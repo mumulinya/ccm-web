@@ -49,6 +49,7 @@ const declared_answer_stream_1 = require("../system/declared-answer-stream");
 const provider_request_diagnostics_1 = require("../system/provider-request-diagnostics");
 const main_agent_tool_prompt_1 = require("../tools/main-agent-tool-prompt");
 const native_tool_catalog_1 = require("./native-tool-catalog");
+const deferred_tool_invocation_1 = require("./deferred-tool-invocation");
 const provider_cache_stable_tools_1 = require("../system/provider-cache-stable-tools");
 const provider_cache_message_layout_1 = require("../system/provider-cache-message-layout");
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
@@ -211,6 +212,7 @@ function nativeControlToolDefinitions() {
                         type: "object",
                         description: "dependencySteps may schedule projects and dependencies; do not rewrite a confirmed plan as frontend/backend/test workstreams.",
                     },
+                    implementationPlan: { type: "object", description: "Executable ccm-implementation-plan-v2 bound to current source evidence, acceptance criteria and observable checks; required for strict task dispatch." },
                     coordinationPlan: { type: "object" },
                 },
             },
@@ -219,6 +221,7 @@ function nativeControlToolDefinitions() {
 }
 function nativeDiscoveryToolDefinitions() {
     return [
+        (0, deferred_tool_invocation_1.deferredToolDefinition)(),
         {
             name: "read_scope_instruction",
             description: "Read one authorized scope cognition document. Use the documentId from the lightweight catalog; the Markdown body is loaded only after this call.",
@@ -365,6 +368,7 @@ function mapNativeTurnToParsed(turn, controlCalls = []) {
             targets: Array.isArray(args.targets) ? args.targets : [],
             workflowDecision: args.workflowDecision || args.workflow_decision || { reason: "主 Agent 已请求派发", actionRequired: true, requiresCodeChanges: true },
             architecturePlan: args.architecturePlan || args.architecture_plan || null,
+            implementationPlan: args.implementationPlan || args.implementation_plan || null,
             coordinationPlan: args.coordinationPlan || args.coordination_plan || null,
         };
     }
@@ -614,7 +618,7 @@ async function runJsonQueryLoop(input) {
         const rows = persistExecutedToolRows(completed, input.persistContext);
         checkpoint.results(rows);
         return rows;
-    });
+    }, calls => checkpoint.beforeExecute(calls));
     let messages = (await checkpoint.resume(executeTools)).slice();
     const responseTypes = "reply|tool_calls|clarify|plan|dispatch";
     const jsonHint = { role: "system", content: "Fallback protocol: return one JSON object as the outer envelope, never a Markdown code fence. Use responseType=" + responseTypes + ". The reply string is user-visible and may use concise GitHub-Flavored Markdown when structure improves readability. A plan must contain a ccm-implementation-plan-v2 object; dispatch is allowed only after confirmed plan binding or a server-approved direct path. Format: {\"responseType\":\"reply\",\"reply\":\"\",\"toolRequests\":[{\"name\":\"\",\"arguments\":{}}],\"workflowDecision\":{}}" };
@@ -962,7 +966,7 @@ async function runNativeQueryLoop(input) {
         const rows = persistExecutedToolRows(completed, input.persistContext);
         checkpoint.results(rows);
         return rows;
-    });
+    }, calls => checkpoint.beforeExecute(calls));
     const callTurn = input.callTurn || group_orchestrator_llm_client_1.callNativeAgentTurn;
     let messages = (await checkpoint.resume(executeTools)).slice();
     let planningSession = input.planModeEnabled === true
@@ -1186,7 +1190,7 @@ async function runNativeQueryLoop(input) {
                     canonicalPayloadChecksum: String(canonicalPayload?.payloadChecksum || ""),
                     toolSchemaChecksum: crypto.createHash("sha256").update(serializedToolSchema).digest("hex"),
                     toolSchemaTokens: Math.max(0, Math.ceil(serializedToolSchema.length / 4)),
-                    toolSchemaVersion: "ccm-native-tools-v1",
+                    toolSchemaVersion: deferred_tool_invocation_1.DEFERRED_TOOL_SCHEMA_VERSION,
                     workspaceModelAudit: (0, workspace_model_result_projection_1.aggregateWorkspaceModelAuditReceipts)(toolResults),
                     finalContextProjection,
                 };

@@ -53,6 +53,8 @@ function collectPlanningEvidence(value, rows = []) {
         return rows;
     if (value.planningEvidence?.evidenceId)
         rows.push(value.planningEvidence);
+    if (value.schema === 'ccm-global-project-source-result-v1')
+        rows.push(...(value.evidenceRefs || []).filter(ref => ref.verified).map(ref => ({ ...ref, from: ref.startLine, to: ref.endLine })));
     if (Array.isArray(value))
         value.forEach(item => collectPlanningEvidence(item, rows));
     else

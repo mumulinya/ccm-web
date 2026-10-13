@@ -566,7 +566,7 @@ function verifyTaskAgentMemorySnapshotSyncDecision(decision, expected = {}) {
     }
     const previousGroupSessionId = String(decision?.previous_group_session_id || "");
     const currentGroupSessionId = String(decision?.group_session_id || "");
-    if (previousGroupSessionId.startsWith("gcs_") && currentGroupSessionId.startsWith("gcs_") && previousGroupSessionId !== currentGroupSessionId) {
+    if (previousGroupSessionId && currentGroupSessionId && previousGroupSessionId !== currentGroupSessionId) {
         issues.push("group_session_mismatch");
     }
     return { valid: issues.length === 0, issues, action };
@@ -779,7 +779,7 @@ function verifyTaskAgentMemorySnapshotSyncCommit(commit, expected = {}) {
 function createTaskAgentMemorySnapshotSyncDecision(input) {
     const groupSessionId = String(input.groupSessionMemoryBinding?.groupSessionId || "").trim();
     const boundGroupSessionId = String(input.session.groupSessionId || "").trim();
-    if (boundGroupSessionId.startsWith("gcs_") && groupSessionId.startsWith("gcs_") && boundGroupSessionId !== groupSessionId) {
+    if (boundGroupSessionId && groupSessionId && boundGroupSessionId !== groupSessionId) {
         const error = new Error(`task Agent memory snapshot cannot cross group sessions: ${boundGroupSessionId} -> ${groupSessionId}`);
         error.code = "TASK_AGENT_MEMORY_SNAPSHOT_CROSS_SESSION_REJECTED";
         throw error;
@@ -820,7 +820,7 @@ function createTaskAgentMemorySnapshotSyncDecision(input) {
     const previousGroupSessionId = previousSnapshotOuterTrusted
         ? String(previousSnapshot?.context?.group_session_memory_binding?.groupSessionId || "").trim()
         : "";
-    if (previousGroupSessionId.startsWith("gcs_") && groupSessionId.startsWith("gcs_") && previousGroupSessionId !== groupSessionId) {
+    if (previousGroupSessionId && groupSessionId && previousGroupSessionId !== groupSessionId) {
         const error = new Error(`task Agent memory snapshot history belongs to another group session: ${previousGroupSessionId} -> ${groupSessionId}`);
         error.code = "TASK_AGENT_MEMORY_SNAPSHOT_CROSS_SESSION_REJECTED";
         throw error;

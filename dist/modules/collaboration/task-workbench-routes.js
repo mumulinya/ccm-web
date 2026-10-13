@@ -2,11 +2,18 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.projectTaskWorkbenchRow = projectTaskWorkbenchRow;
 exports.handleTaskWorkbenchRoutes = handleTaskWorkbenchRoutes;
+const task_session_boundary_1 = require("./task-session-boundary");
 const utils_1 = require("../../core/utils");
+const dispatch_projection_1 = require("../../agents/dispatch-projection");
+const user_workflow_projection_1 = require("../../agents/user-workflow-projection");
+const execution_kernel_1 = require("../../agents/execution-kernel");
 const db_1 = require("../../core/db");
+const task_query_1 = require("../../core/task-query");
+const task_workbench_query_1 = require("../../core/task-workbench-query");
 const access_policy_1 = require("../system/access-policy");
 const automation_definition_service_1 = require("../scheduling/automation-definition-service");
 const task_run_store_1 = require("./task-run-store");
+const readonly_performance_service_1 = require("../../system/readonly-performance-service");
 const task_replay_1 = require("./task-replay");
 const task_session_store_1 = require("./task-session-store");
 const text = (value, fallback = "") => {
@@ -58,7 +65,7 @@ function attentionReason(task, run) {
         return "验收已完成，等待交付确认";
     return "";
 }
-function actionsFor(task, run) {
+function actionsFor(task, run, workflow) {
     const status = statusOf(task, run);
     const active = run && run.run_id === runIdOf(task);
     const actions = [];
@@ -74,7 +81,7 @@ function actionsFor(task, run) {
         actions.push("resume");
     if (active && status === "waiting_user")
         actions.push("confirm");
-    return actions;
+    return (0, user_workflow_projection_1.filterUserWorkflowActions)(workflow || (0, user_workflow_projection_1.readUserWorkflow)(task), actions);
 }
 function runSummary(run) {
     if (!run)
@@ -93,12 +100,12 @@ function runSummary(run) {
         updated_at: run.updated_at,
         verification_result: run.verification_result || null,
         delivery_result: run.delivery_result || null,
-        evidence_count: Array.isArray(run.execution_evidence) ? run.execution_evidence.length : 0,
+        evidence_count: Array.isArray(run.execution_evidence) ? run.execution_evidence.length : Number(run.evidence_count || 0),
         automation_definition_id: run.automation_definition_id || "",
         automation_definition_revision: run.automation_definition_revision || null,
     };
 }
-function projectTaskWorkbenchRow(task, allRuns = (0, task_run_store_1.listTaskRuns)()) {
+function projectTaskWorkbenchRow(task, allRuns = (0, task_run_store_1.listTaskRuns)(), options = {}) {
     const taskId = taskIdOf(task);
     const runs = allRuns.filter(run => run.task_id === taskId);
     const activeId = runIdOf(task);
@@ -108,15 +115,19 @@ function projectTaskWorkbenchRow(task, allRuns = (0, task_run_store_1.listTaskRu
     const automationId = activeRun?.automation_definition_id || task?.automation_definition_id || task?.source_automation_definition_id || "";
     const definition = automationId ? (0, automation_definition_service_1.getAutomationDefinition)(automationId) : null;
     const status = statusOf(task, activeRun);
-    const taskSession = (0, task_session_store_1.getTaskSession)(taskId);
+    const taskSession = Object.hasOwn(options, 'session') ? options.session : (0, task_session_store_1.getTaskSession)(taskId);
     const creationState = (0, task_session_store_1.taskSessionCreationState)(task);
+    const opening = (0, task_session_boundary_1.taskSessionOpeningState)(task);
     const clarificationQuestions = Array.isArray(spec?.clarification_questions)
         ? spec.clarification_questions
         : Array.isArray(task?.intake_draft?.clarification_questions)
             ? task.intake_draft.clarification_questions
             : [];
+    const workflow = (0, user_workflow_projection_1.readUserWorkflow)(task);
     return {
         task_id: taskId,
+        user_workflow: workflow,
+        ...(options.detail === false ? {} : (0, dispatch_projection_1.buildDispatchProjection)(task, (0, execution_kernel_1.listExecutions)({ taskId }))),
         title: taskTitle(task),
         goal: text(spec.goal || task?.description || task?.title),
         scope: text(spec.scope || task?.scope),
@@ -128,7 +139,7 @@ function projectTaskWorkbenchRow(task, allRuns = (0, task_run_store_1.listTaskRu
         acceptance: activeRun?.verification_result || task?.acceptance_state || task?.acceptance_result || null,
         updated_at: text(activeRun?.updated_at || task?.updated_at || task?.updatedAt, task?.created_at || ""),
         attention_reason: attentionReason(task, activeRun),
-        available_actions: actionsFor(task, activeRun),
+        available_actions: actionsFor(task, activeRun, workflow),
         archive_policy: spec.task_session_archive_policy || "",
         creation_policy: spec.task_session_creation_policy || creationState.policy,
         archive_state: (0, task_session_store_1.taskSessionArchiveState)(task),
@@ -143,49 +154,57 @@ function projectTaskWorkbenchRow(task, allRuns = (0, task_run_store_1.listTaskRu
             questions: clarificationQuestions.slice(0, 20),
         },
         task_session: taskSession
-            ? { available: true, session_id: taskSession.session_id, lifecycle: taskSession.lifecycle, creation_policy: taskSession.creation_policy, materialized_at: taskSession.materialized_at, updated_at: taskSession.updated_at }
-            : { available: creationState.eligible, lifecycle: creationState.policy === "on_create" ? "planning" : "", creation_policy: creationState.policy },
+            ? { available: opening.open, opening_reason: opening.reason, materialized: true, session_id: taskSession.session_id, lifecycle: taskSession.lifecycle, creation_policy: taskSession.creation_policy, materialized_at: taskSession.materialized_at, updated_at: taskSession.updated_at }
+            : { available: opening.open && creationState.eligible, opening_reason: opening.reason, lifecycle: creationState.policy === "on_create" ? "planning" : "", creation_policy: creationState.policy },
         spec_summary: { revision: spec.revision || spec.spec_revision || task?.task_spec_revision || 1, checksum: spec.checksum || spec.plan_checksum || "", execution_policy: spec.execution_policy || task?.workflow_policy_snapshot || null },
     };
-}
-function visibleTasks(req) {
-    const principal = req.ccmAuth;
-    return (0, db_1.loadTasks)().filter((task) => !task.archived && !task.deleted_at
-        && (!principal || principal.kind !== "browser" || principal.role === "admin" || (0, access_policy_1.hasTaskResourceAccess)(task, principal, "use")));
 }
 function handleTaskWorkbenchRoutes(pathname, req, res, parsed) {
     const detailRunMatch = pathname.match(/^\/api\/task-workbench\/([^/]+)\/runs\/([^/]+)$/);
     const detailMatch = pathname.match(/^\/api\/task-workbench\/([^/]+)$/);
     if (pathname === "/api/task-workbench" && req.method === "GET") {
-        const allRuns = (0, task_run_store_1.listTaskRuns)();
-        const query = text(parsed.query.query || parsed.query.q).toLowerCase();
-        const view = text(parsed.query.view, "needs_attention");
-        const statusFilter = text(parsed.query.status).toLowerCase();
-        const originFilter = text(parsed.query.origin).toLowerCase();
-        const project = text(parsed.query.project).toLowerCase();
-        const groupId = text(parsed.query.group_id || parsed.query.groupId);
-        const allRows = visibleTasks(req).map(task => projectTaskWorkbenchRow(task, allRuns)).filter(row => row.origin !== "automation");
-        const rows = allRows.filter(row => {
-            if (query && !`${row.title} ${row.goal} ${row.task_id}`.toLowerCase().includes(query))
-                return false;
-            if (statusFilter && row.status !== statusFilter)
-                return false;
-            if (originFilter && row.origin !== originFilter)
-                return false;
-            if (project && String(row.target.project).toLowerCase() !== project)
-                return false;
-            if (groupId && row.target.group_id !== groupId)
-                return false;
-            if (view === "running" && !RUNNING.has(row.status))
-                return false;
-            if (view === "needs_attention" && !row.attention_reason && !NEEDS_ATTENTION.has(row.status))
-                return false;
-            return true;
-        }).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
-        const page = Math.max(1, Number(parsed.query.page || 1));
-        const limit = Math.max(1, Math.min(100, Number(parsed.query.limit || 30)));
-        const items = rows.slice((page - 1) * limit, page * limit);
-        (0, utils_1.sendJson)(res, { success: true, items, tasks: items, pagination: { page, limit, total: rows.length, pages: Math.ceil(rows.length / limit) }, counts: { all: allRows.length, needs_attention: allRows.filter(row => row.attention_reason || NEEDS_ATTENTION.has(row.status)).length, running: allRows.filter(row => RUNNING.has(row.status)).length, completed: allRows.filter(row => row.status === "completed").length } });
+        void (async () => {
+            const index = await (0, readonly_performance_service_1.readTaskRunSummaryOffThread)((0, task_run_store_1.taskRunStorePath)());
+            const principal = req.ccmAuth;
+            const access = (0, access_policy_1.taskReadAccessSnapshot)(principal);
+            const accessibleIds = principal?.kind === 'browser' && principal.role !== 'admin'
+                ? (0, task_workbench_query_1.listTaskAccessReferences)().filter(task => access.allows(task)).map(task => task.id) : undefined;
+            const authorizationKey = JSON.stringify([principal?.kind, principal?.userId || principal?.caller, principal?.role, access.policyRevision]);
+            const selection = (0, task_workbench_query_1.queryTaskWorkbenchPage)(index.runs, parsed.query, accessibleIds, index.sourceVersion, authorizationKey);
+            const summary = await (0, readonly_performance_service_1.readTaskRunSummaryOffThread)((0, task_run_store_1.taskRunStorePath)(), selection.ids);
+            if (summary.sourceVersion !== index.sourceVersion)
+                throw new Error('task_run_source_changed');
+            const allRuns = summary.runs;
+            const selectedIds = new Set(selection.ids);
+            const runsByTask = new Map();
+            for (const run of allRuns)
+                if (selectedIds.has(run.task_id)) {
+                    const rows = runsByTask.get(run.task_id) || [];
+                    rows.push(run);
+                    runsByTask.set(run.task_id, rows);
+                }
+            const sessions = new Map((0, task_session_store_1.listTaskSessionSummaries)().filter(session => selectedIds.has(session.task_id)).map(session => [session.task_id, session]));
+            const executionsByTask = new Map();
+            // Read the legacy execution directory once per page, rather than once for
+            // every card. This is a read projection; action gates still read live state.
+            for (const execution of (0, execution_kernel_1.listExecutions)())
+                if (selectedIds.has(execution.taskId)) {
+                    const rows = executionsByTask.get(execution.taskId) || [];
+                    rows.push(execution);
+                    executionsByTask.set(execution.taskId, rows);
+                }
+            const tasksById = new Map((0, task_query_1.listTasksByIds)(selection.ids).map(task => [task.id, task]));
+            const items = selection.ids.flatMap(taskId => {
+                const task = tasksById.get(taskId);
+                // The task may have changed targets while the Worker was reading Runs.
+                if (!task || !access.allows(task))
+                    return [];
+                return [{ ...projectTaskWorkbenchRow(task, runsByTask.get(taskId) || [], { session: sessions.get(taskId) || null, detail: false }),
+                        ...(0, dispatch_projection_1.buildDispatchProjection)(task, executionsByTask.get(taskId) || []) }];
+            });
+            (0, utils_1.sendJson)(res, { success: true, items, tasks: items, pagination: selection.pagination, counts: selection.counts });
+        })().catch(() => { if (!res.destroyed && !res.writableEnded)
+            (0, utils_1.sendJson)(res, { success: false, error: '任务摘要暂不可用，请重试', code: 'task_summary_unavailable' }, 503); });
         return true;
     }
     if (!detailMatch && !detailRunMatch)
@@ -193,7 +212,10 @@ function handleTaskWorkbenchRoutes(pathname, req, res, parsed) {
     if (req.method !== "GET")
         return false;
     const taskId = decodeURIComponent((detailRunMatch || detailMatch)[1]);
-    const task = visibleTasks(req).find((row) => taskIdOf(row) === taskId);
+    const candidate = (0, db_1.getTaskById)(taskId);
+    const principal = req.ccmAuth;
+    const task = candidate && !candidate.archived && !candidate.deleted_at
+        && (!principal || principal.kind !== 'browser' || principal.role === 'admin' || (0, access_policy_1.hasTaskResourceAccess)(candidate, principal, 'use')) ? candidate : null;
     if (!task) {
         (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
         return true;

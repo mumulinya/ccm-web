@@ -65,7 +65,7 @@ async function recoverAgentRoutineRuns(ctx, now = new Date()) {
         }
         summary.checked += 1;
         const runs = (0, agent_routine_store_1.listAgentRoutineRuns)(routine.routineId);
-        const start = latestRunStart(runs);
+        const start = latestRunStart(runs.map(run => ({ ...run, createdAt: (0, agent_routine_store_1.getAgentRoutineWindowTime)(run) })));
         if (!start) {
             summary.skipped += 1;
             continue;

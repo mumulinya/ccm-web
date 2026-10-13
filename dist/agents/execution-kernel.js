@@ -79,6 +79,7 @@ const runtime_events_1 = require("../system/runtime-events");
 const execution_recovery_1 = require("./execution-recovery");
 const workspace_path_safety_1 = require("./workspace-path-safety");
 const agent_run_store_1 = require("./agent-run-store");
+const task_development_execution_cycle_1 = require("./task-development-execution-cycle");
 function executionCoordinator() {
     return require("./agent-execution-coordinator");
 }
@@ -259,7 +260,12 @@ function createEvent(record, name, message, extra = {}) {
 function ensureExecution(input) {
     const executionId = safePart(input.executionId || input.task?.id || `execution-${Date.now().toString(36)}`);
     const file = executionFile(executionId);
-    const existing = readJson(file, null);
+    let existing = readJson(file, null);
+    const history = (0, task_development_execution_cycle_1.taskDevelopmentExecutionHistory)(input.task, existing);
+    if (history) {
+        writeJsonAtomic(executionFile(history.id), history);
+        existing = null;
+    }
     if (existing) {
         // A task may be resumed after its initial packet was created before the
         // confirmed verification commands were attached. Enrich only the missing
@@ -288,6 +294,7 @@ function ensureExecution(input) {
     const createdAt = now();
     const record = {
         version: 1, id: executionId, taskId: packet.taskId, project: input.project, agent: input.agent || input.project,
+        reviewCycleId: input.task?.review_cycle_id || "",
         state: "queued", packet, processIds: [], externalRunnerRequestIds: [], workspace: {}, checkpointIds: [],
         green: { level: "none", checks: [], evaluatedAt: "" }, failure: null, cancellation: null,
         createdAt, updatedAt: createdAt, startedAt: "", finishedAt: "", events: [],
@@ -653,24 +660,27 @@ function requestActiveAgentRunPause(input = {}) {
     const reason = String(input.reason || "任务请求在最近安全检查点暂停").trim();
     if (!taskId)
         throw new Error("缺少 taskId");
-    const matched = Array.from(activeAgentRuns.values()).filter(run => run.taskId === taskId);
+    const matched = Array.from(activeAgentRuns.values()).filter(run => run.taskId === taskId && (!input.executionId || run.executionId === input.executionId));
     let signalled = 0;
     for (const run of matched) {
-        run.status = "pause_requested";
+        if (input.resume !== true)
+            run.status = "pause_requested";
         run.updatedAt = now();
         try {
             if (run.child?.connected && typeof run.child.send === "function") {
-                run.child.send({ type: "ccm.pause_requested", taskId, reason, contentStored: false });
+                run.child.send({ type: input.resume === true ? "ccm.resume_requested" : "ccm.pause_requested", taskId, reason, contentStored: false });
+                if (input.resume === true)
+                    run.status = "running";
                 signalled++;
             }
         }
         catch { }
         if (run.executionId)
-            transitionExecution(run.executionId, "running", "已请求在当前原子操作结束后暂停", {
+            transitionExecution(run.executionId, "running", input.resume === true ? "已请求原进程继续执行" : "已请求在当前原子操作结束后暂停", {
                 status: "warning",
-                data: { pause_requested: true, cooperative: true, content_stored: false },
+                data: { pause_requested: input.resume !== true, resume_requested: input.resume === true, cooperative: true, content_stored: false },
             });
-        (0, runtime_events_1.publishRuntimeEvent)("agent", "agent.pause_requested", {
+        (0, runtime_events_1.publishRuntimeEvent)("agent", input.resume === true ? "agent.resume_requested" : "agent.pause_requested", {
             runId: run.id,
             taskId: run.taskId,
             project: run.project,
@@ -704,7 +714,9 @@ function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
                 triggerType: meta.triggerType || "user",
                 source: meta.source || "managed-command",
                 idempotencyKey: meta.idempotencyKey || meta.idempotency_key,
+                routineRunId: meta.routineRunId || meta.routine_run_id,
             });
+            executionCoordinator().assertPersistentExecutionLaunchAllowed(coordinated);
             if (coordinated.mode === "coalesced" && coordinated.run.runId !== String(meta.agentRunId || meta.agent_run_id || "")) {
                 throw Object.assign(new Error("AgentRun 已存在活跃执行，拒绝启动重复进程"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinated.run.runId });
             }
@@ -713,6 +725,7 @@ function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
                 meta.leaseId = coordinated.lease.run.leaseId;
         }
         catch (error) {
+            killProcessTree(child);
             throw error;
         }
     }
@@ -740,18 +753,34 @@ function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
             return;
         killProcessTree(child);
     }, 250);
-    return () => {
+    const runLeaseHeartbeat = persistedRunId ? setInterval(() => {
+        try {
+            const lease = (0, agent_run_store_1.heartbeatAgentRunLease)(persistedRunId, String(meta.leaseOwnerId || ""), meta.leaseId || "", Math.max(30000, Number(meta.timeoutMs || 300000)));
+            if (!lease.renewed)
+                killProcessTree(child);
+        }
+        catch {
+            killProcessTree(child);
+        }
+    }, 15000) : null;
+    return async (result = {}) => {
         if (stopped)
             return;
         stopped = true;
         clearInterval(cancellationPoll);
+        if (runLeaseHeartbeat)
+            clearInterval(runLeaseHeartbeat);
         unregisterProcess(safeTaskId, child);
         finishActiveAgentRun(runId, isTaskCancellationRequested(safeTaskId) ? "cancelled" : "finished");
         if (persistedRunId) {
             try {
-                executionCoordinator().finalizePersistentAgentExecution({ runId: persistedRunId, status: isTaskCancellationRequested(safeTaskId) ? "cancelled" : "succeeded", leaseOwnerId: String(meta.leaseOwnerId || ""), result: { source: "managed-child" } });
+                const workspaceEvidence = await require("./agent-run-workspace").captureAgentRunWorkspaceEvidence({ runId: persistedRunId, workspacePath: meta.cwd, worktreeId: meta.worktreeId || "" });
+                return executionCoordinator().finalizePersistentAgentExecution({ runId: persistedRunId, status: isTaskCancellationRequested(safeTaskId) ? "cancelled" : result.status || "failed", leaseOwnerId: String(meta.leaseOwnerId || ""), nativeSessionId: result.nativeSessionId, usage: result.usage, workspaceEvidence, error: result.error || (!result.status ? { code: "managed_result_missing" } : undefined), result: { source: "managed-child" } });
             }
-            catch { }
+            catch (error) {
+                executionCoordinator().markPersistentAgentExecutionRecoveryRequired(persistedRunId, "进程退出结果无法完成可信落账");
+                throw error;
+            }
         }
     };
 }
@@ -879,29 +908,33 @@ async function runManagedCommand(input) {
     const taskId = String(input.taskId || input.executionId || "standalone");
     const executionId = String(input.executionId || input.taskId || "");
     const leaseOwnerId = String(input.leaseOwnerId || `managed:${process.pid}`);
+    let persistedLeaseId = "";
     let persistedRunId = String(input.agentRunId || "");
     if (!persistedRunId && input.agentType) {
         try {
+            const identity = require("./dispatch-task-retry-identity").resolveTaskDispatchExecutionIdentity(taskId, input.attemptId, input.parentRunId);
             const coordinated = await executionCoordinator().startPersistentAgentExecution({
                 taskId,
                 executionId,
-                traceId: input.traceId || `task:${taskId}`,
-                attemptId: input.attemptId || `attempt:${executionId || taskId}`,
-                parentRunId: input.parentRunId,
+                traceId: input.traceId || require("../core/db").loadTasks().find((task) => task.id === taskId)?.trace_id || `task:${taskId}`,
+                attemptId: identity.attemptId || `attempt:${executionId || taskId}`,
+                parentRunId: identity.parentRunId,
                 scope: input.scope || (input.source === "global-agent" ? "global" : String(input.source || "").includes("automation") ? "automation" : "project"),
                 scopeId: input.scopeId || input.project || taskId,
                 agentId: input.agentType,
                 runtimeId: input.agentType,
                 taskAgentSessionId: input.taskAgentSessionId,
+                workItemId: input.workItemId,
                 nativeSessionId: input.nativeSessionId,
                 workspacePath: input.cwd,
                 worktreeId: input.worktreeId,
                 triggerType: input.triggerType || "user",
                 source: input.source || "managed-command",
-                idempotencyKey: input.idempotencyKey,
+                idempotencyKey: require("./dispatch-rework-execution-key").persistedDispatchReworkExecutionKey(taskId, executionId, input.idempotencyKey),
+                routineRunId: input.routineRunId,
                 leaseOwnerId,
             });
-            if (coordinated.mode === "coalesced" && !input.agentRunId) {
+            if (["coalesced", "blocked"].includes(coordinated.mode) && !input.agentRunId) {
                 throw Object.assign(new Error("AgentRun 已存在活跃执行，拒绝启动重复 Runtime"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinated.run.runId });
             }
             persistedRunId = coordinated.run.runId;
@@ -918,7 +951,7 @@ async function runManagedCommand(input) {
                 scope: input.scope || (input.source === "global-agent" ? "global" : String(input.source || "").includes("automation") ? "automation" : "project"), scopeId: input.scopeId || input.project || taskId,
                 agentId: input.agentType, runtimeId: input.agentType, taskAgentSessionId: input.taskAgentSessionId,
                 nativeSessionId: input.nativeSessionId, workspacePath: input.cwd, worktreeId: input.worktreeId,
-                triggerType: input.triggerType || "user", source: input.source || "managed-command", idempotencyKey: `explicit:${persistedRunId}`,
+                triggerType: input.triggerType || "user", source: "managed_process_relinked", idempotencyKey: `explicit:${persistedRunId}`,
             }, leaseOwnerId, Math.max(30_000, Number(input.timeoutMs || 300_000)));
             persistedRunId = materialized.run.runId;
         }
@@ -927,15 +960,30 @@ async function runManagedCommand(input) {
         }
     }
     if (persistedRunId) {
+        const bound = (0, agent_run_store_1.getAgentRun)(persistedRunId);
+        if (!bound || bound.taskId !== taskId || bound.executionId !== executionId || input.traceId && bound.traceId !== input.traceId || input.attemptId && bound.attemptId !== input.attemptId || input.taskAgentSessionId && bound.taskAgentSessionId !== input.taskAgentSessionId)
+            throw Object.assign(new Error("Runtime 请求与 Run 身份不匹配"), { code: "CCM_RUN_IDENTITY_CONFLICT" });
         const lease = executionCoordinator().claimPersistentAgentExecution(persistedRunId, leaseOwnerId, Math.max(30_000, Number(input.timeoutMs || 300_000)));
-        if (!lease.acquired && ["lease_held", "terminal"].includes(String(lease.reason))) {
+        if (!lease.acquired) {
             throw Object.assign(new Error("AgentRun 已由其他执行者占用，拒绝重复启动 Runtime"), { code: "CCM_RUN_ALREADY_LEASED", agentRunId: persistedRunId });
         }
+        persistedLeaseId = lease.run.leaseId;
     }
     if (isTaskCancellationRequested(taskId))
         throw Object.assign(new Error("任务已取消"), { code: "CCM_CANCELLED" });
     if (executionId)
         transitionExecution(executionId, "spawning", "正在启动项目 Agent");
+    if (persistedRunId) {
+        try {
+            const workspaceEvidence = await require("./agent-run-workspace").captureAgentRunWorkspaceEvidence({ runId: persistedRunId, workspacePath: input.cwd, worktreeId: input.worktreeId || "" });
+            (0, agent_run_store_1.updateAgentRunBindings)(persistedRunId, { workspacePath: input.cwd, worktreeId: input.worktreeId || "", workspaceEvidence });
+        }
+        catch (error) {
+            executionCoordinator().markPersistentAgentExecutionRecoveryRequired(persistedRunId, "启动前无法取得可信工作区证据");
+            throw error;
+        }
+        executionCoordinator().markPersistentAgentExecutionStarted(persistedRunId, persistedLeaseId);
+    }
     const child = (0, child_process_1.spawn)(input.command, [], {
         shell: true,
         cwd: input.cwd,
@@ -965,15 +1013,6 @@ async function runManagedCommand(input) {
         transitionExecution(executionId, "ready", `Agent 进程已启动${child.pid ? `（PID ${child.pid}）` : ""}`);
         transitionExecution(executionId, "prompt_accepted", "任务提示已交给 Agent");
         transitionExecution(executionId, "running", "Agent 正在执行开发任务");
-    }
-    if (persistedRunId) {
-        try {
-            executionCoordinator().markPersistentAgentExecutionStarted(persistedRunId, input.agentRunId || "");
-        }
-        catch { }
-        void Promise.resolve().then(() => require("./agent-run-workspace").captureAgentRunWorkspaceEvidence({ runId: persistedRunId, workspacePath: input.cwd, worktreeId: input.worktreeId || "" }))
-            .then(workspaceEvidence => (0, agent_run_store_1.updateAgentRunBindings)(persistedRunId, { workspacePath: input.cwd, worktreeId: input.worktreeId || "", workspaceEvidence }))
-            .catch(() => { });
     }
     const maxOutputBytes = Math.max(64 * 1024, Number(input.maxOutputBytes || 2 * 1024 * 1024));
     const hardMemoryLimit = Math.max(maxOutputBytes, Math.min(maxOutputBytes * 4, 20 * 1024 * 1024));
@@ -1023,11 +1062,17 @@ async function runManagedCommand(input) {
         let cancelled = false;
         const leaseHeartbeat = persistedRunId ? setInterval(() => {
             try {
-                (0, agent_run_store_1.heartbeatAgentRunLease)(persistedRunId, leaseOwnerId, "", Math.max(30_000, Number(input.timeoutMs || 300_000)));
+                const renewal = (0, agent_run_store_1.heartbeatAgentRunLease)(persistedRunId, leaseOwnerId, persistedLeaseId, Math.max(30_000, Number(input.timeoutMs || 300_000)));
+                if (!renewal.renewed)
+                    throw new Error("执行租约已失效");
             }
-            catch { }
+            catch (error) {
+                killProcessTree(child);
+                executionCoordinator().markPersistentAgentExecutionRecoveryRequired(persistedRunId, "Runtime 执行租约丢失，停止进程并等待核对");
+                finish(Object.assign(new Error("Runtime 执行租约丢失"), { code: "CCM_RUN_LEASE_LOST" }), null, "SIGTERM");
+            }
         }, 15_000) : null;
-        const finish = (error, code, signal) => {
+        const finish = async (error, code, signal) => {
             if (settled)
                 return;
             settled = true;
@@ -1037,9 +1082,11 @@ async function runManagedCommand(input) {
                 clearInterval(leaseHeartbeat);
             unregisterProcess(taskId, child);
             finishActiveAgentRun(runId, cancelled ? "cancelled" : (error ? "failed" : "finished"));
-            if (persistedRunId && input.deferAgentRunFinalization !== true) {
+            if (persistedRunId && input.deferAgentRunFinalization !== true && error?.code !== "CCM_RUN_LEASE_LOST") {
                 try {
+                    const workspaceEvidence = await require("./agent-run-workspace").captureAgentRunWorkspaceEvidence({ runId: persistedRunId, workspacePath: input.cwd, worktreeId: input.worktreeId || "" });
                     executionCoordinator().finalizePersistentAgentExecution({
+                        workspaceEvidence,
                         runId: persistedRunId,
                         status: cancelled ? "cancelled" : (error ? "failed" : "succeeded"),
                         leaseOwnerId,
@@ -1047,7 +1094,13 @@ async function runManagedCommand(input) {
                         result: error ? {} : { exitCode: code, signal },
                     });
                 }
-                catch { }
+                catch (finalizeError) {
+                    error = error || finalizeError;
+                    try {
+                        executionCoordinator().markPersistentAgentExecutionRecoveryRequired(persistedRunId, "Runtime 已停止，结束落账失败，需要对账", { code: "finalization_failed" });
+                    }
+                    catch { }
+                }
             }
             outputStream?.end();
             const result = { stdout, stderr, exitCode: code, signal, outputFile, totalOutputBytes: stdoutBytes + stderrBytes, cancelled, agentRunId: persistedRunId };

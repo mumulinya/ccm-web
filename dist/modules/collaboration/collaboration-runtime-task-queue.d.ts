@@ -319,6 +319,215 @@ export declare function buildInlineTaskRuntime(task: any): {
     };
     taskCard: any;
     task_card: any;
+    dispatch_profile?: undefined;
+    dispatch_diagnostic?: undefined;
+    profile_reason?: undefined;
+    required_gates?: undefined;
+    verification_mode?: undefined;
+    worktree_mode?: undefined;
+    scope_expansion_state?: undefined;
+    delivery_approvals?: undefined;
+    rework_round?: undefined;
+    rework_max_rounds?: undefined;
+    rework_remaining_rounds?: undefined;
+} | {
+    taskId: any;
+    status: any;
+    statusText: any;
+    updatedAt: any;
+    lifecycle: any;
+    reasoning: {
+        planVersion: number;
+        openAssertions: any;
+        deviations: any;
+        recoveryChecks: any;
+        lastDecision: any;
+    };
+    counts: {
+        total: number;
+        running: number;
+        reviewing: number;
+        failed: number;
+        mergeReady: number;
+    };
+    agents: {
+        project: string;
+        state: import("../../agents/execution-kernel").ExecutionState;
+        green: any;
+        failureClass: any;
+        runtimeFallbacks: number;
+        conflictGroup: any;
+    }[];
+    sessions: any;
+    governance: {
+        run_id: string;
+        run_status: string;
+        runtime_id: string;
+        run_started_at: string;
+        run_finished_at: string;
+        run_recovery_state: string;
+        heartbeat_wake_id: string;
+        heartbeat_status: string;
+        heartbeat_coalesced: boolean;
+        activity: {
+            eventType: string;
+            summary: string;
+            actorType: import("../../agents/agent-governance-types").ActivityActorType;
+            createdAt: string;
+        }[];
+        pending_approvals: import("../../agents/agent-governance-types").AgentApproval[];
+        budget_state: {
+            incidentId: string;
+            policyId: string;
+            runId: string;
+            taskId: string;
+            level: string;
+            tokenUsed: number;
+            costUsedUsd: number;
+            reason: string;
+            createdAt: string;
+        }[];
+        checkout_state: import("../../agents/agent-governance-types").AgentTaskCheckout;
+        context_reuse: {
+            mode: "native_session_delta" | "native_session_full" | "fresh_session";
+            cursor: string;
+            delta_checksum: string;
+            input_tokens: number;
+            output_tokens: number;
+        };
+        artifact_summary: {
+            count: number;
+            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+        };
+        dependency_state: {
+            dependencyId: string;
+            taskId: string;
+            dependsOnTaskId: string;
+            relation: "blocks" | "related";
+            status: "failed" | "active" | "released";
+        }[];
+        secret_binding_state: {
+            envName: string;
+            scope: "agent" | "runtime" | "project" | "run";
+            status: "failed" | "revoked" | "injected" | "requested";
+        }[];
+        consistency: import("../../agents/agent-run-consistency").TaskRunConsistencyProjection;
+    };
+    taskCard: any;
+    task_card: any;
+    dispatch_profile: any;
+    dispatch_diagnostic: string;
+    profile_reason?: undefined;
+    required_gates?: undefined;
+    verification_mode?: undefined;
+    worktree_mode?: undefined;
+    scope_expansion_state?: undefined;
+    delivery_approvals?: undefined;
+    rework_round?: undefined;
+    rework_max_rounds?: undefined;
+    rework_remaining_rounds?: undefined;
+} | {
+    taskId: any;
+    status: any;
+    statusText: any;
+    updatedAt: any;
+    lifecycle: any;
+    reasoning: {
+        planVersion: number;
+        openAssertions: any;
+        deviations: any;
+        recoveryChecks: any;
+        lastDecision: any;
+    };
+    counts: {
+        total: number;
+        running: number;
+        reviewing: number;
+        failed: number;
+        mergeReady: number;
+    };
+    agents: {
+        project: string;
+        state: import("../../agents/execution-kernel").ExecutionState;
+        green: any;
+        failureClass: any;
+        runtimeFallbacks: number;
+        conflictGroup: any;
+    }[];
+    sessions: any;
+    governance: {
+        run_id: string;
+        run_status: string;
+        runtime_id: string;
+        run_started_at: string;
+        run_finished_at: string;
+        run_recovery_state: string;
+        heartbeat_wake_id: string;
+        heartbeat_status: string;
+        heartbeat_coalesced: boolean;
+        activity: {
+            eventType: string;
+            summary: string;
+            actorType: import("../../agents/agent-governance-types").ActivityActorType;
+            createdAt: string;
+        }[];
+        pending_approvals: import("../../agents/agent-governance-types").AgentApproval[];
+        budget_state: {
+            incidentId: string;
+            policyId: string;
+            runId: string;
+            taskId: string;
+            level: string;
+            tokenUsed: number;
+            costUsedUsd: number;
+            reason: string;
+            createdAt: string;
+        }[];
+        checkout_state: import("../../agents/agent-governance-types").AgentTaskCheckout;
+        context_reuse: {
+            mode: "native_session_delta" | "native_session_full" | "fresh_session";
+            cursor: string;
+            delta_checksum: string;
+            input_tokens: number;
+            output_tokens: number;
+        };
+        artifact_summary: {
+            count: number;
+            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+        };
+        dependency_state: {
+            dependencyId: string;
+            taskId: string;
+            dependsOnTaskId: string;
+            relation: "blocks" | "related";
+            status: "failed" | "active" | "released";
+        }[];
+        secret_binding_state: {
+            envName: string;
+            scope: "agent" | "runtime" | "project" | "run";
+            status: "failed" | "revoked" | "injected" | "requested";
+        }[];
+        consistency: import("../../agents/agent-run-consistency").TaskRunConsistencyProjection;
+    };
+    taskCard: any;
+    task_card: any;
+    dispatch_profile: any;
+    profile_reason: any;
+    required_gates: any;
+    verification_mode: any;
+    worktree_mode: any;
+    scope_expansion_state: any;
+    delivery_approvals: {
+        approvalId: any;
+        runId: any;
+        status: any;
+        actionFingerprint: any;
+        changedFiles: any;
+    }[];
+    rework_round: number;
+    rework_max_rounds: number;
+    rework_remaining_rounds: number;
+    dispatch_diagnostic: any;
 };
 export declare function updateGroupTaskInlineStatus(task: any, status: string, detail?: string, sessionId?: any): {
     projectionUpdated: boolean;
@@ -407,6 +616,219 @@ export declare function updateGroupTaskInlineStatus(task: any, status: string, d
     };
     taskCard: any;
     task_card: any;
+    dispatch_profile?: undefined;
+    dispatch_diagnostic?: undefined;
+    profile_reason?: undefined;
+    required_gates?: undefined;
+    verification_mode?: undefined;
+    worktree_mode?: undefined;
+    scope_expansion_state?: undefined;
+    delivery_approvals?: undefined;
+    rework_round?: undefined;
+    rework_max_rounds?: undefined;
+    rework_remaining_rounds?: undefined;
+} | {
+    projectionUpdated: boolean;
+    projectionRejected: boolean;
+    taskId: any;
+    status: any;
+    statusText: any;
+    updatedAt: any;
+    lifecycle: any;
+    reasoning: {
+        planVersion: number;
+        openAssertions: any;
+        deviations: any;
+        recoveryChecks: any;
+        lastDecision: any;
+    };
+    counts: {
+        total: number;
+        running: number;
+        reviewing: number;
+        failed: number;
+        mergeReady: number;
+    };
+    agents: {
+        project: string;
+        state: import("../../agents/execution-kernel").ExecutionState;
+        green: any;
+        failureClass: any;
+        runtimeFallbacks: number;
+        conflictGroup: any;
+    }[];
+    sessions: any;
+    governance: {
+        run_id: string;
+        run_status: string;
+        runtime_id: string;
+        run_started_at: string;
+        run_finished_at: string;
+        run_recovery_state: string;
+        heartbeat_wake_id: string;
+        heartbeat_status: string;
+        heartbeat_coalesced: boolean;
+        activity: {
+            eventType: string;
+            summary: string;
+            actorType: import("../../agents/agent-governance-types").ActivityActorType;
+            createdAt: string;
+        }[];
+        pending_approvals: import("../../agents/agent-governance-types").AgentApproval[];
+        budget_state: {
+            incidentId: string;
+            policyId: string;
+            runId: string;
+            taskId: string;
+            level: string;
+            tokenUsed: number;
+            costUsedUsd: number;
+            reason: string;
+            createdAt: string;
+        }[];
+        checkout_state: import("../../agents/agent-governance-types").AgentTaskCheckout;
+        context_reuse: {
+            mode: "native_session_delta" | "native_session_full" | "fresh_session";
+            cursor: string;
+            delta_checksum: string;
+            input_tokens: number;
+            output_tokens: number;
+        };
+        artifact_summary: {
+            count: number;
+            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+        };
+        dependency_state: {
+            dependencyId: string;
+            taskId: string;
+            dependsOnTaskId: string;
+            relation: "blocks" | "related";
+            status: "failed" | "active" | "released";
+        }[];
+        secret_binding_state: {
+            envName: string;
+            scope: "agent" | "runtime" | "project" | "run";
+            status: "failed" | "revoked" | "injected" | "requested";
+        }[];
+        consistency: import("../../agents/agent-run-consistency").TaskRunConsistencyProjection;
+    };
+    taskCard: any;
+    task_card: any;
+    dispatch_profile: any;
+    dispatch_diagnostic: string;
+    profile_reason?: undefined;
+    required_gates?: undefined;
+    verification_mode?: undefined;
+    worktree_mode?: undefined;
+    scope_expansion_state?: undefined;
+    delivery_approvals?: undefined;
+    rework_round?: undefined;
+    rework_max_rounds?: undefined;
+    rework_remaining_rounds?: undefined;
+} | {
+    projectionUpdated: boolean;
+    projectionRejected: boolean;
+    taskId: any;
+    status: any;
+    statusText: any;
+    updatedAt: any;
+    lifecycle: any;
+    reasoning: {
+        planVersion: number;
+        openAssertions: any;
+        deviations: any;
+        recoveryChecks: any;
+        lastDecision: any;
+    };
+    counts: {
+        total: number;
+        running: number;
+        reviewing: number;
+        failed: number;
+        mergeReady: number;
+    };
+    agents: {
+        project: string;
+        state: import("../../agents/execution-kernel").ExecutionState;
+        green: any;
+        failureClass: any;
+        runtimeFallbacks: number;
+        conflictGroup: any;
+    }[];
+    sessions: any;
+    governance: {
+        run_id: string;
+        run_status: string;
+        runtime_id: string;
+        run_started_at: string;
+        run_finished_at: string;
+        run_recovery_state: string;
+        heartbeat_wake_id: string;
+        heartbeat_status: string;
+        heartbeat_coalesced: boolean;
+        activity: {
+            eventType: string;
+            summary: string;
+            actorType: import("../../agents/agent-governance-types").ActivityActorType;
+            createdAt: string;
+        }[];
+        pending_approvals: import("../../agents/agent-governance-types").AgentApproval[];
+        budget_state: {
+            incidentId: string;
+            policyId: string;
+            runId: string;
+            taskId: string;
+            level: string;
+            tokenUsed: number;
+            costUsedUsd: number;
+            reason: string;
+            createdAt: string;
+        }[];
+        checkout_state: import("../../agents/agent-governance-types").AgentTaskCheckout;
+        context_reuse: {
+            mode: "native_session_delta" | "native_session_full" | "fresh_session";
+            cursor: string;
+            delta_checksum: string;
+            input_tokens: number;
+            output_tokens: number;
+        };
+        artifact_summary: {
+            count: number;
+            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+        };
+        dependency_state: {
+            dependencyId: string;
+            taskId: string;
+            dependsOnTaskId: string;
+            relation: "blocks" | "related";
+            status: "failed" | "active" | "released";
+        }[];
+        secret_binding_state: {
+            envName: string;
+            scope: "agent" | "runtime" | "project" | "run";
+            status: "failed" | "revoked" | "injected" | "requested";
+        }[];
+        consistency: import("../../agents/agent-run-consistency").TaskRunConsistencyProjection;
+    };
+    taskCard: any;
+    task_card: any;
+    dispatch_profile: any;
+    profile_reason: any;
+    required_gates: any;
+    verification_mode: any;
+    worktree_mode: any;
+    scope_expansion_state: any;
+    delivery_approvals: {
+        approvalId: any;
+        runId: any;
+        status: any;
+        actionFingerprint: any;
+        changedFiles: any;
+    }[];
+    rework_round: number;
+    rework_max_rounds: number;
+    rework_remaining_rounds: number;
+    dispatch_diagnostic: any;
 };
 export declare function buildChildAgentWorkerHandoff(targetProject: string, taskText?: string, options?: any): any;
 export declare function taskAgentInvocationMemoryOptions(edge: any): any;

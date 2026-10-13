@@ -33,6 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeRelativePath = normalizeRelativePath;
+exports.isSensitivePath = isSensitivePath;
+exports.safeResolvedFile = safeResolvedFile;
+exports.redactSensitiveValues = redactSensitiveValues;
 exports.buildProjectSourceManifest = buildProjectSourceManifest;
 exports.readProjectSourceEvidence = readProjectSourceEvidence;
 exports.projectSourceEvidencePrompt = projectSourceEvidencePrompt;
@@ -42,12 +46,13 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const EXCLUDED_DIRECTORIES = new Set([
     ".git", ".idea", ".vscode", ".next", ".nuxt", ".output",
+    ".ccm", ".cc-connect", ".ccm-worktrees",
     "node_modules", "target", "dist", "build", "coverage", "vendor",
 ]);
 const TEXT_EXTENSIONS = new Set([
     ".c", ".cc", ".cpp", ".cs", ".css", ".go", ".gradle", ".graphql",
     ".h", ".hpp", ".html", ".java", ".js", ".json", ".jsx", ".kt", ".kts",
-    ".md", ".mjs", ".properties", ".proto", ".py", ".rb", ".rs", ".scss",
+    ".md", ".mjs", ".cjs", ".properties", ".proto", ".py", ".rb", ".rs", ".scss",
     ".sh", ".sql", ".svelte", ".swift", ".toml", ".ts", ".tsx", ".vue",
     ".xml", ".yaml", ".yml",
 ]);
@@ -99,7 +104,7 @@ function safeResolvedFile(root, relativePath) {
     }
 }
 function redactSensitiveValues(content) {
-    return content.replace(/^(\s*(?:password|passwd|secret|token|api[-_.]?key|private[-_.]?key|access[-_.]?key)\s*[:=]\s*)(.+)$/gim, "$1[REDACTED]");
+    return content.replace(/((?:["']?(?:password|passwd|secret|token|api[-_.]?key|private[-_.]?key|access[-_.]?key)["']?)\s*[:=]\s*)(?:["'][^"'\r\n]*["']|[^,;\r\n}]+)/gim, '$1"[REDACTED]"').replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [REDACTED]');
 }
 function sourcePriority(relativePath) {
     const lower = relativePath.toLowerCase();
@@ -114,13 +119,14 @@ function sourcePriority(relativePath) {
         return 3;
     return 4;
 }
-function buildProjectSourceManifest(project, workDir) {
+function buildProjectSourceManifest(project, workDir, options = {}) {
     const root = path.resolve(workDir);
     if (!fs.existsSync(root) || !fs.statSync(root).isDirectory())
         throw new Error("项目源码目录不存在");
     const files = [];
     const stack = [{ directory: root, depth: 0 }];
     let scanned = 0;
+    let depthLimited = false;
     while (stack.length && scanned < MAX_SCAN_FILES) {
         const current = stack.pop();
         let entries = [];
@@ -141,7 +147,10 @@ function buildProjectSourceManifest(project, workDir) {
             if (!relative)
                 continue;
             if (entry.isDirectory()) {
-                if (current.depth < MAX_DEPTH && !EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase())) {
+                if (current.depth >= MAX_DEPTH && !EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()))
+                    depthLimited = true;
+                if (current.depth < MAX_DEPTH && !EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) && !options.excludedDirectories?.includes(entry.name.toLowerCase())
+                    && !(current.depth === 0 && options.excludedRootDirectories?.includes(entry.name.toLowerCase()))) {
                     stack.push({ directory: absolute, depth: current.depth + 1 });
                 }
                 continue;
@@ -166,7 +175,8 @@ function buildProjectSourceManifest(project, workDir) {
         workDir: root,
         files: limited,
         scannedFiles: scanned,
-        truncated: files.length > limited.length || scanned >= MAX_SCAN_FILES,
+        truncated: files.length > limited.length || scanned >= MAX_SCAN_FILES || depthLimited,
+        truncationReasons: [files.length > limited.length ? 'manifest_file_limit' : '', scanned >= MAX_SCAN_FILES ? 'scan_entry_limit' : '', depthLimited ? 'directory_depth_limit' : ''].filter(Boolean),
         checksum,
     };
 }
@@ -212,6 +222,7 @@ function readProjectSourceEvidence(input) {
                 checksum: crypto.createHash("sha256").update(raw).digest("hex"),
                 chars: content.length,
                 content,
+                startLine: 1, endLine: content.split(/\r?\n/).length, truncated: content.length < raw.length,
             });
         }
         catch {

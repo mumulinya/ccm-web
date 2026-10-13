@@ -2669,10 +2669,16 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         const limit = Math.max(1, Math.min(2000, requestedLimit));
         const groupIdText = String(groupId);
         const sessionId = String(parsed.query.session_id || parsed.query.sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupIdText));
-        const rawMessages = (0, storage_1.getGroupMessages)(groupIdText, sessionId).slice(-limit);
-        const allTasks = (0, db_1.loadTasks)();
-        const sessionTasks = allTasks.filter((task) => String(task?.group_id || "") === groupIdText
-            && String(task?.group_session_id || task?.groupSessionId || "default") === sessionId);
+        let historyPage;
+        try {
+            historyPage = require('../../system/conversation-history-page').conversationHistoryPage((0, storage_1.getGroupMessages)(groupIdText, sessionId), `group:${groupIdText}:${sessionId}`, { limit, before: parsed.query.before });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { error: error.message, code: error.code }, Number(error.status || 409));
+            return true;
+        }
+        const rawMessages = historyPage.items;
+        const sessionTasks = require('../../core/task-query').listGroupSessionTasks(groupIdText, sessionId);
         const taskIds = new Set(rawMessages.map((message) => String(message?.task_id || message?.task?.id || "")).filter(Boolean));
         const taskMap = new Map(sessionTasks.filter((task) => taskIds.has(String(task.id))).map((task) => [String(task.id), task]));
         const runtimeMap = new Map();
@@ -2716,7 +2722,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         const agentQa = deps.getAgentQaItemsForGroup(groupIdText, 100).filter((item) => sessionTaskIds.has(String(item?.task_id || item?.taskId || ""))
             || String(item?.group_session_id || item?.groupSessionId || "") === sessionId);
         const mainAgentStatus = buildGroupMainAgentStatus({ groupId: groupIdText, tasks: sessionTasks, agentQa, getRuntime });
-        (0, utils_1.sendJson)(res, { messages, memory, agentQa, mainAgentStatus, sessionId, sessions: (0, storage_1.listGroupChatSessions)(groupIdText).sessions });
+        (0, utils_1.sendJson)(res, { messages, history_pagination: historyPage.pagination, memory, agentQa, mainAgentStatus, sessionId, sessions: (0, storage_1.listGroupChatSessions)(groupIdText).sessions });
         return true;
     }
     if (pathname === "/api/groups/memory/compact" && req.method === "POST") {

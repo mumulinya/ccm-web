@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.enqueueProjectWorkerDelivery = enqueueProjectWorkerDelivery;
 const child_process_1 = require("child_process");
 const workspace_path_safety_1 = require("../../agents/workspace-path-safety");
+const dispatch_delivery_gate_1 = require("./dispatch-delivery-gate");
 function runGit(cwd, args) {
     return String((0, child_process_1.execFileSync)("git", args, {
         cwd,
@@ -142,8 +143,14 @@ function enqueueProjectWorkerDelivery(input) {
             return { commit, baseCommit, commits, branch: prepared.worktreeBranch, changedFiles: [...changed], merged: true, cleaned: true, alreadyApplied: true };
         }
         assertMainWorktreeSafe(mainWorkDir, changed);
+        const receivingHead = runGit(mainWorkDir, ["rev-parse", "HEAD"]);
+        const authorization = await (0, dispatch_delivery_gate_1.awaitDispatchDeliveryApproval)({ taskId: input.taskId, workItemId: String(workItem?.id || ""), workspacePath: prepared.worktreePath, branch: prepared.worktreeBranch, baseCommit, commit, mainHead: receivingHead, changedFiles: [...changed] });
+        if (runGit(prepared.worktreePath, ["rev-parse", "HEAD"]) !== commit || runGit(prepared.worktreePath, ["status", "--porcelain"]) || runGit(mainWorkDir, ["rev-parse", "HEAD"]) !== receivingHead)
+            throw new Error("审批期间工作区证据发生变化，拒绝执行旧合并授权");
+        assertMainWorktreeSafe(mainWorkDir, changed);
         try {
             runGit(mainWorkDir, ["cherry-pick", ...commits]);
+            (0, dispatch_delivery_gate_1.recordDispatchDeliveryApplied)(authorization, commit);
             cleanupWorktree(mainWorkDir, prepared);
             return { commit, baseCommit, commits, branch: prepared.worktreeBranch, changedFiles: [...changed], merged: true, cleaned: true };
         }

@@ -41,6 +41,7 @@ const fs = __importStar(require("fs"));
 const native_continuation_1 = require("./native-continuation");
 const agent_run_workspace_1 = require("./agent-run-workspace");
 const agent_run_secrets_1 = require("./agent-run-secrets");
+const native_session_presence_1 = require("./native-session-presence");
 class DefaultAgentRuntimeRegistry {
     adapters = new Map();
     probes = new Map();
@@ -122,7 +123,11 @@ function createCommandRuntimeAdapter(runtimeId, deps = {}) {
         async inspectResume(input) {
             // `taskAgentSessionId` is CCM's execution binding. It is not a Provider
             // continuation handle and must never make a native resume look safe.
-            const nativeSessionValid = !!String(input.nativeSessionId || "").trim();
+            const nativeSessionIdPresent = !!String(input.nativeSessionId || "").trim();
+            const requiresStorageProof = !!input.nativeContinuationEvidence;
+            const sessionInspection = requiresStorageProof ? (typeof deps.inspectNativeSession === "function"
+                ? await deps.inspectNativeSession(input) : (0, native_session_presence_1.inspectNativeSessionPresence)(normalized, input)) : null;
+            const nativeSessionValid = nativeSessionIdPresent && (!requiresStorageProof || sessionInspection?.valid === true);
             const workspacePath = String(input.workspacePath || "").trim();
             const workspaceValid = !!workspacePath && fs.existsSync(workspacePath);
             const profile = (0, native_continuation_1.getNativeContinuationCapabilityProfile)(normalized);
@@ -142,7 +147,8 @@ function createCommandRuntimeAdapter(runtimeId, deps = {}) {
                     && !!currentVersion
                     && !!currentVersion.semanticVersion
                     && String(expectedVersion.semanticVersion) !== String(currentVersion.semanticVersion);
-            const runtimeVersionCompatible = !versionMismatch;
+            const versionUnverifiable = !!input.nativeContinuationEvidence && (expectedVersion?.semanticVersion && !currentVersion?.semanticVersion || expectedVersion?.executableIdentityChecksum && !currentVersion?.executableIdentityChecksum);
+            const runtimeVersionCompatible = !versionMismatch && !versionUnverifiable;
             const expectedEvidence = input.workspaceEvidence || null;
             const workspaceEvidenceResult = expectedEvidence && workspaceValid
                 ? await (0, agent_run_workspace_1.verifyAgentRunWorkspaceEvidence)({
@@ -158,8 +164,7 @@ function createCommandRuntimeAdapter(runtimeId, deps = {}) {
             const providerContractValid = continuationEvidence
                 ? (0, native_continuation_1.verifyNativeSessionContinuationEvidence)(continuationEvidence, {
                     provider: normalized,
-                    requestedNativeSessionId: input.nativeSessionId,
-                }).valid === true
+                }).valid === true && continuationEvidence.nativeSessionReusable === true && continuationEvidence.effectiveNativeSessionId === input.nativeSessionId
                 : true;
             const workspaceEvidenceValid = workspaceEvidenceResult.valid !== false;
             const resumable = nativeSessionValid
@@ -174,7 +179,7 @@ function createCommandRuntimeAdapter(runtimeId, deps = {}) {
                 : !profile.sessionResume || descriptor.capabilities.sessionResume === false
                     ? "runtime_session_resume_unsupported"
                     : !nativeSessionValid
-                        ? "native_session_missing"
+                        ? nativeSessionIdPresent ? sessionInspection?.reason || "native_session_unverified" : "native_session_missing"
                         : !workspaceValid
                             ? "workspace_missing"
                             : !runtimeVersionCompatible
@@ -196,6 +201,7 @@ function createCommandRuntimeAdapter(runtimeId, deps = {}) {
                     capabilityProfile: profile,
                     expectedRuntimeVersion: expectedVersion,
                     currentRuntimeVersion: currentVersion,
+                    nativeSession: sessionInspection,
                     workspace: workspaceEvidenceResult.actual || null,
                 },
             };

@@ -568,6 +568,7 @@ function createGlobalAgentFeishuChannel(deps) {
                     history: historyBeforeUser.map((item) => ({ role: item.role, content: item.content })),
                     sessionId: conversationId,
                     source: "feishu-control-bot",
+                    sourceMessageId: getFeishuMessageId(payload),
                     traceId,
                     sourceIngestion,
                     principal: options.principal || { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: "operator", capabilities: [] },
@@ -596,7 +597,8 @@ function createGlobalAgentFeishuChannel(deps) {
                             }, explicitCandidate, "explicit_user_choice");
                             return;
                         }
-                        const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: conversationId, scope: "feishu" });
+                        const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ messageId: getFeishuMessageId(payload) || options.turnId || options.turn_id, message: text, workflowDecision, candidates: recoverableCandidates, exactSessionId: conversationId, scope: "feishu" });
+                        require("../collaboration/task-session-source-discussion").saveTaskSourceDiscussion({ route, scope: "global", scopeId: "global", sessionId: conversationId, messageId: getFeishuMessageId(payload) || options.turnId || options.turn_id, message: text });
                         if (route.decision === "needs_user") {
                             throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
                         }
@@ -608,6 +610,7 @@ function createGlobalAgentFeishuChannel(deps) {
                 });
             }
             const missionSnapshot = run.mission_id ? getGlobalDevelopmentMission(run.mission_id) : null;
+            require("../collaboration/task-session-source-discussion").saveTaskSourceDiscussionResult({ scope: "global", routeScope: "feishu", scopeId: "global", sessionId: conversationId, messageId: getFeishuMessageId(payload) || options.turnId || options.turn_id, message: text, reply: run.final_reply, replyId: run.id });
             bindFeishuTaskContext({
                 sessionId: conversationId,
                 destination,
@@ -619,6 +622,7 @@ function createGlobalAgentFeishuChannel(deps) {
                 originReceipt: options.originReceipt,
             });
             let markdown = formatFeishuTaskJourney(run, missionSnapshot, sourceIngestion, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK);
+            markdown += require('../../system/global-source-feishu-summary').globalSourceFeishuSummary(run);
             if (run.status === "waiting_clarification" && !run.requested_target_refs?.length) {
                 markdown = `${markdown}\n\n${feishuTargetSelectionMarkdown()}`;
             }

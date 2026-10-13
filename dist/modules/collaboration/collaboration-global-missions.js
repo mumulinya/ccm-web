@@ -16,6 +16,7 @@ exports.normalizeGlobalMissionTargetRequirements = normalizeGlobalMissionTargetR
 exports.createGlobalDevelopmentMission = createGlobalDevelopmentMission;
 // Extracted functional module. The original entry remains a compatibility facade.
 const task_available_actions_1 = require("../../agents/task-available-actions");
+const task_session_boundary_1 = require("./task-session-boundary");
 const sessions_1 = require("../projects/sessions");
 const collaboration_task_card_1 = require("./collaboration-task-card");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
@@ -240,8 +241,14 @@ function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
             continue;
         }
         const attempts = Math.max(Number(child.retry_count || 0), Number(child.auto_gap_continue_count || 0));
-        if (child.status === "done") {
+        if (["done", "completed"].includes(String(child.status))) {
             const evidence = (0, collaboration_1.getGlobalMissionChildDeliveryEvidence)(child);
+            if (evidence.merge_required && !evidence.merge_passed && child.dispatch_profile_snapshot
+                && child.workflow_policy_snapshot?.approval === "confirm_before_delivery") {
+                waitingUser.push({ task_id: child.id, reason: "隔离交付已验收，等待合并负责人明确批准合并" });
+                actions.push({ type: "merge_waiting_confirmation", task_id: child.id, execution_ids: evidence.merge_pending_execution_ids });
+                continue;
+            }
             if (evidence.merge_required && !evidence.merge_passed && autoMerge) {
                 for (const executionId of evidence.merge_pending_execution_ids) {
                     try {
@@ -292,7 +299,7 @@ function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
             else {
                 const runtimeFailure = (0, collaboration_1.isRecoverableRuntimeFailure)(child);
                 const result = runtimeFailure
-                    ? (0, collaboration_1.retryTask)(child.id, ctx, `全局任务 ${id} 持续跟进检测到执行器异常，恢复原生会话或切换执行器后重试`, true)
+                    ? (0, collaboration_1.retryTask)(child.id, ctx, `全局任务 ${id} 持续跟进检测到执行器异常，恢复原生会话或切换执行器后重试`, true, "", { automaticRecovery: true })
                     : (0, collaboration_1.continueTaskWithMessage)(child.id, `全局 Agent 检测到本轮失败：${child.status_detail || child.result || "未知失败"}。请先调查根因，只针对失败缺口返工，保留已完成成果，重新运行相关验证并提交结构化回执。`, ctx, {
                         source: "mission_supervisor_failure_rework",
                         auto_execute: true,
@@ -322,7 +329,7 @@ function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
                 waitingUser.push({ task_id: child.id, reason: "子任务执行超时且已达到恢复上限" });
             }
             else {
-                const result = (0, collaboration_1.retryTask)(child.id, ctx, `全局任务 ${id} 持续跟进检测到执行中断或超时`, true);
+                const result = (0, collaboration_1.retryTask)(child.id, ctx, `全局任务 ${id} 持续跟进检测到执行中断或超时`, true, "", { automaticRecovery: true });
                 actions.push({ type: "stalled_recovery", task_id: child.id, result: { success: result.success, queued: result.queued } });
             }
         }
@@ -711,7 +718,9 @@ function normalizeGlobalMissionTargetRequirements(payload, target) {
 function createGlobalDevelopmentMission(payload, ctx) {
     const missionIdempotencyKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
     if (missionIdempotencyKey) {
-        const existingParent = (0, db_1.loadTasks)().find((item) => item.workflow_type === "global_mission" && item.idempotency_key === missionIdempotencyKey);
+        const existingParent = (0, db_1.loadTasks)().find((item) => item.workflow_type === "global_mission"
+            && (item.mission_plan?.request_idempotency_key || item.idempotency_key) === missionIdempotencyKey
+            && String(item.origin_session_id || "") === String(payload.session_id || payload.sessionId || ""));
         if (existingParent) {
             const taskMap = new Map((0, db_1.loadTasks)().map((item) => [item.id, item]));
             return { success: true, duplicate: true, mission: existingParent, children: (existingParent.child_task_ids || []).map((id) => ({ task: taskMap.get(id) })).filter((item) => item.task), rejected: [] };
@@ -839,6 +848,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
         requires_verification: true,
         requires_independent_review: resolved.some((item) => item.requires_independent_review === true),
         mission_plan: {
+            request_idempotency_key: missionIdempotencyKey || null,
             execution_order: payload.execution_order || payload.executionOrder || "parallel",
             targets: resolved,
             rejected,
@@ -947,12 +957,13 @@ function createGlobalDevelopmentMission(payload, ctx) {
         });
         const targetMessageId = `global-task-queued-${child.id}`;
         const targetSessionId = String(child.group_session_id || child.project_session_id || "");
-        const targetConversation = {
+        const privateTarget = (0, task_session_boundary_1.isPrivateTaskSessionId)(targetSessionId);
+        const targetConversation = privateTarget ? null : {
             scope: target.type,
             scopeId: target.type === "group" ? String(child.group_id || "") : String(child.target_project || ""),
             exactSessionId: targetSessionId,
-            sessionKind: "automation",
-            resolution: child.automation_session_binding_snapshot?.resolution === "explicit_binding" ? "explicit_binding" : "auto_created",
+            sessionKind: "conversation",
+            resolution: "explicit_binding",
             taskId: child.id,
             sourceSessionId,
             contentStored: false,
@@ -963,12 +974,13 @@ function createGlobalDevelopmentMission(payload, ctx) {
             project_session_id: child.project_session_id || "",
             automation_session_binding_snapshot: child.automation_session_binding_snapshot || null,
             target_conversation: targetConversation,
+            execution_binding: child.execution_session_binding_snapshot || null,
         };
         Object.assign(target, effectiveTarget);
         const persistedChild = (0, collaboration_1.updateTask)(child.id, {
             mission_target: effectiveTarget,
             target_message_id: targetMessageId,
-            target_conversation_ref: {
+            target_conversation_ref: privateTarget ? null : {
                 scope: target.type,
                 scopeId: target.type === "group" ? child.group_id : child.target_project,
                 exactSessionId: targetSessionId,
@@ -978,7 +990,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
         });
         if (persistedChild)
             Object.assign(child, persistedChild);
-        if (target.type === "project" && child.project_session_id) {
+        if (target.type === "project" && child.project_session_id && !privateTarget) {
             (0, sessions_1.appendProjectSessionTaskMessage)(target.project, child.project_session_id, {
                 id: `global-task-intake-${child.id}`,
                 role: "user",
@@ -1011,7 +1023,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
                 },
             });
         }
-        if (target.type === "group" && child.group_id && child.group_session_id) {
+        if (target.type === "group" && child.group_id && child.group_session_id && !privateTarget) {
             (0, storage_1.appendGroupMessage)(child.group_id, {
                 id: `global-task-intake-${child.id}`,
                 group_session_id: child.group_session_id,

@@ -29,6 +29,14 @@ export type CcmScopeInstructionCatalogEntryV1 = {
     generationRunId?: string;
     generationAttempts?: number;
     failureReason?: string;
+    generationOutcome?: 'model' | 'local_reuse' | 'unknown' | 'failed';
+    generationTaskId?: string;
+    generationTriggerSource?: string;
+    generatedInputDigest?: string;
+    generationContractVersion?: string;
+    generationIdentity?: string;
+    generationRequestIds?: string[];
+    generationEvidence?: any[];
 };
 export type CcmScopeInstructionRefreshReason = "initial_generation" | "key_files_changed" | "module_topology_changed" | "public_interface_changed" | "large_source_change" | "accepted_architecture_task" | "group_purpose_changed" | "group_members_changed" | "project_cognition_changed" | "manual_regeneration";
 export type ScopeInstructionIdentity = {
@@ -94,7 +102,7 @@ export declare function listScopeInstructionCatalog(identity: ScopeInstructionId
 export declare function getScopeInstructionCatalogEntry(documentIdValue: string): CcmScopeInstructionCatalogEntryV1 & {
     sourceCount: number;
 };
-export declare function renderScopeInstructionCatalog(identity: ScopeInstructionIdentity): string;
+export declare function renderScopeInstructionCatalog(identity: ScopeInstructionIdentity): any;
 export declare function readScopeInstructionForAgent(input: {
     identity: ScopeInstructionIdentity;
     documentId: string;
@@ -143,8 +151,10 @@ export declare function supplementScopeInstruction(input: {
 export declare function regenerateScopeInstruction(documentIdValue: string, expectedRevision?: number): CcmScopeInstructionCatalogEntryV1 & {
     sourceCount: number;
 };
+export declare function runScopeInstructionGeneration(taskId?: string): Promise<any>;
 export declare function initializeScopeInstructions(input?: {
     projects?: string[];
     groups?: any[];
 }): void;
 export declare function scopeInstructionStoreRootForTests(): string;
+export declare function stopScopeInstructionValidationTasks(validationId: string, reason: string): any;

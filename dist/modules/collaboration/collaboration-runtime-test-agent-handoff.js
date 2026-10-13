@@ -141,6 +141,15 @@ function validateTestAgentHandoffRegisteredWorkDirs(handoff, group, configs) {
     });
     const invalid = [];
     for (const project of projects) {
+        try {
+            const registered = (0, group_orchestrator_1.resolveMemberRuntime)(String(project?.name || ""), group, configs)?.workDir;
+            const bound = require("../../agents/dispatch-acceptance-workspace").resolveDispatchAcceptanceWorkspace(handoff?.taskId, project?.name, registered, group?.id);
+            if (bound && bound !== registered)
+                registeredRoots.push(fs.realpathSync(bound));
+        }
+        catch (error) {
+            invalid.push(`${project?.name || "project"}: ${error.message}`);
+        }
         const raw = String(project?.workDir || project?.work_dir || "").trim();
         if (!raw) {
             invalid.push(`${project?.name || "project"}: missing workDir`);

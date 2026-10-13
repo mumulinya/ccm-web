@@ -20,6 +20,7 @@ Rules:
 3. Set needsEpicDecomposition=true when the request needs an internal task graph for a PRD, multiple projects, or independently verifiable objectives. The server decides whether a user-confirmed plan is required based on actual scope, risk, permissions, and evidence. Simple explicit changes may dispatch directly.
 4. Attachments and URLs are context; they do not automatically require decomposition. First determine what the user wants done with them.
 5. Use continuationKind=supplement when the message adds to the current goal, revise_goal when it changes the goal, scope, approach, or acceptance, and new_task otherwise.
+   When the supplied task candidates identify the task being discussed or changed, return relatedTaskId with that exact candidate ID. Leave it empty for unrelated messages or ambiguous targets. A selected task never authorizes execution.
 6. If facts or boundaries are insufficient, ask the minimum clarificationQuestions that can change scope, permission, or acceptance. Never guess.
 7. For a task status request set readAction=inspect_status, actionRequired=false, and requiresCodeChanges=false. Do not use local status keywords as a shortcut.
 8. For a question whose answer depends on the current project source, set readAction=inspect_source. Use sourceReadDepth=focused for a named file, symbol, or narrow behavior, and broad only when the cause or affected modules cannot be bounded yet. These fields describe the evidence need, not the current Agent's file permissions.
@@ -126,6 +127,7 @@ function normalizeWorkflowDecision(value, source = "model") {
         needsEpicDecomposition,
         actionRequired,
         continuationKind,
+        relatedTaskId: String(value?.relatedTaskId || value?.related_task_id || "").trim().slice(0, 180),
         readAction,
         sourceReadDepth,
         targetRefs: list(value?.targetRefs || value?.target_refs),

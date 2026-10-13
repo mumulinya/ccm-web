@@ -77,6 +77,13 @@ export interface ResumeInspection {
     evidence?: any;
 }
 export interface AgentRunWorkspaceEvidence {
+    gitEvidence?: {
+        repositoryRoot: string;
+        headCommit: string;
+        changedFiles: string[];
+        diffChecksum: string;
+        capturedAt: string;
+    } | null;
     runId: string;
     workspacePath: string;
     worktreeId: string;
@@ -101,6 +108,7 @@ export interface AgentRunContext {
     taskAgentSessionId?: string;
     nativeSessionId?: string;
     executionId?: string;
+    workItemId?: string;
     workspacePath?: string;
     worktreeId?: string;
     workspaceEvidence?: AgentRunWorkspaceEvidence | null;

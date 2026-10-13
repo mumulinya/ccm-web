@@ -122,6 +122,9 @@ function publicInternalMcpTaskContext(context) {
         schema: "ccm-internal-mcp-task-context-view-v1",
         task: {
             id: task.id,
+            ...require("../agents/dispatch-projection").buildDispatchProjection(task),
+            contract_revision: Number(task.task_spec?.revision || 1),
+            trace_id: task.trace_id || "",
             title: cleanText(task.title || task.name || "任务", 240),
             goal: cleanText(task.business_goal || task.description || task.goal || "", 1800),
             status: String(task.status || "pending"),

@@ -5,14 +5,16 @@ exports.nativeTurnToGlobalDecision = nativeTurnToGlobalDecision;
 exports.runGlobalNativeQueryCall = runGlobalNativeQueryCall;
 exports.runGlobalNativeQuerySelfTest = runGlobalNativeQuerySelfTest;
 const native_query_loop_1 = require("../../agents/native-query-loop");
+const deferred_tool_invocation_1 = require("../../agents/deferred-tool-invocation");
+const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
 const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const main_agent_harness_1 = require("../../agents/main-agent-harness");
 const session_model_checkpoint_1 = require("../../agents/session-model-checkpoint");
 const model_tool_result_1 = require("../../agents/model-tool-result");
+const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const runtime_1 = require("../../agents/global/runtime");
 const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
-const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
 const provider_native_tools_1 = require("../../system/provider-native-tools");
 const agent_key_progress_1 = require("../../system/agent-key-progress");
 const readonly_tool_concurrency_1 = require("../../system/readonly-tool-concurrency");
@@ -20,7 +22,7 @@ const model_activity_1 = require("../../system/model-activity");
 const provider_stream_visible_projection_1 = require("../../system/provider-stream-visible-projection");
 function globalNativeTools(run) {
     const loaded = run?.loaded_tool_names || run?.loadedToolNames || [];
-    const specs = (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS.filter(spec => !(0, global_tool_load_policy_1.isGlobalDeferredTool)(spec.name, loaded)));
+    const specs = (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS.filter(spec => (0, global_tool_load_policy_1.isGlobalAlwaysInlineTool)(spec.name)));
     const fromSpecs = specs.map(spec => ({
         name: spec.name,
         description: spec.description,
@@ -28,6 +30,7 @@ function globalNativeTools(run) {
         deferred: false,
     }));
     return [
+        (0, deferred_tool_invocation_1.deferredToolDefinition)(),
         ...(0, native_query_loop_1.nativeControlToolDefinitions)().filter(tool => tool.name !== "ccm_dispatch"),
         ...fromSpecs,
     ];
@@ -126,10 +129,11 @@ async function runGlobalNativeQueryCall(input) {
         if (call.name === "ccm_dispatch")
             return false;
         try {
-            return (0, global_agent_run_store_1.classifyGlobalAgentToolRisk)(call.name, call.arguments) === "read";
+            const resolved = (0, deferred_tool_invocation_1.resolveGlobalDeferredToolCall)(run, call.name, call.arguments);
+            return (0, global_agent_run_store_1.classifyGlobalAgentToolRisk)(resolved.name, resolved.arguments) === "read";
         }
         catch {
-            return false;
+            return call.name === 'invoke_deferred_tool';
         }
     };
     const resolvePlanningEvidence = async (plan) => {
@@ -205,6 +209,7 @@ async function runGlobalNativeQueryCall(input) {
         nativeToolReference: true,
         persistContext: { scope: "global", scopeId: "global", sessionId: String(run.session_id || "") },
         getTools: () => globalNativeTools(run),
+        resolveToolCall: call => (0, deferred_tool_invocation_1.resolveGlobalDeferredToolCall)(run, call.name, call.arguments),
         getToolPromptLayout: () => (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId: run.session_id }, run.loaded_tool_names || run.loadedToolNames || []).toolPromptLayout,
         isReadOnly: isReadOnlyCall,
         shouldStopAfterTools: (calls) => calls.some(call => !isReadOnlyCall(call)),
@@ -280,7 +285,7 @@ async function runGlobalNativeQueryCall(input) {
                             toolCallId: call.id,
                             arguments: call.arguments || {},
                         });
-                        const observation = await input.executeTool(call.name, call.arguments || {}, run, input.signal);
+                        const observation = await input.executeTool(call.name, call.arguments || {}, run, input.signal, call.id);
                         run.tool_calls = Math.max(0, Number(run.tool_calls || 0)) + 1;
                         run.steps = Array.isArray(run.steps) ? run.steps : [];
                         run.steps.push({
@@ -300,7 +305,7 @@ async function runGlobalNativeQueryCall(input) {
                             // Keep the same sanitized model-facing body that is returned to
                             // the native loop. The runtime event is persisted as an audit
                             // record, so the explicit projection is needed for exact replay.
-                            modelOutput: (0, model_tool_result_1.globalModelToolObservation)(observation),
+                            modelOutput: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(call.name, (0, model_tool_result_1.globalModelToolObservation)(observation)),
                         });
                         const auditReceipt = observation?.auditReceipt || observation?.result?.auditReceipt;
                         const row = (0, model_tool_result_1.toModelToolResult)({ name: call.name, ok: observation?.ok !== false,
@@ -309,6 +314,7 @@ async function runGlobalNativeQueryCall(input) {
                         return row;
                     }
                     catch (error) {
+                        require('../../system/global-source-failure').recordGlobalSourceFailure(run, call, error);
                         (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, {
                             type: "tool_failed",
                             tool: call.name,
@@ -324,8 +330,10 @@ async function runGlobalNativeQueryCall(input) {
                 }
             });
             rows.push(...readRows);
-            if (writes.length && !pendingWrite)
-                pendingWrite = writes[0];
+            if (writes.length && !pendingWrite) {
+                const resolved = (0, deferred_tool_invocation_1.resolveGlobalDeferredToolCall)(run, writes[0].name, writes[0].arguments);
+                pendingWrite = { ...writes[0], name: resolved.name, arguments: resolved.arguments };
+            }
             for (const call of writes) {
                 rows.push({ callId: call.id, name: call.name, ok: true, output: { pending_authorization: true } });
             }
@@ -370,7 +378,7 @@ function runGlobalNativeQuerySelfTest() {
             && firstNames.includes("grep_text") === false
             && firstNames.includes("manage_project") === false
             && firstNames.includes("orchestrate_development") === false,
-        searchLoadsOnlySelectedTool: afterNames.includes("manage_project")
+        searchLoadsOnlySelectedTool: !afterNames.includes("manage_project") && afterNames.includes('invoke_deferred_tool')
             && JSON.stringify(afterNames.filter(name => name !== "manage_project")) === JSON.stringify(firstNames),
         confirmationDoesNotChangeProviderToolSurface: JSON.stringify(afterConfirmationNames) === JSON.stringify(firstNames),
     };

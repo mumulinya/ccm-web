@@ -64,6 +64,9 @@ const ROUTE_ALLOWLIST = {
     ],
     "server-recovery": [
         /^\/api\/(?:tasks|projects|global-agent|feishu)(?:\/|\?|$)/,
+        // Authenticated queued group turns are drained by the server, including
+        // after disconnect/restart. Grant only their concrete submission route.
+        /^\/api\/groups\/send(?:\?|$)/,
         // Recovery tooling may re-run the concrete project Agent CLI probe after
         // a restart so stale readiness cannot strand an otherwise valid task.
         /^\/api\/orchestrator\/agent-cli-probe(?:\?|$)/,

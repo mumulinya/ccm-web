@@ -1,7 +1,7 @@
 export declare const WEB_SESSIONS_DIR: string;
 export declare function getProjectSessionDir(projectName: string): string;
 export declare function getSessionFilePath(projectName: string, sessionId: string): string;
-export declare function getProjectFeishuSessionTargets(projectName: string): any[];
+export declare function getProjectFeishuSessionTargets(projectName: string): any;
 export declare function resolveProjectFeishuTargetForAcpSession(projectName: string, acpSessionId: string, context?: any): {
     target: any;
     resolution: string;
@@ -52,7 +52,7 @@ export declare function getSessions(projectName: string): {
     updated_at: any;
     source: string;
     session_kind: string;
-    feishu_bindings: any[];
+    feishu_bindings: any;
 }[];
 /** Lightweight count used by the project overview endpoint.  It deliberately
  * avoids parsing every transcript just to render the sidebar summary. */

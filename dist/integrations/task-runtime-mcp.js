@@ -40,11 +40,13 @@ const path = __importStar(require("path"));
 const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
 const task_command_runtime_1 = require("./task-command-runtime");
+const dispatch_scope_tools_1 = require("./dispatch-scope-tools");
 exports.TASK_RUNTIME_MCP_SERVER_NAME = "ccm__task_runtime";
 function buildTaskRuntimeMcpServerConfig(context) {
     return (0, internal_mcp_runtime_1.buildInternalMcpServerConfig)(path.join(__dirname, "task-runtime-mcp.js"), context);
 }
 const tools = [
+    ...dispatch_scope_tools_1.dispatchScopeTools,
     {
         name: "get_task_context",
         description: "读取当前签名绑定任务的目标、验收标准、工作项、Todo、近期进度和待用户决策。不能读取其他任务。",
@@ -139,6 +141,10 @@ const tools = [
     },
 ];
 async function callTool(context, name, args) {
+    if (name === "request_scope_expansion")
+        return (0, dispatch_scope_tools_1.requestBoundDispatchScope)(context, args);
+    if (["list_scope_expansions", "decide_scope_expansion"].includes(name))
+        return (0, dispatch_scope_tools_1.callBoundDispatchScopeDecision)(context, name, args);
     if (name === "run_command")
         return (0, task_command_runtime_1.runTaskBoundCommand)(context, args);
     if (name === "get_command_output")

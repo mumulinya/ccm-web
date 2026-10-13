@@ -46,6 +46,8 @@ const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const cache_adaptive_tuning_1 = require("./cache-adaptive-tuning");
+const model_cache_metrics_1 = require("./model-cache-metrics");
+const provider_cache_window_1 = require("./provider-cache-window");
 const FILE = path.join(utils_1.CCM_DIR, "provider-context-cache", "scope-metrics-v1.json");
 // Keep the old location readable for one-way compatibility. New writes always
 // go to CCM_DIR so isolated/test instances cannot silently split their ledger.
@@ -101,28 +103,20 @@ function providerCacheTrend(rows, size, options = {}) {
         const kind = String(row?.requestClass || "unattributed");
         return options.includeAll === true || kind === String(options.requestClass || "foreground_main");
     });
-    const physicalSamples = eligible.slice(-size);
-    const logical = new Map();
-    physicalSamples.forEach((row, index) => {
-        const id = String(row?.logicalCallId || row?.requestKey || "");
-        if (!id) {
-            logical.set(`anonymous:${index}`, row);
-            return;
-        }
-        const prior = logical.get(id);
-        if (!prior || String(row?.at || "") >= String(prior?.at || ""))
-            logical.set(id, row);
-    });
-    const samples = [...logical.values()].slice(-size);
+    const window = (0, provider_cache_window_1.providerCacheWindow)(eligible, size);
+    const physicalSamples = window.physical;
+    const samples = window.logical;
     const reported = samples.filter(row => row.usageReported === true
         || (row.usageReported == null && Number(row.providerInputTokens || 0) > 0));
     const physicalReported = physicalSamples.filter(row => row.usageReported === true
         || (row.usageReported == null && Number(row.providerInputTokens || 0) > 0));
-    const hits = reported.filter(row => row.hit === true).length;
-    const fullReuse = reported.filter(row => row.providerCacheReuseClass === 'full_reuse').length;
-    const partialReuse = reported.filter(row => row.providerCacheReuseClass === 'partial_reuse').length;
-    const baselineOnly = reported.filter(row => row.providerCacheReuseClass === 'baseline_only').length;
-    const misses = reported.filter(row => row.providerCacheReuseClass === 'miss' || (!row.providerCacheReuseClass && row.hit !== true)).length;
+    const cacheReported = reported.filter(provider_cache_window_1.cacheUsageKnown);
+    const comparable = physicalReported.filter(provider_cache_window_1.cacheUsageKnown);
+    const hits = cacheReported.filter(row => row.hit === true).length;
+    const fullReuse = cacheReported.filter(row => row.providerCacheReuseClass === 'full_reuse').length;
+    const partialReuse = cacheReported.filter(row => row.providerCacheReuseClass === 'partial_reuse').length;
+    const baselineOnly = cacheReported.filter(row => row.providerCacheReuseClass === 'baseline_only').length;
+    const misses = cacheReported.filter(row => row.providerCacheReuseClass === 'miss' || (!row.providerCacheReuseClass && row.hit !== true)).length;
     // Token and cost totals are physical-attempt accounting. Only rates/counts
     // use the deduplicated logical result above.
     const cacheReadTokens = physicalReported.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0);
@@ -161,10 +155,11 @@ function providerCacheTrend(rows, size, options = {}) {
         fullReuseRequests: fullReuse,
         partialReuseRequests: partialReuse,
         baselineOnlyRequests: baselineOnly,
-        fullReuseRequestRate: reported.length ? fullReuse / reported.length : null,
-        partialReuseRequestRate: reported.length ? partialReuse / reported.length : null,
-        baselineOnlyRequestRate: reported.length ? baselineOnly / reported.length : null,
-        requestHitRate: reported.length ? hits / reported.length : null,
+        cacheReportedCalls: cacheReported.length,
+        fullReuseRequestRate: cacheReported.length ? fullReuse / cacheReported.length : null,
+        partialReuseRequestRate: cacheReported.length ? partialReuse / cacheReported.length : null,
+        baselineOnlyRequestRate: cacheReported.length ? baselineOnly / cacheReported.length : null,
+        requestHitRate: cacheReported.length ? hits / cacheReported.length : null,
         cacheReadTokens,
         directInputTokens,
         cacheCreationInputTokens,
@@ -184,7 +179,10 @@ function providerCacheTrend(rows, size, options = {}) {
         projectionFallbackCount,
         publicStablePrefixTokens,
         agentStablePrefixTokens,
-        tokenReuseRate: totalContextTokens > 0 ? Math.min(1, cacheReadTokens / totalContextTokens) : null,
+        cacheUnreportedCalls: samples.length - cacheReported.length,
+        cacheTokenReportingCoverage: totalContextTokens > 0 ? comparable.reduce((sum, row) => sum + finite(row.providerInputTokens), 0) / totalContextTokens : null,
+        tokenReuseRate: comparable.reduce((sum, row) => sum + finite(row.providerInputTokens), 0) > 0
+            ? Math.min(1, comparable.reduce((sum, row) => sum + finite(row.cacheReadTokens), 0) / comparable.reduce((sum, row) => sum + finite(row.providerInputTokens), 0)) : null,
         cacheableUtilizationRate: cacheablePrefixTokens > 0 ? sum('cacheReadTokens') / cacheablePrefixTokens : null,
         dynamicSuffixRate: measuredInput > 0 ? uncachedSuffixTokens / measuredInput : null,
         duplicateToolResultRate: measuredInput > 0 ? duplicateToolResultTokens / measuredInput : null,
@@ -205,6 +203,12 @@ function recordProviderCacheScopeMetric(binding, receipt) {
             return readProviderCacheScopeMetrics(binding, state);
         }
         const sample = {
+            execution_origin: receipt.execution_origin || 'unknown', binding_mode: receipt.binding_mode || 'unattributed',
+            cache_preparation_status: receipt.cache_preparation_status || 'unknown',
+            cache_eligibility: receipt.cache_eligibility || 'unknown', cache_eligibility_reason: receipt.cache_eligibility_reason || 'provider_conditions_unknown',
+            cache_usage_reported: receipt.cache_usage_reported ?? receipt.cacheUsageReported ?? (Number(receipt.cacheReadInputTokens) > 0),
+            protocol: String(receipt.protocol || receipt.providerCacheProtocol || ''), model: String(receipt.model || ''),
+            reportedCostUsd: receipt.reportedCostUsd ?? null, estimatedCostUsd: receipt.estimatedCostUsd ?? null,
             requestKey,
             requestId: String(physicalRequestId || ""),
             status: String(receipt?.status || "completed"),
@@ -273,10 +277,10 @@ function recordProviderCacheScopeMetric(binding, receipt) {
             runtimeOwnership: String(receipt?.cacheAffinity?.runtimeOwnership || "ccm_provider"),
             cacheKeyProfile: String(receipt?.cacheAffinity?.cacheKeyProfile || ""),
         };
-        state.scopes[identity.scope] = [...(state.scopes[identity.scope] || []), sample].slice(-50);
-        state.sessions[identity.session] = [...(state.sessions[identity.session] || []), sample].slice(-50);
+        state.scopes[identity.scope] = [...(state.scopes[identity.scope] || []), sample].slice(-500);
+        state.sessions[identity.session] = [...(state.sessions[identity.session] || []), sample].slice(-500);
         if (identity.stage) {
-            state.stages[identity.stage] = [...(state.stages[identity.stage] || []), sample].slice(-50);
+            state.stages[identity.stage] = [...(state.stages[identity.stage] || []), sample].slice(-500);
             state.stageScopes[identity.scope] = [...new Set([...(state.stageScopes[identity.scope] || []), identity.stage])].slice(-40);
         }
         state.updatedAt = new Date().toISOString();
@@ -304,12 +308,12 @@ function recordExternalAgentCacheStageMetric(affinity, metrics, completedAt = ne
         cacheAffinity: affinity,
     });
 }
-function readProviderCacheScopeMetrics(binding, supplied) {
+function readProviderCacheScopeMetrics(binding, supplied, filters = {}) {
     const state = supplied || read();
     const identity = keys(binding);
-    const scopeRows = Array.isArray(state.scopes?.[identity.scope]) ? state.scopes[identity.scope] : [];
-    const sessionRows = Array.isArray(state.sessions?.[identity.session]) ? state.sessions[identity.session] : [];
-    const stageRows = identity.stage && Array.isArray(state.stages?.[identity.stage]) ? state.stages[identity.stage] : [];
+    const scopeRows = (0, model_cache_metrics_1.filterModelCacheRows)(Array.isArray(state.scopes?.[identity.scope]) ? state.scopes[identity.scope] : [], filters);
+    const sessionRows = (0, model_cache_metrics_1.filterModelCacheRows)(Array.isArray(state.sessions?.[identity.session]) ? state.sessions[identity.session] : [], filters);
+    const stageRows = (0, model_cache_metrics_1.filterModelCacheRows)(identity.stage && Array.isArray(state.stages?.[identity.stage]) ? state.stages[identity.stage] : [], filters);
     const scopedStageRows = binding?.sessionId
         ? [...new Set(sessionRows.map((row) => row.cacheKeyProfile))].map(profile => sessionRows.filter((row) => row.cacheKeyProfile === profile))
         : (state.stageScopes?.[identity.scope] || []).map((stageKey) => state.stages?.[stageKey]);
@@ -349,11 +353,11 @@ function readProviderCacheScopeMetricsBatch(bindings = []) {
  * metric ledger intentionally keeps only bounded samples, so this projection
  * reports the recent window and never exposes prompt/tool bodies.
  */
-function readProviderCacheSessionDiagnostics(binding, _latestState = null, supplied) {
+function readProviderCacheSessionDiagnostics(binding, _latestState = null, supplied, filters = {}) {
     const state = supplied || read();
-    const rows = state.sessions?.[keys(binding).session] || [];
+    const rows = (0, model_cache_metrics_1.filterModelCacheRows)(state.sessions?.[keys(binding).session] || [], filters);
     const mainRows = rows.filter(row => String(row?.requestClass || "unattributed") === "foreground_main");
-    const metrics = readProviderCacheScopeMetrics(binding, state);
+    const metrics = readProviderCacheScopeMetrics(binding, state, filters);
     const recent = metrics.session.recent50 || {};
     const totalContextTokens = Math.max(0, Number(recent.totalContextTokens || 0));
     const cacheReadInputTokens = Math.max(0, Number(recent.cacheReadTokens || 0));
@@ -362,7 +366,8 @@ function readProviderCacheSessionDiagnostics(binding, _latestState = null, suppl
     const warning = latest.compactionWarningLevel || (latestContext > 0 && finite(latest.uncachedSuffixTokens) / latestContext >= 0.7 ? "recommended" : latestContext > 0 && finite(latest.uncachedSuffixTokens) / latestContext >= 0.6 ? "warning" : "normal");
     return {
         schema: "ccm-session-cache-diagnostics-v1",
-        ...(0, provider_request_diagnostics_1.readProviderRequestDiagnostics)(binding),
+        ...(0, provider_request_diagnostics_1.readProviderRequestDiagnostics)(binding, filters),
+        auxiliary: metrics.auxiliary, probe: metrics.probe,
         windowSize: 50,
         diagnosticRequestCount: recent.diagnosticSamples,
         sessionId: String(binding?.sessionId || ""),
@@ -372,6 +377,9 @@ function readProviderCacheSessionDiagnostics(binding, _latestState = null, suppl
         reportedRequestCount: Math.max(0, Number(recent.reportedSamples || 0)),
         hitRequestCount: Math.max(0, Number(recent.hits || 0)),
         requestHitRate: recent.requestHitRate,
+        cacheReportedCalls: recent.cacheReportedCalls,
+        cacheUnreportedCalls: recent.cacheUnreportedCalls,
+        cacheTokenReportingCoverage: recent.cacheTokenReportingCoverage,
         cacheReadInputTokens,
         directInputTokens: Math.max(0, Number(recent.directInputTokens || 0)),
         cacheCreationInputTokens: Math.max(0, Number(recent.cacheCreationInputTokens || 0)),
@@ -396,6 +404,9 @@ function readProviderCacheSessionDiagnostics(binding, _latestState = null, suppl
         fullReuseRequestRate: recent.fullReuseRequestRate,
         partialReuseRequestRate: recent.partialReuseRequestRate,
         baselineOnlyRequestRate: recent.baselineOnlyRequestRate,
+        execution_origin: latest.execution_origin || 'unknown', binding_mode: latest.binding_mode || 'unattributed',
+        cache_preparation_status: latest.cache_preparation_status || 'unknown', cache_usage_reported: latest.cache_usage_reported === true,
+        cache_eligibility: latest.cache_eligibility || 'unknown', cache_eligibility_reason: latest.cache_eligibility_reason || 'provider_conditions_unknown',
         latestProviderCacheReuseClass: String(latest.providerCacheReuseClass || "unreported"),
         latestProviderCacheMatchedTokens: finite(latest.providerCacheMatchedTokens || latest.cacheReadTokens),
         latestProviderCacheCandidateTokens: finite(latest.providerCacheCandidateTokens || latest.cacheablePrefixTokens),
@@ -439,7 +450,7 @@ function readProviderCacheSessionDiagnostics(binding, _latestState = null, suppl
 function reasonCode(value) {
     const allowed = new Set(['cold_start', 'first_request_miss', 'ttl_expired', 'stable_prefix_changed', 'tool_schema_changed', 'compaction_boundary_changed',
         'transcript_projection_changed', 'provider_routing_or_eviction', 'provider_usage_not_reported', 'provider_usage_unreported',
-        'prefix_below_provider_threshold', 'native_fields_unproven', 'provider_prefix_reuse_unproven', 'dynamic_prefix_leak',
+        'provider_conditions_unknown', 'prefix_below_provider_threshold', 'native_fields_unproven', 'provider_prefix_reuse_unproven', 'dynamic_prefix_leak',
         'protocol_changed', 'ttl_policy_changed', 'reasoning_mode_changed', 'breakpoint_layout_changed', 'transport_parameters_changed',
         'completed_history_boundary', 'no_cacheable_message_boundary', 'current_boundary_excluded',
         'provider_native_rolling_boundary', 'implicit_provider_cache', 'rolling_breakpoint_unsupported',

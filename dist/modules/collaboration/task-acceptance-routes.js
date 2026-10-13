@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleTaskAcceptanceRoute = handleTaskAcceptanceRoute;
+const task_session_boundary_1 = require("./task-session-boundary");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const access_policy_1 = require("../system/access-policy");
@@ -33,7 +34,7 @@ function handleTaskAcceptanceRoute(pathname, req, res) {
         return true;
     }
     const projection = (0, task_acceptance_service_1.taskAcceptanceProjection)(task);
-    (0, utils_1.sendJson)(res, { success: true, taskId: id, ...projection, archive_policy: task?.task_spec?.task_session_archive_policy || "", archive_state: (0, task_session_store_1.taskSessionArchiveState)(task), available_actions: (0, task_session_store_1.taskSessionArchiveActions)(task), output_revision: (0, task_session_store_1.taskSessionOutputRevision)(task), task_session: (0, task_session_store_1.getTaskSession)(id) ? { available: true } : { available: false }, contentStored: false });
+    (0, utils_1.sendJson)(res, { success: true, taskId: id, ...projection, archive_policy: task?.task_spec?.task_session_archive_policy || "", archive_state: (0, task_session_store_1.taskSessionArchiveState)(task), available_actions: (0, task_session_store_1.taskSessionArchiveActions)(task), output_revision: (0, task_session_store_1.taskSessionOutputRevision)(task), task_session: (0, task_session_store_1.getTaskSession)(id) ? { available: (0, task_session_boundary_1.taskSessionOpeningState)(task).open } : { available: false }, contentStored: false });
     return true;
 }
 //# sourceMappingURL=task-acceptance-routes.js.map

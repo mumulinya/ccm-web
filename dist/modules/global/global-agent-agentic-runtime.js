@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentAgenticRuntime = createGlobalAgentAgenticRuntime;
+const deferred_tool_invocation_1 = require("../../agents/deferred-tool-invocation");
 const crypto = __importStar(require("crypto"));
 const unified_model_call_config_1 = require("../../system/unified-model-call-config");
 const global_agent_run_projection_1 = require("../../agents/global/global-agent-run-projection");
@@ -69,6 +70,7 @@ const scope_instructions_1 = require("../../system/scope-instructions");
 const context_budget_1 = require("../../system/context-budget");
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
 const douyin_agent_tools_1 = require("../music/douyin-agent-tools");
+const global_source_access_1 = require("../../system/global-source-access");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
     const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listAutomationDefinitions, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
@@ -957,7 +959,11 @@ function createGlobalAgentAgenticRuntime(deps) {
             error: "关键任务资料尚未完整读取，已阻止执行操作",
         };
     }
-    async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent, signal) {
+    async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent, signal, principal, toolCallId) {
+        (0, global_source_access_1.assertGlobalSourceToolRequest)(name, args, run, principal);
+        const resolvedDeferred = (0, deferred_tool_invocation_1.resolveGlobalDeferredToolCall)(run, name, args);
+        name = resolvedDeferred.name;
+        args = resolvedDeferred.arguments;
         const sourceGate = sourceExecutionGate(run, name, args);
         if (sourceGate)
             return sourceGate;
@@ -1005,6 +1011,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                         const names = rows.map((tool) => String(tool?.canonicalName || tool?.name || "")).filter(Boolean);
                         run.loaded_tool_names = Array.from(new Set([...(run.loaded_tool_names || run.loadedToolNames || []), ...names]));
                         run.loadedToolNames = run.loaded_tool_names.slice();
+                        (0, deferred_tool_invocation_1.recordGlobalDeferredToolSchemas)(run);
                         (0, global_agent_run_store_1.saveRun)(run, true);
                     }
                     return replayed;
@@ -1081,6 +1088,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 if (name === "tool_search") {
                     run.loaded_tool_names = Array.from(new Set((toolContext.loadedToolNames || []).map((value) => String(value || "")).filter(Boolean)));
                     run.loadedToolNames = run.loaded_tool_names.slice();
+                    (0, deferred_tool_invocation_1.recordGlobalDeferredToolSchemas)(run);
                     (0, global_agent_run_store_1.saveRun)(run, true);
                 }
                 observation = (0, transient_model_content_1.attachTransientModelBlocks)({ success: true, tool: name, result: (() => { try {
@@ -1106,8 +1114,8 @@ function createGlobalAgentAgenticRuntime(deps) {
                     success: true,
                     project,
                     config: { configured: true, agent: info.agent || "claudecode", platform: info.platform || "" },
-                    source_access: "delegated_to_project_main_agent",
-                    memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_project_main_agent" },
+                    source_access: "controlled_direct_or_delegated_source_tools",
+                    memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_source_tools" },
                 };
             }
             else if (name === "read_scope_instruction") {
@@ -1122,12 +1130,18 @@ function createGlobalAgentAgenticRuntime(deps) {
                     }),
                 };
             }
+            else if ((0, global_source_access_1.isGlobalSourceTool)(name)) {
+                observation = await (0, global_source_access_1.executeGlobalSourceTool)(name, args, run, principal, signal);
+                if (toolCallId)
+                    observation.sourceAccess.toolCallId = toolCallId;
+            }
             else if (name === "request_project_source_inquiry") {
                 const readDepth = String(args.read_depth || args.readDepth || "focused") === "broad" ? "broad" : "focused";
                 const targetProject = String(args.project || "").trim();
                 const question = String(args.question || run.user_message || run.reasoning_loop?.effective_goal || "");
                 const inquiryGeneration = Math.max(0, Number(run.generation ?? run.resume_count ?? 0));
-                const delegated = (0, delegated_inquiry_projections_1.beginDelegatedInquiryProjection)({ sourceSessionId: String(run.session_id || run.id || ""), targetScope: "project", targetId: targetProject, question, generation: inquiryGeneration });
+                (0, global_source_access_1.assertGlobalSourceProjectAccess)((0, global_source_access_1.sourceAccessPrincipal)(run, principal), targetProject);
+                const delegated = (0, delegated_inquiry_projections_1.beginDelegatedInquiryProjection)({ sourceSessionId: String(run.session_id || run.id || ""), sourceRunId: run.id, sourceMessageId: run.source_message_id || '', toolCallId: toolCallId || operationKey, targetScope: "project", targetId: targetProject, question, generation: inquiryGeneration });
                 try {
                     const inquiry = await (0, delegated_inquiry_recovery_1.requestRecoverableProjectSourceInquiry)({
                         requestScope: String(run.source || "").toLowerCase().includes("feishu") ? "feishu" : "global",
@@ -1145,6 +1159,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                         status: inquiry.receipt.sufficient ? "completed" : inquiry.needsUserInput ? "needs_input" : "partial",
                         evidenceCount,
                         evidenceIds: inquiry.planningEvidenceEntries.map((item) => item.evidenceId),
+                        evidenceRefs: inquiry.planningEvidenceEntries,
                         missingEvidenceSummaries: inquiry.missingEvidenceSummaries,
                         automaticSupplementAttempts: inquiry.automaticSupplementAttempts,
                         conclusion: inquiry.answer || inquiry.receipt.reason,
@@ -1181,9 +1196,12 @@ function createGlobalAgentAgenticRuntime(deps) {
                 const projects = Array.isArray(args.projects) ? args.projects.map(String).filter(Boolean) : [];
                 const question = String(args.question || run.user_message || run.reasoning_loop?.effective_goal || "");
                 const inquiryGeneration = Math.max(0, Number(run.generation ?? run.resume_count ?? 0));
-                const delegated = (0, delegated_inquiry_projections_1.beginDelegatedInquiryProjection)({ sourceSessionId: String(run.session_id || run.id || ""), targetScope: "group", targetId: String(group.id || groupId), question, generation: inquiryGeneration });
+                for (const project of projects.length ? projects : (group.members || []).map(row => row.project).filter(Boolean))
+                    (0, global_source_access_1.assertGlobalSourceProjectAccess)((0, global_source_access_1.sourceAccessPrincipal)(run, principal), project);
+                const delegated = (0, delegated_inquiry_projections_1.beginDelegatedInquiryProjection)({ sourceSessionId: String(run.session_id || run.id || ""), sourceRunId: run.id, sourceMessageId: run.source_message_id || '', toolCallId: toolCallId || operationKey, targetScope: "group", targetId: String(group.id || groupId), requestedProjectIds: projects.length ? projects : require('../collaboration/group-orchestrator-routing').getRoutableMembers(group).map(row => row.project), question, generation: inquiryGeneration });
                 try {
                     const inquiry = await (0, delegated_inquiry_recovery_1.requestRecoverableGroupSourceInquiry)({
+                        sourceRun: run, principal: (0, global_source_access_1.sourceAccessPrincipal)(run, principal),
                         group,
                         exactSessionId: String(run.session_id || run.id || ""),
                         question,
@@ -1199,6 +1217,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                         status: inquiry.receipt.sufficient ? "completed" : inquiry.needsUserInput ? "needs_input" : "partial",
                         evidenceCount,
                         evidenceIds: inquiry.planningEvidenceEntries.map((item) => item.evidenceId),
+                        evidenceRefs: inquiry.planningEvidenceEntries,
                         missingEvidenceSummaries: inquiry.missingEvidenceSummaries,
                         automaticSupplementAttempts: inquiry.automaticSupplementAttempts,
                         conclusion: inquiry.answer || inquiry.receipt.reason,
@@ -1749,6 +1768,10 @@ function createGlobalAgentAgenticRuntime(deps) {
         const baseConfig = loadOrchestratorConfig();
         const runtime = {
             callModel: async (messages, run, signal) => {
+                if (input.sourceMessageId && !run.source_message_id)
+                    run.source_message_id = input.sourceMessageId;
+                if (input.principal && !run.source_access_principal)
+                    run.source_access_principal = (0, global_source_access_1.sourceAccessPrincipal)(run, input.principal);
                 attachGlobalRunRequirementSources(run, input.sourceIngestion);
                 const sessionState = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", String(run.session_id || input.sessionId || ""));
                 const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "global_main_agent", config: baseConfig });
@@ -1820,7 +1843,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                         messages: providerMessages,
                         run,
                         signal,
-                        executeTool: async (name, args, currentRun, toolSignal) => {
+                        executeTool: async (name, args, currentRun, toolSignal, nativeCallId) => {
                             const snapshot = run.latest_model_visible_payload;
                             (0, context_usage_events_1.publishContextUsageDelta)({
                                 scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""), requestId: String(run.id || ""),
@@ -1828,7 +1851,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                                 predictedNextRequestTokens: Number(snapshot?.predictedNextRequestTokens || snapshot?.totalTokens || 0),
                                 tokenSource: "local_incremental_estimate", reason: "tool_started",
                             });
-                            const result = await executeAgenticTool(baseUrl, ctx, name, args, currentRun, input.onEvent, toolSignal);
+                            const result = await executeAgenticTool(baseUrl, ctx, name, args, currentRun, input.onEvent, toolSignal, input.principal, nativeCallId);
                             const outputTokens = Math.max(0, Math.floor(String(result?.summary || result?.message || "").length / 4));
                             (0, context_usage_events_1.publishContextUsageDelta)({
                                 scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""), requestId: String(run.id || ""),
@@ -1899,7 +1922,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 return invoke(providerMessages);
             },
             prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
-            getContext: (run) => buildAgenticContext(run.user_message, run.session_id, {
+            getContext: (run) => ((0, global_source_access_1.bindGlobalSourceIdentity)(run, input.principal, input.sourceMessageId), buildAgenticContext(run.user_message, run.session_id, {
                 knowledgeContext: input.knowledgeContext || "",
                 lazyResources: true,
                 lightweightDirectory: true,
@@ -1907,11 +1930,13 @@ function createGlobalAgentAgenticRuntime(deps) {
                 source: run.source || "global-agent",
                 loadedToolNames: run.loaded_tool_names || run.loadedToolNames || [],
                 requestedTargetRefs: input.requestedTargetRefs || run.requested_target_refs || [],
-            }),
+            })),
             verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
             executeTool: (name, args, run, signal) => {
                 attachGlobalRunRequirementSources(run, input.sourceIngestion);
-                return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent, signal);
+                if (input.principal && !run.source_access_principal)
+                    run.source_access_principal = (0, global_source_access_1.sourceAccessPrincipal)(run, input.principal);
+                return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent, signal, input.principal);
             },
             fallbackDecision: (run, error) => {
                 const detail = compactPetText(error?.message || error || "统一大模型调用失败", 800);
@@ -1940,39 +1965,8 @@ function createGlobalAgentAgenticRuntime(deps) {
                     ? requestedTargets
                     : confirmedPlanProjects.map((project) => ({ scope: "project", scopeId: project, displayName: project }));
                 let requestedToolName = String(modelDecision?.tool?.name || "").toLowerCase();
-                const sourceInquiryAlreadyObserved = (run.steps || []).some((step) => String(step?.tool?.name || "") === "request_project_source_inquiry" && step?.observation);
-                if (workflowDecision?.readAction === "inspect_source"
-                    && workflowDecision?.actionRequired === false
-                    && workflowDecision?.requiresCodeChanges === false
-                    && requestedToolName !== "request_project_source_inquiry"
-                    && !sourceInquiryAlreadyObserved) {
-                    const knownProjects = new Set(safeProjectRows().map((project) => String(project?.name || "")).filter(Boolean));
-                    const sourceCandidates = Array.from(new Set([
-                        ...groundedTargets.filter((target) => String(target?.scope || "") === "project").map((target) => String(target?.scopeId || "")),
-                        ...(workflowDecision?.targetRefs || []).map((target) => String(target?.id || target?.name || target || "").replace(/^project:/, "")),
-                    ].filter((project) => knownProjects.has(project))));
-                    if (sourceCandidates.length === 1) {
-                        modelDecision.state = "investigate";
-                        modelDecision.tool = {
-                            name: "request_project_source_inquiry",
-                            arguments: {
-                                project: sourceCandidates[0],
-                                question: String(run.original_user_message || run.user_message || ""),
-                                read_depth: workflowDecision.sourceReadDepth === "broad" ? "broad" : "focused",
-                            },
-                        };
-                        modelDecision.message = `正在请求项目 ${sourceCandidates[0]} 主 Agent核对源码。`;
-                        requestedToolName = "request_project_source_inquiry";
-                    }
-                    else {
-                        modelDecision.state = "needs_confirmation";
-                        modelDecision.tool = undefined;
-                        modelDecision.message = sourceCandidates.length > 1
-                            ? "这项源码问题可能涉及多个项目，请先明确要核对的项目；我不会向所有项目广播读取请求。"
-                            : "请先明确要核对源码的项目；全局主 Agent不会直接读取项目文件。";
-                        requestedToolName = "";
-                    }
-                }
+                // The model chooses direct source tools, delegation or clarification.
+                // Each source tool validates its explicit target and current authority.
                 const targetRequired = (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision)
                     && ["orchestrate_development", "send_project_cmd", "send_group_cmd", "create_task"].includes(requestedToolName);
                 const modelSelectedWriteDispatch = ["orchestrate_development", "send_project_cmd", "send_group_cmd", "create_task"].includes(requestedToolName);
@@ -2096,6 +2090,7 @@ function createGlobalAgentAgenticRuntime(deps) {
     async function runAgenticGlobalRequest(baseUrl, ctx, input) {
         const sessionId = input.sessionId || "default";
         const visibleUserMessage = input.originalMessage || input.message;
+        const sourceMessageId = require('../../system/global-source-model-content').globalSourceUserMessageId(input);
         let deferredTerminalEvent = null;
         const runtimeEventSink = input.onEvent
             ? (event) => {
@@ -2103,11 +2098,11 @@ function createGlobalAgentAgenticRuntime(deps) {
                     deferredTerminalEvent = event;
                     return;
                 }
-                input.onEvent?.(event);
+                input.onEvent?.(require('../../system/global-source-model-content').globalSourcePublicEvent(event));
             }
             : undefined;
         if (!/feishu/i.test(input.source || "")) {
-            ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: visibleUserMessage, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
+            ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { id: sourceMessageId, role: "user", content: visibleUserMessage, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
         }
         const requestedClarificationRunId = String(input.clarificationRunId || "").trim();
         let clarificationCandidate = null;
@@ -2128,6 +2123,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             sourceIngestion: input.sourceIngestion,
             knowledgeContext: "",
             principal: input.principal,
+            sourceMessageId,
             readOnly: input.readOnly,
             turnId: input.turnId,
             sessionId,
@@ -2171,11 +2167,11 @@ function createGlobalAgentAgenticRuntime(deps) {
             if (canonicalReply.trim())
                 input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, canonical: true });
             if (deferredTerminalEvent) {
-                input.onEvent({
+                input.onEvent(require('../../system/global-source-model-content').globalSourcePublicEvent({
                     ...deferredTerminalEvent,
                     reply: run.final_reply,
                     run,
-                });
+                }));
                 deferredTerminalEvent = null;
             }
         }
@@ -2194,6 +2190,8 @@ function createGlobalAgentAgenticRuntime(deps) {
                             timestamp: new Date().toISOString(),
                             trace_id: run.trace_id,
                             mission_id: run.mission_id,
+                            source_access_run_id: run.id,
+                            source_access_count: require('../../system/global-source-model-content').countGlobalSourceAccess(run),
                         }],
                     extractMemory: run.direct_reply_fast_path !== true,
                 });
@@ -2250,17 +2248,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         return startGlobalMissionSupervisorScheduler(createMissionSupervisorRuntime(ctx));
     }
     function bootstrapGlobalAgentMemoryForServer() {
-        const store = loadGlobalAgentHistoryStore();
-        const results = [];
-        for (const session of store.sessions || []) {
-            try {
-                results.push(ingestGlobalAgentConversation({ sessionId: session.id, source: session.source || "history-migration", messages: session.messages || [] }));
-            }
-            catch (error) {
-                results.push({ sessionId: session.id, error: error?.message || String(error) });
-            }
-        }
-        return { total: (store.sessions || []).length, migrated: results.filter(item => !item.error).length, results };
+        return require('../../system/global-history-startup').bootstrapGlobalHistoryInBatches(loadGlobalAgentHistoryStore, ingestGlobalAgentConversation);
     }
     function stopGlobalMissionSupervisionForServer() {
         stopGlobalMissionSupervisorScheduler();

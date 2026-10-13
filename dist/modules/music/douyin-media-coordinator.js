@@ -184,6 +184,8 @@ async function materialize(sourceId, opId, signal) {
         catch (mcpError) {
             if (signal?.aborted)
                 throw mcpError;
+            if (["login_required", "risk_controlled"].includes(String(mcpError?.douyinState || "")))
+                throw mcpError;
             resolver = 'yt-dlp';
             const resolved = await (0, douyin_1.resolveDouyinMediaInput)(id, { signal });
             if (!resolved?.url)

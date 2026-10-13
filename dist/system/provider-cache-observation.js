@@ -66,9 +66,10 @@ function providerCacheObservation(plan, usageReported, cacheReadTokens, evidence
                     : contextPlan.compactionBoundaryChanged ? "compaction_boundary_changed"
                         : contextPlan.transcriptProjectionChanged ? "transcript_projection_changed"
                             : contextPlan.stablePrefixChanged ? "stable_prefix_changed"
-                                : contextPlan.prefixExtensionEligible !== true ? "prefix_below_provider_threshold"
-                                    : contextPlan.adapterKind === "stable_prefix" ? "native_fields_unproven"
-                                        : "provider_prefix_reuse_unproven";
+                                : contextPlan.cacheEligibility?.status === 'ineligible' ? "prefix_below_provider_threshold"
+                                    : contextPlan.cacheEligibility?.status === 'unknown' ? "provider_conditions_unknown"
+                                        : contextPlan.adapterKind === "stable_prefix" ? "native_fields_unproven"
+                                            : "provider_prefix_reuse_unproven";
     return {
         localHistoryState,
         providerCacheObservation,

@@ -2,6 +2,7 @@
  * Shared Independent Review decision for TestAgent reports.
  * Used by group native summary, handoff strengthening, workchain gates, and global relay.
  */
+import { classifyAcceptanceFailure } from "../../agents/acceptance-failure-routing";
 export type IndependentReviewStatus = "passed" | "needs_rework" | "needs_recheck" | "needs_environment" | "needs_user";
 export type IndependentReviewDecision = {
     status: IndependentReviewStatus;
@@ -15,6 +16,7 @@ export type IndependentReviewDecision = {
     providerGapCount: number;
     spotCheckNeedsRecheck: boolean;
     flakyStabilityGroups: number;
+    acceptance_feedback: ReturnType<typeof classifyAcceptanceFailure>;
 };
 export declare function summarizeTestAgentBrowserProviderGaps(report: any, verdict?: any): {
     count: number;

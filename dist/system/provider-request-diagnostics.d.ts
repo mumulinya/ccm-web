@@ -1,4 +1,5 @@
 import { compareProviderWire, comparePublicProviderWire, type WireSnapshot } from './provider-wire-evidence';
+import { type ModelCacheFilters } from './model-cache-metrics';
 export type RequestAttribution = {
     purpose: string;
     requestClass: 'foreground_main' | 'auxiliary' | 'probe' | 'unattributed';
@@ -13,6 +14,11 @@ type Attempt = {
     requestId: string;
     logicalCallId: string;
     attempt: number;
+    validationRunId?: string;
+    validationOrdinal?: number;
+    httpStatus?: number;
+    configurationChanged?: boolean;
+    cacheIdentityPreserved?: boolean;
     attribution: RequestAttribution;
     protocol: string;
     model: string;
@@ -49,7 +55,147 @@ export declare function providerAttemptUsage(options: any, usage: any): void;
  */
 export declare function providerAttemptWireReuseEvidence(options: any): any;
 export declare function finishProviderAttempt(options: any, result: any): any;
-export declare function readProviderRequestDiagnostics(binding?: any): {
+export declare function readProviderRequestDiagnostics(binding?: any, filters?: ModelCacheFilters): {
+    requestGroups: {
+        main: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+        auxiliary: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+        probe: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+        unattributed: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+    };
+    contentStored: boolean;
+    request_hit_rate: number;
+    token_reuse_rate: number;
+    total_input_tokens: any;
+    cache_known_input_tokens: any;
+    cache_token_reporting_coverage: number;
+    baseline_only_rate: number;
+    cache_preparation_coverage: number;
+    logical_calls: number;
+    physical_attempts: number;
+    cache_reported_calls: number;
+    cache_unreported_calls: number;
+    reported_cost_usd: any;
+    estimated_cost_usd: any;
+    cost_unreported_attempts: number;
+    by_origin: {
+        [k: string]: number;
+    };
     recentRequests: {
         wireLayoutVersion: string;
         publicPrefixChecksum: string;
@@ -72,6 +218,11 @@ export declare function readProviderRequestDiagnostics(binding?: any): {
         requestId: string;
         logicalCallId: string;
         attempt: number;
+        validationRunId?: string;
+        validationOrdinal?: number;
+        httpStatus?: number;
+        configurationChanged?: boolean;
+        cacheIdentityPreserved?: boolean;
         attribution: RequestAttribution;
         protocol: string;
         model: string;
@@ -116,52 +267,5 @@ export declare function readProviderRequestDiagnostics(binding?: any): {
         previousBreakpointChecksums: any;
         contentStored: boolean;
     }[];
-    requestGroups: {
-        main: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-        auxiliary: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-        probe: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-        unattributed: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-    };
-    contentStored: boolean;
 };
 export {};

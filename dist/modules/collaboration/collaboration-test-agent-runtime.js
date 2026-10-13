@@ -225,6 +225,7 @@ function buildCoordinatorTestAgentHandoff(item, input) {
         return null;
     const runtime = (0, collaboration_1.resolveProjectRuntimeForTestAgentHandoff)(input.group, originalTarget);
     const task = input.sourceTask || {};
+    runtime.workDir = require("../../agents/dispatch-acceptance-workspace").resolveDispatchAcceptanceWorkspace(task.id, originalTarget, runtime.workDir, task.group_id || task.groupId);
     const previous = input.previousLedger || {};
     const verifierPrevious = buildMinimalVerifierLedger(previous, originalTarget);
     const changedFiles = (0, collaboration_1.collectCoordinatorChangedFiles)([
@@ -353,6 +354,7 @@ function buildCoordinatorTestAgentHandoff(item, input) {
         },
         metadata: {
             handoffSource: "group-main-agent-independent-review-gate",
+            ...require("../../agents/task-acceptance-service").taskAcceptanceVerificationMetadata(task.id, originalTarget),
             route: input.reworkRoute || item?.reworkRoute || null,
             reviewSubject: originalTarget,
             verifier: targetName,
@@ -510,10 +512,7 @@ function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrd
                 reportId: report.id,
                 artifactDir: report.artifactDir,
                 // 盖新鲜度戳：记录本次复核实际覆盖的变更集合，门禁据此发现"复核后代码又改了"。
-                ...require("./review-freshness").buildReviewFreshnessStamp([
-                    ...reviewedFiles,
-                    ...((handoff?.projects || []).flatMap((project) => (project?.changedFiles || []).map((file) => ({ path: file, project: project?.name })))),
-                ]),
+                ...require("./review-freshness").buildHandoffReviewFreshnessStamp(handoff, workOrder, reviewedFiles),
             }],
         reviewer: targetName || "test-agent",
         role: "independent_verifier",

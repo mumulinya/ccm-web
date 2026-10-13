@@ -37,20 +37,26 @@ function handleDelegatedInquiryProjectionsApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有目标资源的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
             }
             try {
+                if (projection.sourceRunId)
+                    require('./global-source-summary').assertSourceRunRead(require('../agents/global/global-agent-run-store').getGlobalAgentRun(projection.sourceRunId), principal);
+                const projects = projection.targetScope === 'project' ? [projection.targetId] : projection.requestedProjectIds || (require('../modules/collaboration/storage').loadGroups().find(group => group.id === projection.targetId)?.members || []).map(row => row.project).filter(Boolean);
+                for (const project of projects)
+                    require('./global-source-access').assertGlobalSourceProjectAccess(principal, project);
                 const result = await (0, delegated_inquiry_actions_1.performDelegatedInquiryAction)({
                     inquiryId,
                     revision: Number(payload?.revision || 0),
                     action: String(payload?.action || ""),
                     clarification: String(payload?.clarification || ""),
+                    principal,
                 });
                 res.setHeader("Cache-Control", "no-store");
                 (0, utils_1.sendJson)(res, { success: true, ...result });
             }
             catch (error) {
                 const code = String(error?.code || "DELEGATED_INQUIRY_ACTION_FAILED");
-                const status = code === "DELEGATED_INQUIRY_REVISION_CONFLICT" ? 409
+                const status = error.status || (/^SOURCE_(?:PROJECT_ACCESS_DENIED|PRINCIPAL_INACTIVE|PRINCIPAL_REQUIRED)$/.test(error.message) ? 403 : 0) || (code === "DELEGATED_INQUIRY_REVISION_CONFLICT" ? 409
                     : code === "DELEGATED_INQUIRY_NOT_FOUND" ? 404
-                        : code === "DELEGATED_INQUIRY_ACTION_NOT_ALLOWED" || code === "DELEGATED_INQUIRY_CLARIFICATION_REQUIRED" ? 400 : 500;
+                        : code === "DELEGATED_INQUIRY_ACTION_NOT_ALLOWED" || code === "DELEGATED_INQUIRY_CLARIFICATION_REQUIRED" ? 400 : 500);
                 (0, utils_1.sendJson)(res, { success: false, error: error?.message || "协作记录操作失败", code }, status);
             }
         }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "请求解析失败", code: error?.code || "INVALID_REQUEST" }, 400));
@@ -72,7 +78,17 @@ function handleDelegatedInquiryProjectionsApi(pathname, req, res, parsed) {
     res.setHeader("Cache-Control", "no-store");
     (0, utils_1.sendJson)(res, {
         success: true,
-        inquiries: (0, delegated_inquiry_projections_1.listDelegatedInquiryProjections)({ targetScope, targetId, limit: parsed?.query?.limit }),
+        inquiries: (0, delegated_inquiry_projections_1.listDelegatedInquiryProjections)({ targetScope, targetId, limit: parsed?.query?.limit }).filter(row => {
+            if (!row.sourceRunId)
+                return true; // Legacy records retain their existing target ACL.
+            try {
+                require('./global-source-summary').assertSourceRunRead(require('../agents/global/global-agent-run-store').getGlobalAgentRun(row.sourceRunId), principal);
+                return true;
+            }
+            catch {
+                return false;
+            }
+        }),
     });
     return true;
 }

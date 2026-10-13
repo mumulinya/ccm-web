@@ -11,6 +11,7 @@ export type TaskSessionMessage = {
         size?: number;
         content_type?: string;
         stored?: boolean;
+        attachment_ref?: string;
     }>;
     created_at: string;
 };
@@ -34,6 +35,11 @@ export type TaskSessionRecord = {
     run_ids: string[];
     dossier: any;
     messages: TaskSessionMessage[];
+    opening_state?: {
+        open: boolean;
+        reason: string;
+    };
+    runtime_bindings?: any[];
     pending_follow_up?: {
         message_id: string;
         content: string;
@@ -42,6 +48,8 @@ export type TaskSessionRecord = {
         mode?: "queue" | "steer";
         active_run_id?: string;
         attempt_id?: string;
+        spec_checksum?: string;
+        plan_revision?: number;
     } | null;
 };
 export declare function taskSessionArchiveState(task: any): {
@@ -62,8 +70,19 @@ export declare function taskSessionCreationState(task: any): {
 };
 export declare function taskSessionArchiveActions(task: any): string[];
 export declare function taskSessionOutputRevision(task: any): string;
+export declare function synchronizeTaskSessionSourceMessage(scope: string, scopeId: string, sessionId: string, item: any): void;
+/** Only backend-confirmed source relations call this; use the same version identity as replay. */
+export declare function appendTaskSessionSourceMessage(taskId: string, item: any, source?: any): TaskSessionMessage;
 export declare function taskSessionStorePath(): string;
 export declare function getTaskSession(taskId: string): TaskSessionRecord;
+export declare function listTaskSessionSummaries(): {
+    task_id: string;
+    session_id: string;
+    lifecycle: "running" | "awaiting_confirmation" | "planning" | "available";
+    creation_policy: "on_create" | "on_terminal";
+    materialized_at: string;
+    updated_at: string;
+}[];
 export declare function listTaskSessions(): TaskSessionRecord[];
 export declare function isTaskSessionAvailable(task: any): boolean;
 export declare function reconcileTaskSessions(): {
@@ -87,7 +106,7 @@ export declare function materializeTaskSession(taskInput: any): {
     reason: string;
     task_id: string;
 };
-export declare function appendTaskSessionMessage(taskId: string, input: any): TaskSessionMessage;
+export declare function appendTaskSessionMessage(taskId: string, input: any, trustedSourceTimestamp?: string): TaskSessionMessage;
 export declare function setTaskSessionPendingFollowUp(taskId: string, pending: TaskSessionRecord["pending_follow_up"]): {
     pending_follow_up: {
         message_id: string;
@@ -97,6 +116,8 @@ export declare function setTaskSessionPendingFollowUp(taskId: string, pending: T
         mode?: "queue" | "steer";
         active_run_id?: string;
         attempt_id?: string;
+        spec_checksum?: string;
+        plan_revision?: number;
     };
     revision: number;
     updated_at: string;
@@ -117,6 +138,11 @@ export declare function setTaskSessionPendingFollowUp(taskId: string, pending: T
     run_ids: string[];
     dossier: any;
     messages: TaskSessionMessage[];
+    opening_state?: {
+        open: boolean;
+        reason: string;
+    };
+    runtime_bindings?: any[];
 };
 export declare function buildTaskSessionDiscussionReply(taskId: string, question?: string): string;
 export declare function taskSessionEvents(taskId: string, after?: number): any[];

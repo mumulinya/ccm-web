@@ -83,9 +83,37 @@ ccm logs --follow     # 实时查看服务端轮转日志
 | **证据真实性与防重** | 只读失败有限重试（最多3次） + 真实哈希校验短路（file_unchanged） | 消除过度去重死锁，杜绝虚假文件命中，确保上下文证据真实 |
 | **Responses 原生保真** | reasoning/encrypted_content 完整回放 + 本地 Token 估算去重 | 原生思维链与加密项无损回放，修复本地 Token 虚增，严防跨域污染 |
 | **多 Agent 协作网络** | 全局 Agent + 群聊主 Agent + 项目主 Agent + 隔离项目 Worker | 明确角色职责边界：主 Agent 只读规划，子 Agent 隔离执行 |
+| **模型缓存重构与分派档位** | 模型缓存全场景准入 + 三档派发（light/standard/strict） + 范围申请审批 + 虚拟化长列表 | 消除模型缓存击穿，任务风险分档秒级响应与严苛隔离验收兼顾，长会话极速流畅 |
 | **Agent运行治理与可靠性** | 四级身份解耦 + Heartbeat幂等唤醒合并 + 6维证据断点自愈 + 预算硬停与Secret安全注入 | 彻底杜绝并发重复启动，崩溃断电自愈恢复，密钥零泄漏，长效运行高稳定 |
 | **任务工作流与自动化** | 三级分派策略（直通/规划/编排）+ 任务会话工作台 + Crontab 自动化调度引擎 | 轻量任务免冗长规划秒级执行，重型开发强制独立验收，支持定时任务自动化 |
 | **企业协同与多端集成** | 飞书双向会话与自动化工作报告 + 多协议终端 PTY + 可互动桌宠 | 多端消息直通工作区，会话事实自动生成可信工作日报/周报 |
+
+---
+
+## 4.3.0 重大里程碑与版本演进
+
+在 4.3.0 重大版本中，CCM 完成了模型缓存统一重设计与全链路被动观测（Model Cache Redesign & Passive Cache Observation）、第三方 Agent 三档派发策略与业务收口验证（Agent Dispatch Profiles & Closeout Validation）、全局源码访问与作用域导航运行时（Global Source Access & Scope Navigation）、以及本地性能优化与长对话虚拟化渲染（Local Performance Optimization & Virtualization）的全面落地：
+
+### 1. 模型缓存统一重设计与全链路命中审计（Model Cache Redesign & Passive Cache Observation）
+- **统一模型请求上下文与准入判定（model-cache-preparation & eligibility）**：构建确定性缓存准备层，全面覆盖三作用域会话压缩、项目记忆提取、规划与自验、RAG、网页摘要等所有模型调用入口。
+- **物理尝试与逻辑调用分离核算**：清晰区分重试的物理调用与最终生效的逻辑调用，准确核算真实 Token 与成本，修复直接输入（`inputTokens`）与 Provider 聚合用量（包含缓存）混淆导致的账单失真。
+- **长会话滚动指标与诊断看板（provider-cache-rolling-metrics）**：引入多时间窗口滚动命中率监控与被动观测机制，在不增加额外网络请求与探测的前提下，提供高保真的缓存命中与击穿追踪。
+
+### 2. 第三方 Agent 三档派发策略与业务收口验证（Agent Dispatch Profiles & Closeout Validation）
+- **三档结构化派发策略（light / standard / strict）**：
+  - **轻量档（light）**：适用于文案、配置与单文件低风险改动，使用最小 Receipt 模板，免去冗长 ACK 与记忆声明，直接执行真实快速检查自验。
+  - **标准档（standard）**：普通代码开发任务，默认共享串行工作区，强制生成 ACK、结构化工作单与主 Agent 自验。
+  - **严格档（strict）**：涉及权限、安全、数据库、发布与跨项目改动，强制绑定真实 Git linked worktree 物理隔离、完整 AcceptanceContract、Workspace Evidence 与 TestAgent 独立验收。
+- **细粒度路径边界与动态范围申请（Scope Expansion）**：明确建议路径（`recommendedPaths`）、受保护路径（`protectedPaths`）与禁止路径（`forbiddenPaths`）；支持通过 MCP 工具提交范围申请与审批（`scope-expansion`），在严防代码越权修改的同时支持合法跨目录变更。
+
+### 3. 全局源码访问与作用域导航运行时（Global Source Access & Scope Navigation）
+- **全局源码访问边界与历史绑定**：规范全局主 Agent 对各项目代码库的安全只读检索与多轮会话绑定，支持结构化源码摘要（`global-source-summary`）与模型安全内容透出。
+- **作用域导航运行时（Scope Navigation Runtime）**：打通跨项目、跨群聊与全局上下文的无缝导航与状态校验，生成权威导航验证报告（`scope-navigation-validation-report`）。
+- **前端源码证据抽屉（SourceEvidence.vue）**：在交互面板中直观呈现引用的源码片段、文件哈希、行号范围与校验和。
+
+### 4. 本地性能优化与长对话虚拟化渲染（Local Performance Optimization & Virtualization）
+- **前端单飞请求防重与长对话虚拟化**：引入 `readRequestSingleflight` 合并并发读取、`VirtualConversationList.vue` 虚拟滚动渲染与 `VirtualFileLines.vue` 超大文件逐行虚拟化，彻底消除百轮以上超长会话的卡顿与高内存占用。
+- **静态资源压缩与高性能只读服务**：支持静态资源预压缩（`static-compressed-assets.ts`）、独立只读性能工作线程（`readonly-performance-worker.ts`）与 Markdown 渲染记忆缓存（`markdownRenderMemo.js`），大幅提升首屏加载与消息流式推显流畅度。
 
 ---
 

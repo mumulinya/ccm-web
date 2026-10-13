@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.REVIEW_FRESHNESS_SCHEMA = void 0;
 exports.buildReviewChangeFingerprint = buildReviewChangeFingerprint;
 exports.buildReviewFreshnessStamp = buildReviewFreshnessStamp;
+exports.buildHandoffReviewFreshnessStamp = buildHandoffReviewFreshnessStamp;
 exports.readReviewFingerprint = readReviewFingerprint;
 exports.classifyReviewFreshness = classifyReviewFreshness;
 exports.applyReviewFreshnessToEvidence = applyReviewFreshnessToEvidence;
@@ -104,6 +105,18 @@ function buildReviewFreshnessStamp(reviewedChanges, at = new Date().toISOString(
         reviewed_change_fingerprint: fingerprint,
         reviewedChangeCount: fingerprint ? Number(fingerprint.split(":")[0]) : 0,
     };
+}
+/** Use the source-bound project's changed files. Report display strings are
+ * aliases, not additional changes, and must not duplicate qualified paths. */
+function buildHandoffReviewFreshnessStamp(handoff, workOrder, reviewedFiles) {
+    const projects = Array.isArray(handoff?.projects) && handoff.projects.length ? handoff.projects : workOrder?.projects || [];
+    const bound = projects.flatMap((project) => (project.changedFiles || []).map((file) => ({
+        ...(typeof file === "object" ? file : { path: file }), project: project.name,
+    })));
+    if (bound.length)
+        return buildReviewFreshnessStamp(bound);
+    return buildReviewFreshnessStamp((reviewedFiles || []).map(file => typeof file === "string" && projects.length === 1
+        ? { path: file, project: projects[0].name } : file));
 }
 function readReviewFingerprint(entry) {
     return String(entry?.reviewedChangeFingerprint

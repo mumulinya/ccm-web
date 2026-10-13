@@ -43,7 +43,7 @@ exports.testUnifiedModelConnection = testUnifiedModelConnection;
 exports.buildGroupMainAgentBoundary = buildGroupMainAgentBoundary;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const os = __importStar(require("os"));
+const runtime_paths_1 = require("../../core/runtime-paths");
 const credential_store_1 = require("../../core/credential-store");
 const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
@@ -61,7 +61,7 @@ exports.DEFAULT_GROUP_ORCHESTRATOR = {
     coordinatorProject: exports.COORDINATOR_PROJECT,
     maxDepth: 3,
 };
-exports.CCM_DIR = path.join(os.homedir(), ".ccm");
+exports.CCM_DIR = runtime_paths_1.CCM_DIR;
 const ORCHESTRATOR_CONFIG_FILE = path.join(exports.CCM_DIR, "group-orchestrator-config.json");
 function defaultOrchestratorConfig() {
     return {
@@ -910,9 +910,8 @@ async function testUnifiedModelConnection() {
             providerContextCache: probeCache,
             requestAttribution: probeCache.requestAttribution,
         });
-        // Connection health is intentionally independent from optional cache
-        // capability evidence. A cache probe may degrade without making the
-        // configured model unavailable.
+        // Read existing evidence only; connection checks do not launch extra
+        // cache probes. Normal business usage calibrates cache capabilities.
         const latencyMs = Date.now() - startedAt;
         return {
             success: true,

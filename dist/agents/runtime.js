@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AGENT_RUNTIMES = void 0;
 exports.captureAgentRuntimeVersionSnapshot = captureAgentRuntimeVersionSnapshot;
+exports.readRuntimeLaunchMetadata = readRuntimeLaunchMetadata;
 exports.normalizeAgentRuntimeId = normalizeAgentRuntimeId;
 exports.getAgentRuntime = getAgentRuntime;
 exports.buildAgentCommand = buildAgentCommand;

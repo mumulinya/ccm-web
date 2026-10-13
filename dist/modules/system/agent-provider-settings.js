@@ -67,6 +67,7 @@ exports.usesCodexCliLogin = usesCodexCliLogin;
 exports.isDevelopmentAgentEnabled = isDevelopmentAgentEnabled;
 exports.isDevelopmentAgentReady = isDevelopmentAgentReady;
 exports.agentProviderSettingsFile = agentProviderSettingsFile;
+const agent_command_resolution_async_1 = require("./agent-command-resolution-async");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -810,9 +811,9 @@ async function commandVersionAsync(command, installed) {
 }
 async function resolveCursorAgentCommandAsync() {
     if (await commandExistsAsync("cursor-agent"))
-        return resolveWindowsCommandPath("cursor-agent");
+        return (0, agent_command_resolution_async_1.resolveWindowsCommandPathAsync)("cursor-agent");
     if (await commandExistsAsync("agent"))
-        return resolveWindowsCommandPath("agent");
+        return (0, agent_command_resolution_async_1.resolveWindowsCommandPathAsync)("agent");
     if (process.platform === "win32") {
         const localAppData = String(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"));
         for (const name of ["cursor-agent.cmd", "agent.cmd"]) {
@@ -840,6 +841,7 @@ function collectAgentProviderProbes() {
     const claudeCommand = resolveClaudeCodeCommand();
     return {
         cursorCommand,
+        antigravityCommand,
         claudeCommand,
         cursorInstalled: commandExists(cursorCommand),
         cursor: cursorStatus(cursorCommand),
@@ -858,8 +860,8 @@ function collectAgentProviderProbes() {
 }
 async function collectAgentProviderProbesAsync() {
     const cursorCommand = await resolveCursorAgentCommandAsync();
-    const antigravityCommand = resolveAntigravityCliCommand();
-    const claudeCommand = resolveClaudeCodeCommand();
+    const antigravityCommand = await (0, agent_command_resolution_async_1.resolveAntigravityCliCommandAsync)();
+    const claudeCommand = await (0, agent_command_resolution_async_1.resolveClaudeCodeCommandAsync)();
     // 阶段一：轻量存在性探测（where.exe / stat）并行执行
     const [cursorInstalled, codexInstalled, geminiInstalled, openCodeInstalled, claudeInstalled] = await Promise.all([
         commandExistsAsync(cursorCommand),
@@ -879,6 +881,7 @@ async function collectAgentProviderProbesAsync() {
     ]);
     return {
         cursorCommand,
+        antigravityCommand,
         cursorInstalled,
         cursor,
         codexInstalled,
@@ -956,7 +959,7 @@ function assembleAgentProviderStatuses(probes) {
         },
         gemini: {
             provider: "gemini",
-            command: resolveAntigravityCliCommand(),
+            command: probes.antigravityCommand,
             installed: probes.geminiInstalled,
             version: probes.versions.gemini,
             ...geminiState,
@@ -976,7 +979,7 @@ function assembleAgentProviderStatuses(probes) {
         },
         claudecode: {
             provider: "claudecode",
-            command: probes.claudeCommand || resolveClaudeCodeCommand(),
+            command: probes.claudeCommand,
             installed: probes.claudeInstalled,
             version: probes.versions.claude,
             authState: claudeEvidence?.valid ? "configured" : claudeReady ? "credential_detected" : "not_configured",
@@ -1000,6 +1003,7 @@ function storeAgentProviderStatuses(value) {
 // 不写入 STATUS_CACHE，避免占位数据顶掉真实探测结果。
 function pendingAgentProviderStatuses() {
     return assembleAgentProviderStatuses({
+        antigravityCommand: String(process.env.CCM_ANTIGRAVITY_CLI_COMMAND || 'agy'),
         cursorCommand: "cursor-agent",
         claudeCommand: "claude",
         cursorInstalled: false,

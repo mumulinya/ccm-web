@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WORKSPACE_EDIT_MCP_SERVER_NAME = void 0;
 exports.buildWorkspaceEditMcpServerConfig = buildWorkspaceEditMcpServerConfig;
+exports.handleWorkspaceEditMcpTool = handleWorkspaceEditMcpTool;
 exports.workspaceEditMcpTools = workspaceEditMcpTools;
 exports.runWorkspaceEditMcpServer = runWorkspaceEditMcpServer;
 const crypto = __importStar(require("crypto"));
@@ -43,6 +44,7 @@ const path = __importStar(require("path"));
 const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
 const unified_evidence_registry_1 = require("../system/unified-evidence-registry");
+const dispatch_profile_1 = require("../agents/dispatch-profile");
 exports.WORKSPACE_EDIT_MCP_SERVER_NAME = "ccm__workspace_edit";
 const EDIT_ROLES = ["project-child-agent"];
 const SENSITIVE_NAMES = /(?:^|[-_.])(?:credentials?|secrets?|private[-_.]?key|access[-_.]?key|service[-_.]?account|firebase[-_.]?admin)(?:[-_.]|$)|^\.env(?:\.|$)|^\.(?:npmrc|pypirc|netrc)$|^id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$|\.(?:pem|p12|pfx|key|keystore|jks)$/i;
@@ -101,7 +103,7 @@ function normalizeRelative(value) {
     return String(value || "").trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 function assertSafeRelative(value) {
-    const relative = normalizeRelative(value);
+    const relative = (0, dispatch_profile_1.normalizeDispatchPath)(value);
     if (!relative || path.isAbsolute(relative) || relative.split("/").includes(".."))
         throw new Error("文件路径无效或越过项目边界");
     if (relative.split("/").some(part => SENSITIVE_NAMES.test(part)))
@@ -169,7 +171,14 @@ function assertFence(context, args, paths) {
         throw new Error("只有项目执行子Agent可以修改工作区");
     const task = (0, internal_mcp_task_store_1.getBoundInternalMcpTask)(context);
     const workItemId = String(args?.work_item_id || "");
-    const expectedWorkItem = String(task.work_item_id || task.workItemId || task.id || "");
+    let expectedWorkItem = String(task.work_item_id || task.workItemId || task.id || "");
+    if (task.dispatch_profile_snapshot && context.taskAgentSessionId) {
+        const store = require("../agents/agent-run-store");
+        const runs = store.listAgentRuns({ taskId: task.id }).filter((run) => run.taskAgentSessionId === context.taskAgentSessionId && !["succeeded", "failed", "cancelled"].includes(run.status));
+        if (runs.length !== 1)
+            throw new Error("当前工作区会话没有唯一活跃 Run");
+        expectedWorkItem = store.listAgentRunEvents(runs[0].runId).find((event) => event.eventType === "execution.work_item_bound")?.payload?.workItemId || (task.work_items?.length === 1 ? task.work_items[0].id : expectedWorkItem);
+    }
     const attempt = Math.max(1, Number(args?.attempt || 0));
     const expectedAttempt = Math.max(1, Number(task.attempt || task.agent_communication_attempt || context.communicationAttempt || 1));
     const leaseId = String(args?.lease_id || "");
@@ -181,7 +190,19 @@ function assertFence(context, args, paths) {
     if (expectedLease && leaseId !== expectedLease)
         throw new Error("工作区编辑lease已过期或缺失");
     const allowed = allowedPaths(task);
-    paths.forEach(relative => assertAllowed(relative, allowed));
+    if (task.dispatch_profile_snapshot) {
+        const scope = (0, dispatch_profile_1.resolveDispatchScope)(task);
+        const item = (task.work_items || []).find((row) => (row.id || row.workItemId) === workItemId);
+        scope.recommendedPaths = [...new Set([...scope.recommendedPaths, ...allowed, ...(item?.dispatchContract?.files || [])])];
+        scope.forbiddenPaths = [...new Set([...scope.forbiddenPaths, ...(item?.dispatchContract?.forbiddenPaths || [])])];
+        paths.forEach(relative => {
+            const decision = (0, dispatch_profile_1.evaluateDispatchPath)(relative, scope, (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task).profile, context.workDir);
+            if (!decision.allowed)
+                throw new Error(`工作区路径未授权：${relative}（${decision.reason}）`);
+        });
+    }
+    else
+        paths.forEach(relative => assertAllowed(relative, allowed));
     return { task, workItemId, attempt, leaseId: expectedLease || leaseId, allowed };
 }
 function readTextFile(file) {
@@ -354,7 +375,9 @@ function deletePath(context, args) {
     const recorded = recordMutation(context, fence, "delete_path", [target.relative], beforeChecksum, "deleted");
     return { success: true, schema: "ccm-workspace-edit-result-v1", action: "delete_path", path: target.relative, beforeChecksum, status: "deleted", evidenceId: recorded.evidence.evidenceId, repoStateIdentity: recorded.repoStateIdentity, contentStored: false };
 }
-async function callTool(context, name, args) {
+async function handleWorkspaceEditMcpTool(context, name, args) {
+    if (["write_file", "apply_patch", "move_path", "delete_path"].includes(name))
+        require("./dispatch-scope-tools").assertBoundDispatchControl(context);
     if (name === "apply_patch")
         return applyPatch(context, args);
     if (name === "write_file")
@@ -366,7 +389,7 @@ async function callTool(context, name, args) {
     throw new Error(`未知工作区编辑工具：${name}`);
 }
 function workspaceEditMcpTools() { return tools.map(tool => ({ ...tool })); }
-function runWorkspaceEditMcpServer() { (0, internal_mcp_runtime_1.runInternalMcpServer)({ name: exports.WORKSPACE_EDIT_MCP_SERVER_NAME, version: "1.0.0", tools, callTool }); }
+function runWorkspaceEditMcpServer() { (0, internal_mcp_runtime_1.runInternalMcpServer)({ name: exports.WORKSPACE_EDIT_MCP_SERVER_NAME, version: "1.0.0", tools, callTool: handleWorkspaceEditMcpTool }); }
 if (require.main === module)
     runWorkspaceEditMcpServer();
 //# sourceMappingURL=workspace-edit-mcp.js.map

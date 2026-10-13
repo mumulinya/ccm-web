@@ -262,7 +262,7 @@ function getGlobalMissionChildDeliveryEvidence(task, deps) {
     };
 }
 function globalMissionChildGatePassedFromEvidence(task, deps, evidence) {
-    if (!task || task.status !== "done")
+    if (!task || !["done", "completed"].includes(task.status))
         return false;
     if (!evidence.merge_passed)
         return false;
@@ -331,7 +331,7 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
             target_type: child.mission_target?.type || child.assign_type,
             target: child.mission_target?.name || child.group_id || child.target_project || "",
             status: child.status,
-            display_status: child.status === "done" && !gatePassed ? "reviewing" : child.status,
+            display_status: ["done", "completed"].includes(child.status) && !gatePassed ? "reviewing" : child.status,
             status_detail: child.status_detail || child.result || "",
             gate_passed: gatePassed,
             actual_file_change_count: missionActualFileChangeCount(child),
@@ -352,9 +352,10 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
     const completed = rows.filter((item) => item.gate_passed).length;
     const passed = rows.filter((item) => item.gate_passed).length;
     const failed = rows.filter((item) => item.status === "failed").length;
-    const blocked = rows.filter((item) => item.status === "failed" || item.blockers.length > 0 || (item.status === "done" && !item.gate_passed)).length;
-    const reviewing = rows.filter((item) => item.status === "done" && !item.gate_passed).length;
-    const pending = rows.filter((item) => !item.gate_passed && !["done", "failed"].includes(String(item.status || ""))).length;
+    const blocked = rows.filter((item) => ["failed", "blocked", "waiting_user", "cancelled", "recovery_required"].includes(item.status)
+        || item.blockers.length > 0 || (["done", "completed"].includes(item.status) && !item.gate_passed)).length;
+    const reviewing = rows.filter((item) => ["done", "completed"].includes(item.status) && !item.gate_passed).length;
+    const pending = rows.filter((item) => !item.gate_passed && !["done", "completed", "failed", "blocked", "waiting_user", "cancelled", "recovery_required"].includes(String(item.status || ""))).length;
     const allPassed = rows.length > 0 && passed === rows.length;
     const now = new Date().toISOString();
     const actualFileChanges = rows

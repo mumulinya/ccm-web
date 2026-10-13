@@ -234,7 +234,7 @@ export declare function collectCompletionEvidence(input: MainAgentWorkchainInput
     risks: string[];
 };
 export declare function hasExecutableWorkEvidence(input: MainAgentWorkchainInput, evidence: ReturnType<typeof collectCompletionEvidence>): boolean;
-export declare function hasStrongWorkchainVerificationEvidence(evidence: ReturnType<typeof collectCompletionEvidence>): boolean;
+export declare function hasStrongWorkchainVerificationEvidence(evidence: ReturnType<typeof collectCompletionEvidence>): any;
 export declare function workchainVerificationFailureText(item: any): boolean;
 export declare function isBareWorkchainAcceptanceLine(item: any): boolean;
 export declare function workchainAcceptanceFailureText(item: any): boolean;

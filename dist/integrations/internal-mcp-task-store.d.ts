@@ -25,18 +25,7 @@ export declare function appendInternalMcpTaskJournal(context: InternalMcpTaskCon
 }): InternalMcpTaskJournalEntry;
 export declare function publicInternalMcpTaskContext(context: InternalMcpTaskContext): {
     schema: string;
-    task: {
-        id: any;
-        title: string;
-        goal: string;
-        status: string;
-        phase: string;
-        acceptance_criteria: string[];
-        constraints: string[];
-        target_project: string;
-        parent_task_id: string;
-        work_items: any;
-    };
+    task: any;
     binding: {
         project: string;
         role: import("./internal-mcp-runtime").InternalMcpAgentRole;

@@ -45,9 +45,13 @@ const utils_1 = require("../core/utils");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const acceptance_contract_1 = require("./acceptance-contract");
 const acceptance_workspace_1 = require("./acceptance-workspace");
+const acceptance_ledger_cycle_1 = require("./acceptance-ledger-cycle");
 const location = (taskId) => path.join(process.env.CCM_ACCEPTANCE_STORE_DIR || path.join(process.env.CCM_TASK_STORE_DIR || utils_1.CCM_DIR, "acceptance"), `${(0, acceptance_contract_1.acceptanceHash)(taskId)}.json`);
-function readAcceptanceLedger(taskId) {
-    return (0, atomic_json_file_1.readJsonWithBackup)(location(taskId), null);
+function readAcceptanceLedger(taskId, contractChecksum = "") {
+    const ledger = (0, atomic_json_file_1.readJsonWithBackup)(location(taskId), null);
+    if (!contractChecksum || ledger?.contract.checksum === contractChecksum)
+        return ledger;
+    return ledger?.history?.find(row => row.contract.checksum === contractChecksum) || null;
 }
 const environmentFingerprint = () => (0, acceptance_contract_1.acceptanceHash)({ node: process.version, platform: process.platform, arch: process.arch });
 function registerAcceptanceExecution(contract, input) {
@@ -60,9 +64,8 @@ function registerAcceptanceExecution(contract, input) {
         throw new Error("acceptance_project_mismatch");
     return (0, atomic_json_file_1.withFileLock)(location(contract.taskId), () => {
         const old = readAcceptanceLedger(contract.taskId);
-        if (old && old.contract.checksum !== contract.checksum)
-            throw new Error("acceptance_contract_revision_requires_new_generation");
-        const ledger = old || { contract: JSON.parse(JSON.stringify(contract)), executions: [], observations: [] };
+        const ledger = old && old.contract.checksum !== contract.checksum ? (0, acceptance_ledger_cycle_1.acceptanceLedgerForNewCycle)(old, contract)
+            : old || { contract: JSON.parse(JSON.stringify(contract)), executions: [], observations: [] };
         const existing = ledger.executions.find(r => r.workItemId === input.workItemId && r.projectId === input.projectId && r.executionSessionId === input.executionSessionId && r.attempt === input.attempt);
         if (existing)
             return existing;
@@ -197,7 +200,7 @@ function evaluateAcceptanceLedger(task) {
             continue;
         }
         const current = (0, acceptance_workspace_1.captureAcceptanceSnapshot)(run.root, contract, projectId);
-        const audit = (0, acceptance_workspace_1.auditAcceptanceScope)(contract, projectId, run.baseline, current);
+        const audit = require("./dispatch-acceptance-scope").auditDispatchAcceptanceScope(task, contract, projectId, work.id, run.baseline, current, (0, acceptance_workspace_1.auditAcceptanceScope)(contract, projectId, run.baseline, current));
         scopes.push({ projectId, ...audit });
         if (audit.status !== "passed")
             issues.push(`scope_audit_${audit.status}:${projectId}`);

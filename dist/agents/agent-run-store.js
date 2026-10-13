@@ -47,6 +47,7 @@ exports.transitionAgentRun = transitionAgentRun;
 exports.claimAgentRunLeaseInTransaction = claimAgentRunLeaseInTransaction;
 exports.claimAgentRunLease = claimAgentRunLease;
 exports.appendAgentRunEvent = appendAgentRunEvent;
+exports.appendAgentRunEventInTransaction = appendAgentRunEventInTransaction;
 exports.touchAgentRunLease = touchAgentRunLease;
 exports.updateAgentRunBindings = updateAgentRunBindings;
 exports.heartbeatAgentRunLease = heartbeatAgentRunLease;
@@ -63,6 +64,7 @@ exports.getAgentRunMetrics = getAgentRunMetrics;
 const crypto = __importStar(require("crypto"));
 const task_store_1 = require("../core/task-store");
 const agent_run_lifecycle_1 = require("./agent-run-lifecycle");
+const credential_store_1 = require("../core/credential-store");
 const agent_run_types_1 = require("./agent-run-types");
 function now() { return new Date().toISOString(); }
 function id(prefix) { return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`; }
@@ -94,7 +96,7 @@ function sanitizeStoredValue(value, key = "", depth = 0) {
     if (depth > 4)
         return "[truncated]";
     if (typeof value === "string")
-        return value.slice(0, 1000);
+        return (0, credential_store_1.redactSensitiveText)(value).slice(0, 1000);
     if (value === null || value === undefined || typeof value !== "object")
         return value;
     if (Array.isArray(value))
@@ -409,12 +411,19 @@ function claimAgentRunLeaseInTransaction(db, runId, ownerId, ttlMs = 120_000, re
     const activeOtherOwner = run.leaseOwnerId && run.leaseOwnerId !== owner && Date.parse(run.leaseExpiresAt || "") > Date.now();
     if (activeOtherOwner)
         return { acquired: false, reason: "lease_held", run };
-    const leaseId = text(requestedLeaseId) || run.leaseId || id("lease");
+    const continuingLease = run.leaseOwnerId === owner && Date.parse(run.leaseExpiresAt || "") > Date.now();
+    if (continuingLease && text(requestedLeaseId) && text(requestedLeaseId) !== run.leaseId) {
+        return { acquired: false, reason: "lease_lost", run };
+    }
+    // Ownership changes and expired claims get a new fencing identity. An old
+    // Runner receipt cannot authorize actions under a replacement lease.
+    const leaseId = continuingLease ? run.leaseId : run.leaseId ? id("lease") : text(requestedLeaseId) || id("lease");
     const nextVersion = run.leaseVersion + 1;
     const nextStatus = ["created", "queued"].includes(run.status) ? "leased" : run.status;
     const expiresAt = new Date(expiresMs).toISOString();
     db.prepare(`UPDATE agent_runs SET status = ?, lease_id = ?, lease_owner_id = ?, lease_expires_at = ?,
     lease_version = ?, last_heartbeat_at = ?, updated_at = ? WHERE run_id = ?`).run(nextStatus, leaseId, owner, expiresAt, nextVersion, at, at, runId);
+    db.prepare("UPDATE agent_task_checkouts SET lease_id = ?, owner_id = ?, expires_at = ? WHERE run_id = ? AND status = 'active'").run(leaseId, owner, expiresAt, runId);
     insertEvent(db, { ...run, status: nextStatus }, {
         eventType: "run.lease_claimed", status: nextStatus, message: "AgentRun 租约已获取",
         payload: { ownerId: owner, leaseId, leaseVersion: nextVersion, expiresAt },
@@ -429,12 +438,11 @@ function claimAgentRunLease(runId, ownerId, ttlMs = 120_000, requestedLeaseId = 
     return (0, task_store_1.withImmediateTaskStoreTransaction)(db => claimAgentRunLeaseInTransaction(db, runId, owner, ttlMs, requestedLeaseId));
 }
 function appendAgentRunEvent(runId, event) {
-    return (0, task_store_1.withImmediateTaskStoreTransaction)(db => {
-        const run = resolveRun(db, runId);
-        if (!run)
-            return null;
-        return insertEvent(db, run, event);
-    });
+    return (0, task_store_1.withImmediateTaskStoreTransaction)(db => appendAgentRunEventInTransaction(db, runId, event));
+}
+function appendAgentRunEventInTransaction(db, runId, event) {
+    const run = resolveRun(db, runId);
+    return run ? insertEvent(db, run, event) : null;
 }
 function touchAgentRunLease(runId, leaseId = "") {
     return (0, task_store_1.withImmediateTaskStoreTransaction)(db => {
@@ -488,10 +496,14 @@ function heartbeatAgentRunLease(runId, ownerId, leaseId = "", ttlMs = 120_000) {
         if (run.leaseOwnerId !== owner || (text(leaseId) && run.leaseId !== text(leaseId))) {
             return { renewed: false, reason: "lease_lost", run };
         }
+        if (Date.parse(run.leaseExpiresAt || "") <= Date.now() || run.status === "recovery_required") {
+            return { renewed: false, reason: "lease_expired", run };
+        }
         const at = now();
         const expiresAt = new Date(Date.now() + Math.max(5_000, Number(ttlMs || 120_000))).toISOString();
         db.prepare("UPDATE agent_runs SET lease_expires_at = ?, last_heartbeat_at = ?, updated_at = ? WHERE run_id = ?")
             .run(expiresAt, at, at, runId);
+        db.prepare("UPDATE agent_task_checkouts SET expires_at = ? WHERE run_id = ? AND lease_id = ? AND status = 'active'").run(expiresAt, runId, run.leaseId);
         return { renewed: true, reason: "renewed", run: resolveRun(db, runId) };
     });
 }
@@ -578,7 +590,7 @@ function listAgentRunUsage(runId) {
     })));
 }
 function reconcileLegacyAgentRuns() {
-    const tasks = (0, task_store_1.loadTasksFromSqlite)();
+    const tasks = require('../core/task-query').listUnfinishedTasks();
     let created = 0;
     let checked = 0;
     for (const task of tasks) {
@@ -588,8 +600,9 @@ function reconcileLegacyAgentRuns() {
         checked += 1;
         const taskId = text(task.id);
         const executionId = text(task.execution_id || task.executionId || task.global_run_id || task.globalRunId);
-        const existing = listAgentRuns({ taskId }).find(run => run.source === "legacy_reconciled");
-        if (existing)
+        // Frozen tasks and tasks already owned by AgentRun are not legacy. A
+        // restart must never materialize a second recovery run beside them.
+        if (task.task_spec?.schema === "ccm-task-spec-v1" || listAgentRuns({ taskId }).length)
             continue;
         const runtimeId = text(task.runtime || task.agent_type || task.agentType || task.agent) || "legacy";
         const result = createAgentRun({
@@ -627,6 +640,8 @@ function reconcileAgentRunLeases(maxAgeMs = 5 * 60_000) {
     let recovered = 0;
     for (const row of candidates) {
         checked += 1;
+        if (row.lease_owner_id && Date.parse(String(row.lease_expires_at || "")) > Date.now())
+            continue;
         const heartbeat = Date.parse(String(row.last_heartbeat_at || row.updated_at || ""));
         if (Number.isFinite(heartbeat) && heartbeat > cutoff)
             continue;

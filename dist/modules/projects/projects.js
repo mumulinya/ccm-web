@@ -753,7 +753,7 @@ async function stopProject(projectName, explicit = true) {
 }
 async function reconcileProjectFeishuConnections(port) {
     const results = [];
-    const processRows = managedProcessRows();
+    const processRows = await require('./managed-process-query').queryManagedProcessesAsync();
     const currentControlBotPid = Number(getControlBotPid() || 0);
     for (const duplicatePid of discoverOwnedChannelRootPids(CONTROL_BOT_NAME, processRows)) {
         if (duplicatePid === currentControlBotPid)
@@ -1982,11 +1982,14 @@ type = "${finalPlatform}"${platformOptionsToml}
             const sessionId = (0, project_validation_1.validateSessionId)(decodeURIComponent(sessionDetailMatch[2]));
             const detail = (0, sessions_1.getSessionDetail)(projectName, sessionId);
             if (detail) {
+                const historyPage = parsed.query?.history_page === '1'
+                    ? require('../../system/conversation-history-page').conversationHistoryPage(detail.history || [], `project:${projectName}:${sessionId}`, parsed.query) : null;
                 const executionPage = (0, group_orchestrator_config_1.loadOrchestratorConfig)().ccStyleExecutionDisplayEnabled === false
                     ? { events: [] }
                     : (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ scope: "project", scopeId: projectName, exactSessionId: sessionId, limit: 500 });
                 (0, utils_1.sendJson)(res, {
                     ...detail,
+                    ...(historyPage ? { history: historyPage.items, history_pagination: historyPage.pagination } : {}),
                     // Safe event projections only. Source text and raw tool output are
                     // deliberately absent, matching the dedicated execution endpoint.
                     execution_events: executionPage.events || [],
@@ -1996,7 +1999,7 @@ type = "${finalPlatform}"${platformOptionsToml}
                 (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
         }
         catch (e) {
-            (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            (0, utils_1.sendJson)(res, { error: e.message, code: e.code }, Number(e.status || 400));
         }
         return true;
     }

@@ -33,7 +33,7 @@ export declare function runGlobalNativeQueryCall(input: {
     }>;
     run: any;
     signal?: AbortSignal;
-    executeTool: (name: string, args: any, run: any, signal?: AbortSignal) => Promise<any>;
+    executeTool: (name: string, args: any, run: any, signal?: AbortSignal, toolCallId?: string) => Promise<any>;
     onEvent?: (event: any) => void;
     onUsage?: (usage: any) => void;
     onContextUsageDelta?: (delta: string) => void;

@@ -99,6 +99,10 @@ async function defaultProbeCaller(config, request) {
         retry: false,
         nativeTools: request.nativeTools,
         providerContextCache: request.providerContextCache,
+        executionOrigin: 'probe',
+        requestAttribution: { purpose: 'provider_cache_capability_probe', requestClass: 'probe',
+            scope: request.providerContextCache?.scope, scopeId: request.providerContextCache?.scopeId,
+            exactSessionId: request.providerContextCache?.sessionId },
         onUsage: (value) => { usage = value; },
         onResponseMetadata: (value) => {
             responseId = String(value?.responseId || "");

@@ -43,6 +43,10 @@ exports.providerAttemptWireReuseEvidence = providerAttemptWireReuseEvidence;
 exports.finishProviderAttempt = finishProviderAttempt;
 exports.readProviderRequestDiagnostics = readProviderRequestDiagnostics;
 const crypto_1 = require("crypto");
+const scope_navigation_execution_1 = require("./scope-navigation-execution");
+const cache_validation_budget_1 = require("./cache-validation-budget");
+const perf_hooks_1 = require("perf_hooks");
+const performance_monitor_1 = require("./performance-monitor");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
@@ -50,6 +54,8 @@ const provider_wire_evidence_1 = require("./provider-wire-evidence");
 const conversation_attempt_1 = require("../agents/conversation-attempt");
 const provider_request_cache_fields_1 = require("./provider-request-cache-fields");
 const provider_usage_1 = require("./provider-usage");
+const model_request_context_1 = require("./model-request-context");
+const model_cache_metrics_1 = require("./model-cache-metrics");
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const key = Symbol('ccm-request-audit');
 const safe = (value) => String(value || '').replace(/[\0\r\n\t]/g, ' ').slice(0, 240);
@@ -119,15 +125,21 @@ const append = (row) => { try {
 }
 catch { } };
 function withRequestDiagnostics(options, config) {
-    return options[key] ? options : { ...options,
+    if (options[key] && (!config || options._modelRequestContextResolved))
+        return options;
+    return { ...(config ? (0, model_request_context_1.attachModelRequestContext)(config, options) : options),
+        ...(config ? { _modelRequestContextResolved: true } : {}),
+        ...(config ? { _modelCacheCostRates: { input: config.inputCostPerMillionTokens ?? config.input_cost_per_million_tokens,
+                read: config.cacheReadCostPerMillionTokens ?? config.cache_read_cost_per_million_tokens,
+                create: config.cacheCreationCostPerMillionTokens ?? config.cache_creation_cost_per_million_tokens } } : {}),
         ...(config?.requestAttribution && !options.requestAttribution ? { requestAttribution: config.requestAttribution } : {}),
         ...(config?.contextEngineSessionId && !config?.requestAttribution && !options.requestAttribution && !options.providerContextCache ? {
             requestAttribution: { scope: config.contextEngineScope, scopeId: config.contextEngineScopeId,
                 exactSessionId: config.contextEngineSessionId, purpose: config.contextEngineSource || 'unrecorded', requestClass: 'auxiliary' },
-        } : {}), [key]: { logicalCallId: (0, crypto_1.randomUUID)(), attempt: 0 } };
+        } : {}), [key]: options[key] || { logicalCallId: (0, crypto_1.randomUUID)(), attempt: 0 } };
 }
 function attribution(options) {
-    const binding = options.providerContextCache || options.provider_context_cache || {};
+    const binding = options.providerContextCache || options.provider_context_cache || options._modelCacheBinding || {};
     const explicit = options.requestAttribution || binding.requestAttribution;
     const tracking = options.promptCacheTracking || options.prompt_cache_tracking || {};
     const scope = explicit?.scope || binding.scope || (tracking.groupId ? 'group' : '');
@@ -227,6 +239,7 @@ function startProviderAttempt(options, config, body, protocol, endpoint) {
         config.userId || config.user_id || 'local-user', config.credentialProfileId || config.credential_profile_id || '', cacheDir()])).digest('hex');
     const history = rows();
     const agentRole = safe(options.providerContextCache?.cacheAffinity?.agentRole || owner.requestClass);
+    const recentPhysical = owner.exactSessionId ? history.find(row => same(row.attribution, owner) && row.attribution.purpose === owner.purpose) : undefined;
     const previous = owner.exactSessionId ? history.find(row => same(row.attribution, owner)
         && row.attribution.purpose === owner.purpose && row.protocol === protocol && row.route === route && row.model === String(config.model || body.model || '')) : undefined;
     // Public-prefix evidence may compare different project/group/global scopes
@@ -262,10 +275,27 @@ function startProviderAttempt(options, config, body, protocol, endpoint) {
                 : 'local_first_request';
     if (isFirstLocalRequest)
         activeWarmupProfiles.set(warmupProfileChecksum, activeWarmupCount + 1);
-    const row = { schema: 'ccm-provider-request-attempt-v1', requestId: (0, crypto_1.randomUUID)(), logicalCallId: state.logicalCallId,
+    const permit = options._cacheValidationPermit;
+    const successful = owner.exactSessionId ? history.find(row => row.status === 'completed' && same(row.attribution, owner)
+        && row.attribution.purpose === owner.purpose && row.protocol === protocol && row.route === route && row.model === String(config.model || body.model || '')) : undefined;
+    const row = { schema: 'ccm-provider-request-attempt-v1', requestId: permit?.requestId || (0, crypto_1.randomUUID)(), logicalCallId: state.logicalCallId,
         attempt: ++state.attempt, attribution: owner, protocol, model: safe(config.model || body.model), startedAt: new Date().toISOString(), status: 'started',
-        snapshot, route, endpointFingerprint: actualEndpointFingerprint, agentRole, cacheKeyScope: String(contextPlan.automaticCacheOptimization?.cacheKeyScope || 'conversation_branch'), warmStartKind, concurrentWarmupDetected,
-        warmupProfileChecksum, cacheFieldEvidence: cacheFields, wireReuseEvidence: { ...(0, provider_wire_evidence_1.compareProviderWire)(previous?.snapshot, snapshot),
+        snapshot, route, ...(0, model_request_context_1.modelCacheContextProjection)(options), validationRunId: permit?.validationRunId,
+        validationOrdinal: permit?.ordinal, validationTraceId: permit?.trace_id, transport: permit?.transport,
+        requestIntervalMs: recentPhysical ? Math.max(0, Date.now() - Date.parse(recentPhysical.startedAt)) : null,
+        successfulRequestIntervalMs: successful ? Math.max(0, Date.now() - Date.parse(successful.startedAt)) : null,
+        lastSuccessfulComparison: { ...(0, provider_wire_evidence_1.compareProviderWire)(successful?.snapshot, snapshot), comparedRequestId: successful?.requestId },
+        recentPhysicalComparison: { ...(0, provider_wire_evidence_1.compareProviderWire)(recentPhysical?.snapshot, snapshot), comparedRequestId: recentPhysical?.requestId },
+        completePrefixPreserved: previous ? ['append_only', 'unchanged'].includes((0, provider_wire_evidence_1.compareProviderWire)(previous.snapshot, snapshot).comparison)
+            && previous.cacheFieldEvidence?.promptCacheKeyChecksum === cacheFields.promptCacheKeyChecksum : null,
+        cacheIdentityPreserved: previous ? previous.cacheFieldEvidence?.promptCacheKeyChecksum === cacheFields.promptCacheKeyChecksum : null,
+        configurationChanged: recentPhysical ? recentPhysical.route !== route || recentPhysical.protocol !== protocol || recentPhysical.model !== String(config.model || body.model || '') : false,
+        transportFallbackReason: options.cacheValidationFallbackReason || null,
+        endpointFingerprint: actualEndpointFingerprint, agentRole, cacheKeyScope: String(contextPlan.automaticCacheOptimization?.cacheKeyScope || 'conversation_branch'), warmStartKind, concurrentWarmupDetected,
+        warmupProfileChecksum, cacheFieldEvidence: cacheFields,
+        cacheFieldOmissionReason: String(contextPlan._runtimeCacheKeyOmissionReason || ''),
+        breakpointOmissionReason: String(contextPlan._runtimeBreakpointOmissionReason || ''),
+        wireReuseEvidence: { ...(0, provider_wire_evidence_1.compareProviderWire)(previous?.snapshot, snapshot),
             crossSessionComparable: !!publicPrevious,
             comparedRequestId: previous?.requestId, comparedRequestStatus: previous?.status,
             comparedProtocol: previous?.protocol, comparedModel: previous?.model, comparedRoute: previous?.route,
@@ -276,8 +306,18 @@ function startProviderAttempt(options, config, body, protocol, endpoint) {
     return row;
 }
 async function auditedProviderFetch(fetcher, endpoint, init, meta) {
+    (0, scope_navigation_execution_1.scopeNavigationBeforeSend)();
+    const permit = (0, cache_validation_budget_1.reserveCacheValidationRequest)(meta?.options, meta?.config, meta?.protocol, /WebSocket/i.test(fetcher.name) ? 'websocket' : /nativeHttp/i.test(fetcher.name) ? 'native_http_fallback' : 'http');
     if (!meta)
-        return fetcher(endpoint, init);
+        meta = { options: withRequestDiagnostics({}), config: {}, protocol: '' };
+    meta.options._cacheValidationPermit = permit;
+    try {
+        (0, scope_navigation_execution_1.scopeNavigationDispatched)(permit);
+    }
+    catch (error) {
+        (0, cache_validation_budget_1.completeCacheValidationRequest)(permit.validationRunId || '', permit.requestId, 'not_sent');
+        throw error;
+    }
     let body;
     try {
         body = JSON.parse(init.body);
@@ -286,15 +326,18 @@ async function auditedProviderFetch(fetcher, endpoint, init, meta) {
         body = {};
     }
     try {
-        startProviderAttempt(meta.options, meta.config, body, meta.protocol, endpoint);
+        (0, performance_monitor_1.measurePerformance)('model.local_request_preparation', () => startProviderAttempt(meta.options, meta.config, body, meta.protocol, endpoint));
     }
     catch { }
+    const networkStarted = perf_hooks_1.performance.now();
     try {
-        const response = await fetcher(endpoint, init);
+        const response = await fetcher(endpoint, permit?.validationRunId ? { ...init, redirect: 'manual' } : init);
+        (0, performance_monitor_1.recordPerformance)('model.network_to_headers', perf_hooks_1.performance.now() - networkStarted);
         providerAttemptResponse(meta.options, response);
         return response;
     }
     catch (error) {
+        (0, performance_monitor_1.recordPerformance)('model.network_to_error', perf_hooks_1.performance.now() - networkStarted);
         const completed = finishProviderAttempt(meta.options, { ok: false, error });
         // Fetch already closed this physical attempt. Deliver its evidence once
         // to the outer context receipt, without writing or charging it again.
@@ -340,19 +383,20 @@ function finishProviderAttempt(options, result) {
     const normalizedUsage = (0, provider_usage_1.normalizeProviderUsage)(usage || {}, row.protocol);
     const reported = normalizedUsage.reported;
     const direct = reported ? normalizedUsage.directInputTokens : null;
-    const cached = reported ? normalizedUsage.cacheReadInputTokens : null;
+    const cached = normalizedUsage.cacheUsageReported ? normalizedUsage.cacheReadInputTokens : null;
     const creation = reported ? normalizedUsage.cacheCreationInputTokens : null;
     Object.assign(row, { completedAt: new Date().toISOString(), status: result.ok ? 'completed' : result.error?.name === 'AbortError' ? 'cancelled' : 'failed',
         providerRequestId: safe(result.providerRequestId || row.providerRequestId),
         usageReported: reported, directInputTokens: direct, cacheReadInputTokens: cached, cacheCreationInputTokens: creation,
-        totalInputTokens: reported ? direct + cached + creation : null, outputTokens: reported ? normalizedUsage.outputTokens : null,
-        reportedCostUsd: reported && Number(usage.costUsd ?? usage.totalCostUsd) > 0 ? (usage.costUsd ?? usage.totalCostUsd) : null,
+        totalInputTokens: reported ? normalizedUsage.totalContextTokens : null, outputTokens: reported ? normalizedUsage.outputTokens : null,
+        cache_usage_reported: normalizedUsage.cacheUsageReported, ...(0, model_cache_metrics_1.providerCostEvidence)(usage),
+        estimatedCostUsd: (0, model_cache_metrics_1.providerCostEvidence)(usage).estimatedCostUsd ?? (0, model_cache_metrics_1.configuredModelInputCost)(options._modelCacheCostRates, usage, row.protocol),
         errorCode: result.ok ? undefined : safe(result.error?.code || result.error?.name || 'request_failed') });
     if (result.cacheReuse && typeof result.cacheReuse === 'object') {
         Object.assign(row, {
             providerCacheReuseClass: safe(result.cacheReuse.providerCacheReuseClass),
             providerCacheCandidateTokens: Math.max(0, Number(result.cacheReuse.providerCacheCandidateTokens || 0)),
-            providerCacheMatchedTokens: Math.max(0, Number(result.cacheReuse.providerCacheMatchedTokens || 0)),
+            providerCacheMatchedTokens: normalizedUsage.cacheUsageReported ? Math.max(0, Number(result.cacheReuse.providerCacheMatchedTokens || 0)) : null,
             providerCachePartialReason: safe(result.cacheReuse.providerCachePartialReason),
             providerCacheComparableEvidence: result.cacheReuse.providerCacheComparableEvidence === true,
             toolSchemaChecksum: safe(result.cacheReuse.toolSchemaChecksum),
@@ -364,6 +408,11 @@ function finishProviderAttempt(options, result) {
     }
     append(row);
     state.active = undefined;
+    (0, scope_navigation_execution_1.scopeNavigationCompleted)(row);
+    try {
+        (0, cache_validation_budget_1.completeCacheValidationRequest)(row.validationRunId || '', row.requestId, row.status);
+    }
+    catch { }
     return { requestAttribution: row.attribution, wireReuseEvidence: row.wireReuseEvidence,
         warmStartKind: row.warmStartKind,
         concurrentWarmupDetected: row.concurrentWarmupDetected === true,
@@ -382,8 +431,11 @@ function finishProviderAttempt(options, result) {
                 toolSchemaPrefixEligible: row.toolSchemaPrefixEligible === true,
             } } : {}) };
 }
-function readProviderRequestDiagnostics(binding) {
-    const selected = rows().filter(row => !binding || same(row.attribution, binding)).slice(0, 50);
+function readProviderRequestDiagnostics(binding, filters = {}) {
+    const filtered = (0, model_cache_metrics_1.filterModelCacheRows)(rows().filter(row => !binding || same(row.attribution, binding)), filters);
+    const limit = Math.max(1, Math.min(200, filters.limit || 50));
+    const logicalIds = [...new Set(filtered.map(row => row.logicalCallId || row.requestId))].slice(0, limit);
+    const selected = filtered.filter(row => logicalIds.includes(row.logicalCallId || row.requestId));
     const recentRequests = selected.map(({ snapshot, ...row }) => ({
         ...row,
         wireLayoutVersion: String(snapshot?.layoutVersion || row.wireLayoutVersion || ""),
@@ -406,7 +458,7 @@ function readProviderRequestDiagnostics(binding) {
         providerRouteHeaderCount: Number(row.providerRouteHeaderCount || 0),
     }));
     const terminalRows = selected.filter(row => TERMINAL_STATUSES.has(String(row.status)));
-    const byRequestId = new Map(terminalRows.map(row => [String(row.requestId), row]));
+    const byRequestId = new Map(filtered.filter(row => TERMINAL_STATUSES.has(String(row.status))).map(row => [String(row.requestId), row]));
     // Compare the request against the exact request id captured at start time.
     // Array adjacency is not reliable when retries, auxiliary calls, or
     // rotated ledgers interleave between two foreground requests.
@@ -453,6 +505,7 @@ function readProviderRequestDiagnostics(binding) {
         };
     }).filter(item => item.previousRequestId).slice(0, 12);
     const summarize = (items) => ({ attempts: items.length, logicalCalls: new Set(items.map(row => row.logicalCallId)).size,
+        ...(0, model_cache_metrics_1.summarizeModelCacheRows)(items), cacheReportedAttempts: items.filter(row => row.cache_usage_reported === true).length,
         reportedAttempts: items.filter(row => row.usageReported).length,
         totalInputTokens: items.reduce((sum, row) => sum + Number(row.totalInputTokens || 0), 0),
         cacheReadInputTokens: items.reduce((sum, row) => sum + Number(row.cacheReadInputTokens || 0), 0),
@@ -460,7 +513,7 @@ function readProviderRequestDiagnostics(binding) {
         partialReuseRequests: items.filter(row => row.providerCacheReuseClass === 'partial_reuse').length,
         baselineOnlyRequests: items.filter(row => row.providerCacheReuseClass === 'baseline_only').length,
         missRequests: items.filter(row => row.providerCacheReuseClass === 'miss').length });
-    return { recentRequests, adjacentComparisons, requestGroups: { main: summarize(terminalRows.filter(row => row.attribution.requestClass === 'foreground_main')),
+    return { recentRequests, adjacentComparisons, ...(0, model_cache_metrics_1.summarizeModelCacheRows)(selected), requestGroups: { main: summarize(terminalRows.filter(row => row.attribution.requestClass === 'foreground_main')),
             auxiliary: summarize(terminalRows.filter(row => row.attribution.requestClass === 'auxiliary')),
             probe: summarize(terminalRows.filter(row => row.attribution.requestClass === 'probe')),
             unattributed: summarize(terminalRows.filter(row => row.attribution.requestClass === 'unattributed')) }, contentStored: false };

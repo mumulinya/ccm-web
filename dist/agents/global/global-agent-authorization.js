@@ -37,6 +37,7 @@ exports.buildGlobalWriteAuthorizationReceipt = buildGlobalWriteAuthorizationRece
 exports.verifyGlobalWriteAuthorizationReceipt = verifyGlobalWriteAuthorizationReceipt;
 exports.globalWriteAuthorizationAllowsTool = globalWriteAuthorizationAllowsTool;
 exports.revokeGlobalWriteAuthorization = revokeGlobalWriteAuthorization;
+exports.clarificationRevokesGlobalAuthorization = clarificationRevokesGlobalAuthorization;
 const crypto = __importStar(require("crypto"));
 const DISPATCH_TOOLS = new Set([
     "create_requirement_epic",
@@ -169,5 +170,13 @@ function revokeGlobalWriteAuthorization(run, at = new Date().toISOString()) {
     run.writeAuthorizationReceipt = next;
     run.explicit_write_authorization = false;
     return next;
+}
+function clarificationRevokesGlobalAuthorization(run, message, options) {
+    const receipt = options.writeAuthorizationReceipt;
+    if (!receipt || receipt.schema !== 'ccm-global-write-authorization-receipt-v2' || receipt.directive !== 'revoke')
+        return false;
+    const { checksum: saved, ...body } = receipt;
+    return saved === receiptChecksum(body) && receipt.session_id === (run.session_id || 'default')
+        && receipt.valid_for_turn === options.turnId && receipt.message_checksum === checksum(message);
 }
 //# sourceMappingURL=global-agent-authorization.js.map

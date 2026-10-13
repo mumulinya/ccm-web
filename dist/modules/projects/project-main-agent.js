@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.reconcileInterruptedProjectMainTasks = reconcileInterruptedProjectMainTasks;
+exports.projectRequirementPlanProjection = projectRequirementPlanProjection;
 exports.runProjectMainAgentFirstTurn = runProjectMainAgentFirstTurn;
 exports.planProjectMainTask = planProjectMainTask;
 exports.createProjectMainTask = createProjectMainTask;
@@ -47,6 +48,10 @@ exports.reviseProjectMainTask = reviseProjectMainTask;
 exports.executeProjectMainTask = executeProjectMainTask;
 exports.projectMainTaskPublic = projectMainTaskPublic;
 exports.runProjectMainAgentContractSelfTest = runProjectMainAgentContractSelfTest;
+const dispatch_rework_evidence_1 = require("../collaboration/dispatch-rework-evidence");
+const dispatch_review_gap_1 = require("../collaboration/dispatch-review-gap");
+const dispatch_projection_1 = require("../../agents/dispatch-projection");
+const dispatch_rework_reservation_1 = require("../collaboration/dispatch-rework-reservation");
 const crypto = __importStar(require("crypto"));
 const native_session_transcript_1 = require("../../agents/native-session-transcript");
 const provider_native_tools_1 = require("../../system/provider-native-tools");
@@ -94,6 +99,7 @@ const session_compaction_core_1 = require("../../system/session-compaction-core"
 const canonical_context_accounting_1 = require("../../system/canonical-context-accounting");
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
 const agent_execution_coordinator_1 = require("../../agents/agent-execution-coordinator");
+const dispatch_profile_1 = require("../../agents/dispatch-profile");
 const agent_run_lifecycle_1 = require("../../agents/agent-run-lifecycle");
 const project_session_compaction_1 = require("./project-session-compaction");
 const project_native_messages_1 = require("./project-native-messages");
@@ -205,7 +211,7 @@ const activeProjectMainAbortControllers = new Map();
 const PROJECT_MAIN_LEASE_TTL_MS = 60_000;
 const PROJECT_MAIN_LEASE_HEARTBEAT_MS = 15_000;
 function reconcileInterruptedProjectMainTasks() {
-    const candidates = (0, db_1.loadTasks)().filter((task) => {
+    const candidates = require('../../core/task-query').listUnfinishedTasks().filter((task) => {
         if (task?.workflow_type !== "project_main_agent" && !task?.project_main_run_id)
             return false;
         if (task?.orchestration_scope !== "project_session")
@@ -1988,6 +1994,7 @@ ${implementation_plan_1.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT}\n${implementation
                 acceptanceCriteria: repairedCriteria,
                 acceptanceEvidencePlan: repairedEvidencePlan.length ? repairedEvidencePlan : plan.acceptanceEvidencePlan,
                 permissionBoundaries: repaired.exclusions,
+                verification: repaired.verification,
                 workItems: normalizedWorkItems(repaired.steps.map(step => ({ ...step, acceptanceCriteria: step.acceptance, allowedFiles: step.files, forbiddenFiles: step.forbiddenPaths })), input.userMessage),
             };
         }
@@ -2287,7 +2294,9 @@ function aggregateFileChanges(results) {
 function normalizeContractPath(value) {
     return String(value || "").trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 }
-function validateWorkerFileScope(result, contract) {
+function validateWorkerFileScope(result, contract, task) {
+    if (task?.dispatch_profile_snapshot)
+        return require("./dispatch-worker-scope").validateDispatchWorkerScope(task, contract, (result?.fileChanges?.files || []).map((row) => String(row?.path || row?.file || row)), result?.delivery?.workspacePath || task.workspace_path || task.worktree_path);
     if (!contract)
         return { valid: false, issues: ["缺少工作项派发合同"] };
     const allowed = new Set((Array.isArray(contract.files) ? contract.files : []).map(normalizeContractPath).filter(Boolean));
@@ -2310,7 +2319,7 @@ async function finalSummary(input) {
     // Delivery data is assembled deterministically here so task completion never
     // opens a second "final synthesis" model request.
     const changes = aggregateFileChanges(input.results);
-    const independentReview = input.review?.mode !== "main_agent_self_verification";
+    const independentReview = !["main_agent_self_verification", "quick_check"].includes(input.review?.mode);
     void input.onDelta;
     void input.signal;
     const accepted = input.status === "completed" && input.review?.canAccept === true;
@@ -2575,6 +2584,12 @@ async function reviseProjectMainTask(input) {
 }
 async function runProjectMainAgentSelfVerification(input) {
     const changes = aggregateFileChanges(input.results);
+    if ((0, dispatch_profile_1.resolveDispatchProfileSnapshot)(input.task).profile === "light") {
+        return require("../collaboration/dispatch-quick-verification").runDispatchQuickVerification({
+            task: input.task, project: input.plan.project, workDir: input.workDir,
+            changedFiles: changes.files, verificationCommands: input.verificationCommands,
+        });
+    }
     return (0, main_agent_self_verification_1.runMainAgentSelfVerification)({
         task: input.task,
         policy: input.policy,
@@ -2623,6 +2638,9 @@ async function executeProjectMainTask(input) {
     let persistedAgentRun = null;
     if (!taskId)
         throw new Error("缺少项目主 Agent 任务 ID");
+    const replay = require("./dispatch-project-replay").replayDispatchProjectExecution(getProjectMainTask(taskId) || input.task);
+    if (replay)
+        return replay;
     if (activeProjectMainTasks.has(taskId))
         throw new Error("项目主 Agent 任务正在执行");
     if (input.plan.requiresConfirmation && input.confirmed !== true) {
@@ -2657,7 +2675,7 @@ async function executeProjectMainTask(input) {
         sourceManifestChecksum: input.plan.sourceEvidence?.manifestChecksum || "",
     }, { planId: taskId, revision: Number(dispatchProjection.revision || 1) });
     const dispatchContract = dispatchPlan ? (0, plan_dispatch_contract_1.buildPlanDispatchContract)({
-        acceptanceScope: { scope: "project", scopeId: project, exactSessionId: String(input.task.project_session_id || input.task.exact_session_id || "") },
+        acceptanceScope: (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(input.task).profile === "light" ? undefined : { scope: "project", scopeId: project, exactSessionId: String(input.task.project_session_id || input.task.exact_session_id || "") },
         generation: Number(input.task.generation ?? input.task.boundary_generation ?? 0),
         plan: dispatchPlan,
         taskId,
@@ -2678,7 +2696,7 @@ async function executeProjectMainTask(input) {
             status: "blocked",
             acceptance_state: "plan_dispatch_blocked",
             status_detail: `计划暂时无法派发：${reasons}`,
-            workflow_meta: { ...(input.task.workflow_meta || {}), plan_dispatch_contract: dispatchContract || null },
+            workflow_meta: { ...(input.task.workflow_meta || {}), plan_dispatch_diagnostics: require("./dispatch-plan-diagnostics").dispatchPlanBlockDiagnostics(dispatchContract, contractValidation) },
         }) || input.task;
         (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_plan_dispatch_blocked", title: "计划未通过第三方 Agent 派发门禁", detail: reasons, status: "error", phase: "planning", agent: "project-main-agent", data: { blockers: dispatchContract?.blockers || [] } });
         return { task: blockedTask, status: "blocked", summary: `计划暂时无法派发：${reasons}`, fileChanges: { count: 0, files: [] }, verification: [], risks: dispatchContract?.blockers || [], testAgent: null };
@@ -2708,11 +2726,13 @@ async function executeProjectMainTask(input) {
         runtimeVersionSnapshot: (0, runtime_1.captureAgentRuntimeVersionSnapshot)(projectRuntimeId),
         taskAgentSessionId: String(input.task?.task_agent_session_id || input.task?.taskAgentSessionId || input.plan?.projectSessionId || ""),
         nativeSessionId: String(input.task?.native_session_id || input.task?.nativeSessionId || ""), executionId: taskId,
+        routineRunId: String(input.task?.automation_routine_run_id || input.task?.automationRoutineRunId || ""),
         workspacePath: workDir, worktreeId: String(input.task?.worktree_id || input.task?.worktreeId || ""),
         triggerType: parentRunId ? "retry" : isAutomationRun ? "schedule" : "user",
         source: "project-main-agent", idempotencyKey: `project-main:${taskId}:${String(input.task?.attempt_id || input.task?.attemptId || input.task?.execution_attempt || input.task?.attempt || 1)}`,
     });
     persistedAgentRun = coordinatedExecution.run;
+    require("../../agents/agent-execution-coordinator").assertPersistentExecutionLaunchAllowed(coordinatedExecution);
     const executionLeaseOwnerId = coordinatedExecution.lease?.run?.leaseOwnerId || "";
     if (coordinatedExecution.mode === "coalesced") {
         throw Object.assign(new Error("项目主 Agent 已存在同一幂等执行，拒绝重复启动"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: persistedAgentRun.runId });
@@ -2768,7 +2788,7 @@ async function executeProjectMainTask(input) {
     activeProjectMainTasks.add(taskId);
     const taskAbortController = new AbortController();
     activeProjectMainAbortControllers.set(taskId, taskAbortController);
-    const reviewCycleId = (0, rework_policy_1.createReviewCycleId)(`project-${taskId}`);
+    const reviewCycleId = String(input.task.review_cycle_id || (0, rework_policy_1.createReviewCycleId)(`project-${taskId}`));
     let leaseLost = false;
     let executionPhase = "executing";
     const executionStartedAt = new Date().toISOString();
@@ -2838,7 +2858,9 @@ async function executeProjectMainTask(input) {
     const resumeSummaryOnly = checkpointMatchesPlan
         && persistedCheckpoint?.summaryPending === true
         && latestReview?.canAccept === true;
-    let independentTestAgentEnabled = (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(persistedAtResume, acceptancePolicy);
+    const dispatchProfile = (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(persistedAtResume);
+    let independentTestAgentEnabled = dispatchProfile.profile === "strict"
+        || (dispatchProfile.profile !== "light" && (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(persistedAtResume, acceptancePolicy));
     let visiblePlanRevision = Math.max(1, Number(Array.isArray(persistedAtResume?.plan_revisions) ? persistedAtResume.plan_revisions.length + 1 : 1));
     const emitVisiblePlanState = (status = "executing", activeWorkItemId = "") => {
         visiblePlanRevision += 1;
@@ -2934,7 +2956,7 @@ async function executeProjectMainTask(input) {
             else
                 pending.add(item);
         }
-        const executeWorkItem = async (item) => {
+        const executeWorkItem = async (item, repairRound = 0, repairProblems = []) => {
             assertNotCancelled();
             executionPhase = "executing";
             persistExecutionState();
@@ -2952,8 +2974,8 @@ async function executeProjectMainTask(input) {
             }, input.task.project_main_run_id || taskId, "", "", taskToolCorrelation);
             let result;
             try {
-                result = await input.executeWorker(item, 0, []);
-                const scopeValidation = validateWorkerFileScope(result, item.dispatchContract);
+                result = await input.executeWorker(item, repairRound, repairProblems);
+                const scopeValidation = validateWorkerFileScope(result, item.dispatchContract, getProjectMainTask(taskId) || input.task);
                 if (!scopeValidation.valid) {
                     result = { ...result, success: false, error: scopeValidation.issues.join("；"), output: [result.output, `CCM 文件范围门禁：${scopeValidation.issues.join("；")}`].filter(Boolean).join("\n") };
                 }
@@ -2969,7 +2991,7 @@ async function executeProjectMainTask(input) {
                 throw error;
             }
             assertNotCancelled();
-            result = { ...result, workItemId: item.id, reviewRound: 0 };
+            result = { ...result, workItemId: item.id, reviewRound: repairRound };
             results.push(result);
             item.output = result.output;
             item.fileChanges = result.fileChanges;
@@ -2991,13 +3013,16 @@ async function executeProjectMainTask(input) {
             }));
             if (!ready.length)
                 throw new Error("计划工作项依赖无法解锁，已阻止跳过依赖执行");
+            // Shared workspace lanes are serialized even when the plan has no dependencies.
+            if (input.task.workflow_policy_snapshot?.workspace === "shared_serial")
+                ready.splice(1);
             for (const item of ready)
                 pending.delete(item);
             if (ready.length > 1) {
                 (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_worker_parallel_batch_started", title: `并行执行 ${ready.length} 个项目工作项`, detail: ready.map(item => item.title).join("、"), status: "active", phase: "executing", agent: "project-main-agent", data: { work_item_ids: ready.map(item => item.id), contentStored: false } });
                 emit("work_item_batch", { status: "running", parallel: true, work_items: ready.map(item => ({ id: item.id, title: item.title })) });
             }
-            const settled = await Promise.allSettled(ready.map(executeWorkItem));
+            const settled = await Promise.allSettled(ready.map(item => executeWorkItem(item)));
             const failure = settled.find(result => result.status === "rejected");
             if (failure)
                 throw failure.reason;
@@ -3047,13 +3072,20 @@ async function executeProjectMainTask(input) {
             (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "main_agent_self_verifying", status_detail: acceptancePolicy.schema === "ccm-task-acceptance-policy-snapshot-v3" && acceptancePolicy.level === "lightweight" ? "项目主 Agent 正在执行轻量自验" : "项目主 Agent 正在执行标准验收" });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_self_verification_started", title: acceptancePolicy.schema === "ccm-task-acceptance-policy-snapshot-v3" && acceptancePolicy.level === "lightweight" ? "开始轻量自验" : "开始标准验收", detail: "主 Agent正在核对范围、文件变化、验收标准和真实验证证据", status: "active", phase: "reviewing", agent: "project-main-agent" });
             emit("testing", { status: "running", mode: "main_agent_self_verification", round: 1, max_rounds: 1 });
-            latestReview = await runProjectMainAgentSelfVerification({
-                task: getProjectMainTask(taskId) || input.task,
-                plan: input.plan,
-                results,
-                workDir,
-                verificationCommands: input.verificationCommands || [],
-                policy: acceptancePolicy,
+            latestReview = await require("../collaboration/dispatch-self-review").runDispatchSelfReview({
+                taskId, workspacePath: workDir,
+                verify: () => runProjectMainAgentSelfVerification({
+                    task: getProjectMainTask(taskId) || input.task, plan: input.plan, results, workDir,
+                    verificationCommands: input.verificationCommands || [], policy: acceptancePolicy,
+                }),
+                repair: async (round, gaps) => {
+                    const item = input.plan.workItems[0];
+                    if (!item)
+                        throw new Error("缺少可修复的项目工作项");
+                    assertNotCancelled();
+                    emit("reworking", { status: "running", round, problems: gaps, work_item: item });
+                    await executeWorkItem(item, round, gaps);
+                },
             });
             (0, collaboration_task_service_1.updateTask)(taskId, { test_agent_review: null, main_agent_self_verification: latestReview, acceptance_state: latestReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_self_verification_finished", title: latestReview.canAccept ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过", detail: latestReview.report.summary, status: latestReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: "project-main-agent", data: { review: latestReview } });
@@ -3091,12 +3123,14 @@ async function executeProjectMainTask(input) {
         }
         // 本次编排是一个完整的验收周期：round 从 1 重新计数，累计值在既有基线上按实际复核次数递增。
         const reviewRoundTotalBase = Math.max(0, Number((getProjectMainTask(taskId) || input.task)?.review_round_total || 0));
-        const maxAcceptanceReviewRounds = Math.min(rework_policy_1.AUTO_REWORK_MAX_ROUNDS, (0, task_acceptance_policy_1.taskAcceptanceReviewRounds)(getProjectMainTask(taskId) || input.task, acceptancePolicy));
+        const maxAcceptanceReviewRounds = (getProjectMainTask(taskId) || input.task)?.dispatch_profile_snapshot
+            ? require("../collaboration/rework-policy").automaticReworkLimit(getProjectMainTask(taskId) || input.task) + 1
+            : (0, task_acceptance_policy_1.taskAcceptanceReviewRounds)(getProjectMainTask(taskId) || input.task, acceptancePolicy);
         for (let round = 1; requiresTestAgent && !resumeSummaryOnly && round <= maxAcceptanceReviewRounds; round += 1) {
             assertNotCancelled();
             executionPhase = "test_agent_running";
             persistExecutionState();
-            (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "test_agent_running", status_detail: `TestAgent 正在执行第 ${round}/${maxAcceptanceReviewRounds} 轮独立验收`, review_round: round, review_round_total: reviewRoundTotalBase + round, rework_exhausted: null });
+            (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "test_agent_running", status_detail: `TestAgent 正在执行第 ${round}/${maxAcceptanceReviewRounds} 轮独立验收`, review_round: round, review_round_total: reviewRoundTotalBase + round });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_test_agent_started", title: `TestAgent 第 ${round} 轮验收`, detail: "独立读取源码和真实验证证据", status: "active", phase: "reviewing", agent: "test-agent" });
             emit("testing", { status: "running", round, max_rounds: maxAcceptanceReviewRounds });
             const previousReview = latestReview;
@@ -3233,7 +3267,14 @@ async function executeProjectMainTask(input) {
             emit("reworking", { status: "running", round, problems, work_item: reworkItem });
             (0, collaboration_task_service_1.updateTask)(taskId, { status: "in_progress", acceptance_state: "reworking", status_detail: `开发 Agent 正在修复第 ${round} 轮验收缺口` });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_rework_started", title: reworkItem.title, detail: problems.join("；"), status: "active", phase: "reworking", agent: project });
+            const reworkTask = getProjectMainTask(taskId) || input.task;
+            const reworkReservation = (0, dispatch_rework_reservation_1.reservePersistentAutomaticRework)(taskId, (0, dispatch_review_gap_1.dispatchReviewGapIdentity)(latestReview, problems), await (0, dispatch_rework_evidence_1.captureDispatchReworkEvidence)(reworkTask, workDir));
+            if (!reworkReservation.allowed)
+                break;
             let rework = await input.executeWorker(reworkItem, round, problems);
+            const reworkScope = validateWorkerFileScope(rework, reworkItem.dispatchContract, getProjectMainTask(taskId) || input.task);
+            if (!reworkScope.valid)
+                rework = { ...rework, success: false, error: reworkScope.issues.join("；") };
             assertNotCancelled();
             rework = { ...rework, workItemId: reworkItem.id, reviewRound: round };
             results.push(rework);
@@ -3268,7 +3309,7 @@ async function executeProjectMainTask(input) {
             status_detail: accepted ? "项目主 Agent 正在完成最终复盘" : blockedDetail,
             ...(accepted || finalReviewDecision.route !== "implementation_rework"
                 ? {}
-                : (0, rework_policy_1.buildReworkExhaustedUpdate)((0, project_test_agent_gate_1.projectTestAgentProblems)(latestReview).join("；") || "TestAgent 验收未通过", { path: "project_direct" })),
+                : { rework_exhausted: getProjectMainTask(taskId)?.rework_exhausted || (0, rework_policy_1.buildReworkExhaustedUpdate)((0, project_test_agent_gate_1.projectTestAgentProblems)(latestReview).join("；") || "TestAgent 验收未通过", { path: "project_direct", rounds: Number(getProjectMainTask(taskId)?.rework_round || 0), maxRounds: require("../collaboration/rework-policy").automaticReworkLimit(getProjectMainTask(taskId) || input.task) }).rework_exhausted }),
         });
         emit("accepting", { status: accepted ? "running" : "blocked", test_agent: independentTestAgentEnabled ? latestReview : null, main_agent_self_verification: independentTestAgentEnabled ? null : latestReview });
         const mainSummaryStartedAt = new Date().toISOString();
@@ -3324,7 +3365,7 @@ async function executeProjectMainTask(input) {
         const finalAcceptance = {
             schema: "ccm-main-agent-final-acceptance-v1",
             accepted,
-            mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
+            mode: independentTestAgentEnabled ? "test_agent" : latestReview?.mode === "quick_check" ? "quick_check" : "main_agent_self_verification",
             acceptance_policy_checksum: acceptancePolicy.checksum,
             review_checksum: String(latestReview?.checksum || latestReview?.runner?.checksum || latestReview?.runner?.id || ""),
             decided_at: new Date().toISOString(),
@@ -3363,6 +3404,13 @@ async function executeProjectMainTask(input) {
             });
         }
         const outputRevision = crypto.createHash("sha256").update(JSON.stringify({ summary, fileChanges, verification, finalAcceptance })).digest("hex");
+        try {
+            (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: persistedAgentRun.runId, leaseOwnerId: executionLeaseOwnerId,
+                status: accepted ? "succeeded" : "failed", result: { accepted, outputRevision } });
+        }
+        catch (error) {
+            throw Object.assign(new Error("项目终态落账未完成"), { code: "CCM_DISPATCH_FINALIZATION_BLOCKED", cause: error });
+        }
         const finalTask = (0, collaboration_task_service_1.updateTask)(taskId, {
             status: accepted ? "waiting_user" : "blocked",
             acceptance_state: accepted ? "awaiting_user_acceptance" : "blocked",
@@ -3459,13 +3507,24 @@ async function executeProjectMainTask(input) {
                 },
             },
         });
-        try {
-            (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: persistedAgentRun.runId, leaseOwnerId: executionLeaseOwnerId, status: accepted ? "succeeded" : "failed", result: { accepted, outputRevision } });
-        }
-        catch { }
         return { task: finalTask, status: accepted ? "completed" : "blocked", summary, fileChanges, verification, risks, testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     catch (error) {
+        const finalizationBlock = require("./dispatch-project-finalization").blockDispatchProjectFinalization(taskId, persistedAgentRun.runId, error);
+        if (finalizationBlock) {
+            emit("blocked", { status: "blocked", summary: finalizationBlock.summary });
+            return finalizationBlock;
+        }
+        const pendingDelivery = require("./dispatch-delivery-recovery").blockInterruptedDispatchDelivery(taskId, persistedAgentRun.runId, error);
+        if (pendingDelivery) {
+            emit("blocked", { status: "blocked", summary: pendingDelivery.summary });
+            return pendingDelivery;
+        }
+        const dispatchBlock = require("../collaboration/dispatch-start-block").preserveDispatchStartBlock(taskId, error, persistedAgentRun.runId);
+        if (dispatchBlock) {
+            emit("blocked", { status: "blocked", summary: dispatchBlock.summary });
+            return dispatchBlock;
+        }
         if (String(error?.code || "") === "CCM_TASK_PAUSE_SAFE_BOUNDARY") {
             const currentTask = getProjectMainTask(taskId) || input.task;
             const suspended = (0, agent_sessions_purge_1.suspendTaskAgentSessions)({ taskId }, "项目主 Agent 已在安全检查点暂停");
@@ -3666,7 +3725,9 @@ async function executeProjectMainTask(input) {
             else
                 (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: persistedAgentRun.runId, leaseOwnerId: executionLeaseOwnerId, status: cancelled ? "cancelled" : "failed", error: { message: summary.slice(0, 500) } });
         }
-        catch { }
+        catch (finalizationError) {
+            return require("./dispatch-project-finalization").blockDispatchProjectFinalization(taskId, persistedAgentRun.runId, Object.assign(new Error("项目失败终态落账未完成"), { code: "CCM_DISPATCH_FINALIZATION_BLOCKED", cause: finalizationError }));
+        }
         return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: unacceptedFileChanges, verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     finally {
@@ -3726,6 +3787,9 @@ function projectMainTaskPublic(task) {
         test_agent_enabled: task.test_agent_enabled !== false,
         acceptance_policy_snapshot: task.acceptance_policy_snapshot || null,
         acceptance_level: task.acceptance_level || task.acceptance_policy_snapshot?.level || null,
+        ...(0, dispatch_projection_1.buildDispatchProjection)(task),
+        dispatch_profile_snapshot: task.dispatch_profile_snapshot || task.task_spec?.dispatch_profile_snapshot || null,
+        dispatch_scope: task.dispatch_scope || null,
         acceptance_route: task.acceptance_route || task.acceptance_policy_snapshot?.route || null,
         acceptance_reasons: Array.isArray(task.acceptance_reasons) ? task.acceptance_reasons : [],
         acceptance_actual_level: task.acceptance_actual_level || null,

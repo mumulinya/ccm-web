@@ -1,3 +1,4 @@
+import { ModelCacheFilters } from './model-cache-metrics';
 export declare function providerCacheTrend(rows: any[], size: number, options?: {
     includeAll?: boolean;
     requestClass?: string;
@@ -14,6 +15,7 @@ export declare function providerCacheTrend(rows: any[], size: number, options?: 
     fullReuseRequests: number;
     partialReuseRequests: number;
     baselineOnlyRequests: number;
+    cacheReportedCalls: number;
     fullReuseRequestRate: number;
     partialReuseRequestRate: number;
     baselineOnlyRequestRate: number;
@@ -37,6 +39,8 @@ export declare function providerCacheTrend(rows: any[], size: number, options?: 
     projectionFallbackCount: any;
     publicStablePrefixTokens: any;
     agentStablePrefixTokens: any;
+    cacheUnreportedCalls: number;
+    cacheTokenReportingCoverage: number;
     tokenReuseRate: number;
     cacheableUtilizationRate: number;
     dynamicSuffixRate: number;
@@ -58,6 +62,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -81,6 +86,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -99,6 +106,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -122,6 +130,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -142,6 +152,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -165,6 +176,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -183,6 +196,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -206,6 +220,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -226,6 +242,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -249,6 +266,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -267,6 +286,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -290,6 +310,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -310,6 +332,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -333,6 +356,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -351,6 +376,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -374,6 +400,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -394,6 +422,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -417,6 +446,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -435,6 +466,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -458,6 +490,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -478,6 +512,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -501,6 +536,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -519,6 +556,7 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -542,6 +580,8 @@ export declare function recordProviderCacheScopeMetric(binding: any, receipt: an
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -568,6 +608,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -591,6 +632,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -609,6 +652,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -632,6 +676,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -652,6 +698,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -675,6 +722,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -693,6 +742,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -716,6 +766,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -736,6 +788,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -759,6 +812,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -777,6 +832,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -800,6 +856,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -820,6 +878,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -843,6 +902,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -861,6 +922,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -884,6 +946,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -904,6 +968,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -927,6 +992,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -945,6 +1012,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -968,6 +1036,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -988,6 +1058,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1011,6 +1082,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1029,6 +1102,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1052,6 +1126,8 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1062,7 +1138,7 @@ export declare function recordExternalAgentCacheStageMetric(affinity: any, metri
     updatedAt: string;
     contentStored: boolean;
 };
-export declare function readProviderCacheScopeMetrics(binding: any, supplied?: any): {
+export declare function readProviderCacheScopeMetrics(binding: any, supplied?: any, filters?: ModelCacheFilters): {
     schema: string;
     scope: {
         recent20: {
@@ -1078,6 +1154,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1101,6 +1178,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1119,6 +1198,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1142,6 +1222,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1162,6 +1244,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1185,6 +1268,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1203,6 +1288,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1226,6 +1312,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1246,6 +1334,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1269,6 +1358,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1287,6 +1378,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1310,6 +1402,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1330,6 +1424,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1353,6 +1448,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1371,6 +1468,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1394,6 +1492,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1414,6 +1514,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1437,6 +1538,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1455,6 +1558,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1478,6 +1582,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1498,6 +1604,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1521,6 +1628,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1539,6 +1648,7 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1562,6 +1672,8 @@ export declare function readProviderCacheScopeMetrics(binding: any, supplied?: a
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1588,6 +1700,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1611,6 +1724,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1629,6 +1744,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1652,6 +1768,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1672,6 +1790,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1695,6 +1814,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1713,6 +1834,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1736,6 +1858,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1756,6 +1880,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1779,6 +1904,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1797,6 +1924,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1820,6 +1948,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1840,6 +1970,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1863,6 +1994,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1881,6 +2014,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1904,6 +2038,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1924,6 +2060,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1947,6 +2084,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -1965,6 +2104,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -1988,6 +2128,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -2008,6 +2150,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -2031,6 +2174,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -2049,6 +2194,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             fullReuseRequests: number;
             partialReuseRequests: number;
             baselineOnlyRequests: number;
+            cacheReportedCalls: number;
             fullReuseRequestRate: number;
             partialReuseRequestRate: number;
             baselineOnlyRequestRate: number;
@@ -2072,6 +2218,8 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
             projectionFallbackCount: any;
             publicStablePrefixTokens: any;
             agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
             tokenReuseRate: number;
             cacheableUtilizationRate: number;
             dynamicSuffixRate: number;
@@ -2087,7 +2235,7 @@ export declare function readProviderCacheScopeMetricsBatch(bindings?: any[]): {
  * metric ledger intentionally keeps only bounded samples, so this projection
  * reports the recent window and never exposes prompt/tool bodies.
  */
-export declare function readProviderCacheSessionDiagnostics(binding: any, _latestState?: any, supplied?: any): {
+export declare function readProviderCacheSessionDiagnostics(binding: any, _latestState?: any, supplied?: any, filters?: ModelCacheFilters): {
     cacheableUtilizationRate: any;
     dynamicSuffixRate: any;
     duplicateToolResultRate: any;
@@ -2099,6 +2247,186 @@ export declare function readProviderCacheSessionDiagnostics(binding: any, _lates
     contentStored: boolean;
     providerCacheObservation?: any;
     localHistoryState?: any;
+    auxiliary: {
+        recent20: {
+            samples: number;
+            logicalCalls: number;
+            reportedSamples: number;
+            logicalReportedCalls: number;
+            unreportedSamples: number;
+            physicalAttemptCount: number;
+            failedAttemptCount: number;
+            hits: number;
+            misses: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            cacheReportedCalls: number;
+            fullReuseRequestRate: number;
+            partialReuseRequestRate: number;
+            baselineOnlyRequestRate: number;
+            requestHitRate: number;
+            cacheReadTokens: any;
+            directInputTokens: any;
+            cacheCreationInputTokens: any;
+            providerInputTokens: any;
+            totalContextTokens: any;
+            diagnosticSamples: number;
+            cacheablePrefixTokens: any;
+            uncachedSuffixTokens: any;
+            duplicateToolResultTokens: any;
+            stableToolSchemaTokens: any;
+            rollingHistoryTokens: any;
+            rollingToolResultTokens: any;
+            activeToolResultTokens: any;
+            incrementalPayloadTokens: any;
+            projectedToolResultTokens: any;
+            savedToolResultTokens: any;
+            projectionFallbackCount: any;
+            publicStablePrefixTokens: any;
+            agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
+            tokenReuseRate: number;
+            cacheableUtilizationRate: number;
+            dynamicSuffixRate: number;
+            duplicateToolResultRate: number;
+        };
+        recent50: {
+            samples: number;
+            logicalCalls: number;
+            reportedSamples: number;
+            logicalReportedCalls: number;
+            unreportedSamples: number;
+            physicalAttemptCount: number;
+            failedAttemptCount: number;
+            hits: number;
+            misses: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            cacheReportedCalls: number;
+            fullReuseRequestRate: number;
+            partialReuseRequestRate: number;
+            baselineOnlyRequestRate: number;
+            requestHitRate: number;
+            cacheReadTokens: any;
+            directInputTokens: any;
+            cacheCreationInputTokens: any;
+            providerInputTokens: any;
+            totalContextTokens: any;
+            diagnosticSamples: number;
+            cacheablePrefixTokens: any;
+            uncachedSuffixTokens: any;
+            duplicateToolResultTokens: any;
+            stableToolSchemaTokens: any;
+            rollingHistoryTokens: any;
+            rollingToolResultTokens: any;
+            activeToolResultTokens: any;
+            incrementalPayloadTokens: any;
+            projectedToolResultTokens: any;
+            savedToolResultTokens: any;
+            projectionFallbackCount: any;
+            publicStablePrefixTokens: any;
+            agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
+            tokenReuseRate: number;
+            cacheableUtilizationRate: number;
+            dynamicSuffixRate: number;
+            duplicateToolResultRate: number;
+        };
+    };
+    probe: {
+        recent20: {
+            samples: number;
+            logicalCalls: number;
+            reportedSamples: number;
+            logicalReportedCalls: number;
+            unreportedSamples: number;
+            physicalAttemptCount: number;
+            failedAttemptCount: number;
+            hits: number;
+            misses: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            cacheReportedCalls: number;
+            fullReuseRequestRate: number;
+            partialReuseRequestRate: number;
+            baselineOnlyRequestRate: number;
+            requestHitRate: number;
+            cacheReadTokens: any;
+            directInputTokens: any;
+            cacheCreationInputTokens: any;
+            providerInputTokens: any;
+            totalContextTokens: any;
+            diagnosticSamples: number;
+            cacheablePrefixTokens: any;
+            uncachedSuffixTokens: any;
+            duplicateToolResultTokens: any;
+            stableToolSchemaTokens: any;
+            rollingHistoryTokens: any;
+            rollingToolResultTokens: any;
+            activeToolResultTokens: any;
+            incrementalPayloadTokens: any;
+            projectedToolResultTokens: any;
+            savedToolResultTokens: any;
+            projectionFallbackCount: any;
+            publicStablePrefixTokens: any;
+            agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
+            tokenReuseRate: number;
+            cacheableUtilizationRate: number;
+            dynamicSuffixRate: number;
+            duplicateToolResultRate: number;
+        };
+        recent50: {
+            samples: number;
+            logicalCalls: number;
+            reportedSamples: number;
+            logicalReportedCalls: number;
+            unreportedSamples: number;
+            physicalAttemptCount: number;
+            failedAttemptCount: number;
+            hits: number;
+            misses: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            cacheReportedCalls: number;
+            fullReuseRequestRate: number;
+            partialReuseRequestRate: number;
+            baselineOnlyRequestRate: number;
+            requestHitRate: number;
+            cacheReadTokens: any;
+            directInputTokens: any;
+            cacheCreationInputTokens: any;
+            providerInputTokens: any;
+            totalContextTokens: any;
+            diagnosticSamples: number;
+            cacheablePrefixTokens: any;
+            uncachedSuffixTokens: any;
+            duplicateToolResultTokens: any;
+            stableToolSchemaTokens: any;
+            rollingHistoryTokens: any;
+            rollingToolResultTokens: any;
+            activeToolResultTokens: any;
+            incrementalPayloadTokens: any;
+            projectedToolResultTokens: any;
+            savedToolResultTokens: any;
+            projectionFallbackCount: any;
+            publicStablePrefixTokens: any;
+            agentStablePrefixTokens: any;
+            cacheUnreportedCalls: number;
+            cacheTokenReportingCoverage: number;
+            tokenReuseRate: number;
+            cacheableUtilizationRate: number;
+            dynamicSuffixRate: number;
+            duplicateToolResultRate: number;
+        };
+    };
     windowSize: number;
     diagnosticRequestCount: any;
     sessionId: string;
@@ -2108,6 +2436,9 @@ export declare function readProviderCacheSessionDiagnostics(binding: any, _lates
     reportedRequestCount: number;
     hitRequestCount: number;
     requestHitRate: any;
+    cacheReportedCalls: any;
+    cacheUnreportedCalls: any;
+    cacheTokenReportingCoverage: any;
     cacheReadInputTokens: number;
     directInputTokens: number;
     cacheCreationInputTokens: number;
@@ -2132,6 +2463,12 @@ export declare function readProviderCacheSessionDiagnostics(binding: any, _lates
     fullReuseRequestRate: any;
     partialReuseRequestRate: any;
     baselineOnlyRequestRate: any;
+    execution_origin: any;
+    binding_mode: any;
+    cache_preparation_status: any;
+    cache_usage_reported: boolean;
+    cache_eligibility: any;
+    cache_eligibility_reason: any;
     latestProviderCacheReuseClass: string;
     latestProviderCacheMatchedTokens: number;
     latestProviderCacheCandidateTokens: number;
@@ -2159,6 +2496,145 @@ export declare function readProviderCacheSessionDiagnostics(binding: any, _lates
     toolSchemaChecksum: string;
     toolSchemaVersion: string;
     compactionWarningLevel: any;
+    requestGroups: {
+        main: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+        auxiliary: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+        probe: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+        unattributed: {
+            cacheReportedAttempts: number;
+            reportedAttempts: number;
+            totalInputTokens: number;
+            cacheReadInputTokens: number;
+            fullReuseRequests: number;
+            partialReuseRequests: number;
+            baselineOnlyRequests: number;
+            missRequests: number;
+            request_hit_rate: number;
+            token_reuse_rate: number;
+            total_input_tokens: any;
+            cache_known_input_tokens: any;
+            cache_token_reporting_coverage: number;
+            baseline_only_rate: number;
+            cache_preparation_coverage: number;
+            logical_calls: number;
+            physical_attempts: number;
+            cache_reported_calls: number;
+            cache_unreported_calls: number;
+            reported_cost_usd: any;
+            estimated_cost_usd: any;
+            cost_unreported_attempts: number;
+            by_origin: {
+                [k: string]: number;
+            };
+            contentStored: boolean;
+            attempts: number;
+            logicalCalls: number;
+        };
+    };
+    request_hit_rate: number;
+    token_reuse_rate: number;
+    total_input_tokens: any;
+    cache_known_input_tokens: any;
+    cache_token_reporting_coverage: number;
+    baseline_only_rate: number;
+    cache_preparation_coverage: number;
+    logical_calls: number;
+    physical_attempts: number;
+    cache_reported_calls: number;
+    cache_unreported_calls: number;
+    reported_cost_usd: any;
+    estimated_cost_usd: any;
+    cost_unreported_attempts: number;
+    by_origin: {
+        [k: string]: number;
+    };
     recentRequests: {
         wireLayoutVersion: string;
         publicPrefixChecksum: string;
@@ -2181,6 +2657,11 @@ export declare function readProviderCacheSessionDiagnostics(binding: any, _lates
         requestId: string;
         logicalCallId: string;
         attempt: number;
+        validationRunId?: string;
+        validationOrdinal?: number;
+        httpStatus?: number;
+        configurationChanged?: boolean;
+        cacheIdentityPreserved?: boolean;
         attribution: import("./provider-request-diagnostics").RequestAttribution;
         protocol: string;
         model: string;
@@ -2225,52 +2706,6 @@ export declare function readProviderCacheSessionDiagnostics(binding: any, _lates
         previousBreakpointChecksums: any;
         contentStored: boolean;
     }[];
-    requestGroups: {
-        main: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-        auxiliary: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-        probe: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-        unattributed: {
-            attempts: number;
-            logicalCalls: number;
-            reportedAttempts: number;
-            totalInputTokens: number;
-            cacheReadInputTokens: number;
-            fullReuseRequests: number;
-            partialReuseRequests: number;
-            baselineOnlyRequests: number;
-            missRequests: number;
-        };
-    };
     schema: string;
 };
 export type SessionCacheDiagnostics = ReturnType<typeof readProviderCacheSessionDiagnostics>;

@@ -206,6 +206,7 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
     content: string;
 };
 export declare function runLlmGroupOrchestrator(input: {
+    sourceInquiryContext?: any;
     group: any;
     message: string;
     context?: string;

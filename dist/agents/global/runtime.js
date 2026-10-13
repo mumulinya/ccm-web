@@ -116,6 +116,9 @@ function toolTitle(name) {
     return String(name || "").split("_").filter(Boolean).map(part => part[0]?.toUpperCase() + part.slice(1)).join(" ") || "Tool";
 }
 function schemaForSpec(spec) {
+    const source = require('../../system/global-source-model-content').globalSourceToolSchema(spec.name);
+    if (source)
+        return source;
     const douyin = (0, douyin_tool_schema_1.douyinToolSchema)(spec.name, spec.required);
     if (douyin)
         return douyin;

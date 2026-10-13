@@ -9,9 +9,7 @@ const storage_1 = require("./storage");
 const group_orchestrator_1 = require("./group-orchestrator");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const model_capability_cache_1 = require("./model-capability-cache");
-const provider_cache_capability_probe_1 = require("../../system/provider-cache-capability-probe");
 const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
-const provider_cache_capability_registry_2 = require("../../system/provider-cache-capability-registry");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const context_engine_observability_1 = require("../../system/context-engine-observability");
 const context_engine_recovery_1 = require("../../system/context-engine-recovery");
@@ -64,7 +62,6 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
         req.on("end", () => {
             try {
                 const updates = JSON.parse(body);
-                const previousConfig = (0, group_orchestrator_1.loadOrchestratorConfig)();
                 const config = (0, group_orchestrator_1.saveOrchestratorConfig)(updates);
                 if (Number(config.modelContextWindow || 0) > 0
                     && ["modelContextWindow", "model_context_window", "memoryContextPreset", "memory_context_preset"].some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
@@ -82,10 +79,6 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
                     const { startGroupSessionRetentionMaintenanceScheduler } = require("./group-session-maintenance");
                     startGroupSessionRetentionMaintenanceScheduler();
                 }
-                const previousIdentity = (0, provider_cache_capability_registry_2.providerCacheCapabilityIdentity)(previousConfig).identityChecksum;
-                const nextIdentity = (0, provider_cache_capability_registry_2.providerCacheCapabilityIdentity)(config).identityChecksum;
-                if (previousIdentity !== nextIdentity)
-                    (0, provider_cache_capability_probe_1.scheduleProviderCacheCapabilityProbe)(config, { force: true });
                 (0, utils_1.sendJson)(res, { success: true, config: (0, group_orchestrator_1.publicOrchestratorConfig)(config) });
             }
             catch (e) {
@@ -96,8 +89,6 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
     }
     if (pathname === "/api/orchestrator/connection-test" && req.method === "POST") {
         void (0, group_orchestrator_1.testUnifiedModelConnection)().then(result => {
-            if (result.success)
-                (0, provider_cache_capability_probe_1.scheduleProviderCacheCapabilityProbe)((0, group_orchestrator_1.loadOrchestratorConfig)());
             (0, utils_1.sendJson)(res, result, result.success ? 200 : 422);
         }).catch((error) => {
             (0, utils_1.sendJson)(res, { success: false, message: error?.message || "模型连接测试失败" }, 500);
@@ -112,11 +103,7 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
     if (pathname === "/api/orchestrator/cache-capability/probe" && req.method === "POST") {
         if (!requireAdmin())
             return true;
-        void (0, provider_cache_capability_probe_1.probeProviderCacheCapability)((0, group_orchestrator_1.loadOrchestratorConfig)()).then(result => {
-            (0, utils_1.sendJson)(res, result, result.connection.success ? 200 : 422);
-        }).catch((error) => {
-            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "缓存能力探测失败" }, 500);
-        });
+        (0, utils_1.sendJson)(res, { success: false, code: "CACHE_PROBE_DISABLED", error: "主动缓存探测已停用，请从正常模型请求的用量查看实际缓存命中" }, 410);
         return true;
     }
     if (pathname === "/api/orchestrator/cache-capability/revoke" && req.method === "POST") {

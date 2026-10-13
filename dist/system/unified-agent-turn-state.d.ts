@@ -8,7 +8,7 @@ export declare function projectUnifiedAgentTurnState(events: UserVisibleAgentEve
     eventId: string;
     contentStored: boolean;
 } | {
-    state: "executing" | "waiting_user" | "planning" | "thinking" | "waiting_dependency" | "verifying";
+    state: "executing" | "waiting_user" | "planning" | "thinking" | "verifying" | "waiting_dependency";
     generation: number;
     terminal: boolean;
     showThinking: boolean;
@@ -24,7 +24,7 @@ export declare function projectUnifiedAgentTurnStates(events: UserVisibleAgentEv
         eventId: string;
         contentStored: boolean;
     } | {
-        state: "executing" | "waiting_user" | "planning" | "thinking" | "waiting_dependency" | "verifying";
+        state: "executing" | "waiting_user" | "planning" | "thinking" | "verifying" | "waiting_dependency";
         generation: number;
         terminal: boolean;
         showThinking: boolean;

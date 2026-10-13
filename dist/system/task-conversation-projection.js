@@ -5,6 +5,7 @@ exports.syncTaskConversationProjection = syncTaskConversationProjection;
 exports.reconcileTaskConversationProjections = reconcileTaskConversationProjections;
 exports.reconcileTaskConversationProjectionsAsync = reconcileTaskConversationProjectionsAsync;
 exports.shouldSyncTaskConversationProjection = shouldSyncTaskConversationProjection;
+const task_session_boundary_1 = require("../modules/collaboration/task-session-boundary");
 const db_1 = require("../core/db");
 const collaboration_task_card_1 = require("../modules/collaboration/collaboration-task-card");
 const task_user_runtime_1 = require("../agents/task-user-runtime");
@@ -13,6 +14,8 @@ const task_session_store_1 = require("../modules/collaboration/task-session-stor
 const text = (value, max = 2_000) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const terminalStatuses = new Set(["done", "completed", "success", "failed", "blocked", "cancelled", "canceled", "interrupted"]);
 function scopeOf(task) {
+    if (task?.task_session_boundary_version && task.source_conversation_ref?.scope)
+        return task.source_conversation_ref.scope;
     if (text(task?.group_id || task?.groupId, 200))
         return "group";
     if (text(task?.project_session_id || task?.projectSessionId, 300) || text(task?.orchestration_scope, 80) === "project_session")
@@ -34,6 +37,8 @@ function scopeOf(task) {
     return "global";
 }
 function sourceSessionOf(task) {
+    if (task?.task_session_boundary_version)
+        return text(task?.source_conversation_ref?.exactSessionId, 300);
     return text(task?.exact_session_id || task?.group_session_id || task?.project_session_id || task?.origin_session_id || task?.source_conversation_ref?.exactSessionId, 300);
 }
 function activeSessionOf(task) {
@@ -138,12 +143,14 @@ function publicTaskProjection(task, activeSessionId) {
         ? task.verification
         : Array.isArray(task?.delivery_summary?.verification) ? task.delivery_summary.verification
             : Array.isArray(task?.receipt?.verification) ? task.receipt.verification : [];
+    const userWorkflow = require("../agents/user-workflow-projection").readUserWorkflow(task);
     const projected = {
+        user_workflow: userWorkflow,
         id: text(task?.id, 160),
         task_id: text(task?.id, 160),
         trace_id: text(task?.trace_id, 160),
         project: text(task?.target_project || task?.project_id || task?.project, 240),
-        project_session_id: text(task?.project_session_id, 300),
+        project_session_id: task?.task_session_boundary_version && (0, task_session_boundary_1.isPrivateTaskSessionId)(task?.project_session_id) ? "" : text(task?.project_session_id, 300),
         project_main_run_id: text(task?.project_main_run_id || task?.run_id, 180),
         status: text(task?.status, 40),
         phase: runtimeStatus.phase,
@@ -179,18 +186,18 @@ function publicTaskProjection(task, activeSessionId) {
         recovery_transaction: task?.recovery_transaction || null,
         task_session: (() => {
             const session = (0, task_session_store_1.getTaskSession)(text(task?.id, 160));
-            return session ? { available: true, session_id: session.session_id, title: session.title, action_label: "查看任务会话" } : { available: false };
+            return session ? { available: (0, task_session_boundary_1.taskSessionOpeningState)(task).open, session_id: session.session_id, title: session.title, action_label: "查看任务会话" } : { available: false };
         })(),
         task_context_revision: Math.max(0, Number(task?.task_context_revision || task?.task_context?.revision || 0)),
         task_context_checksum: text(task?.task_context_checksum || task?.task_context?.checksum, 160),
-        available_actions: terminal && ["done", "completed", "cancelled", "canceled"].includes(task?.status) ? [] : (0, collaboration_task_card_1.buildUserTaskActions)(task, runtimeStatus.phase, []),
+        available_actions: terminal && ["done", "completed", "cancelled", "canceled"].includes(task?.status) ? [] : require("../agents/user-workflow-projection").filterUserWorkflowActions(userWorkflow, (0, collaboration_task_card_1.buildUserTaskActions)(task, runtimeStatus.phase, [])),
     };
     return {
         ...projected,
         revision: projectionRevision(task),
         execution_attempt: taskAttempt(task),
         source_session_id: sourceSessionOf(task),
-        active_execution_session_id: activeSessionId,
+        active_execution_session_id: task?.task_session_boundary_version && (0, task_session_boundary_1.isPrivateTaskSessionId)(activeSessionId) ? "" : activeSessionId,
         conversation_projection_revision: projectionRevision(task),
         requires_card: true,
     };
@@ -243,7 +250,8 @@ function appendTerminalExecutionProjection(task, scope, scopeId, sessionId) {
     });
 }
 function syncProjectSession(task, sessionId, content, sourceLink) {
-    const project = text(task?.target_project || task?.project_id || task?.project, 240);
+    const project = text(task?.task_session_boundary_version && task.source_conversation_ref?.scope === "project"
+        ? task.source_conversation_ref.scopeId : task?.target_project || task?.project_id || task?.project, 240);
     if (!project || !sessionId)
         return { status: "skipped", updated: false, issue: "project_session_identity_missing" };
     const sessions = require("../modules/projects/sessions");
@@ -292,12 +300,14 @@ function syncProjectSession(task, sessionId, content, sourceLink) {
     return { status: "synced", updated: true, issue: "" };
 }
 function syncGroupSession(task, sessionId, content, sourceLink = false) {
-    const groupId = text(task?.group_id || task?.groupId, 240);
+    const groupId = text(task?.task_session_boundary_version && task.source_conversation_ref?.scope === "group"
+        ? task.source_conversation_ref.scopeId : task?.group_id || task?.groupId, 240);
     if (!groupId || !sessionId)
         return { status: "skipped", updated: false, issue: "group_session_identity_missing" };
     const runtime = require("../modules/collaboration/collaboration-runtime-task-queue");
     const result = runtime.updateGroupTaskInlineStatus({
         ...task,
+        group_id: groupId,
         group_session_id: sessionId,
         conversation_projection_content: content,
         conversation_projection_source_link: sourceLink,
@@ -335,7 +345,8 @@ function syncTaskConversationProjection(task, reason = "task_updated") {
     const taskId = text(task?.id, 160);
     const scope = scopeOf(task);
     const sourceSessionId = sourceSessionOf(task);
-    const activeSessionId = activeSessionOf(task);
+    const runtimeSessionId = activeSessionOf(task);
+    const activeSessionId = (0, task_session_boundary_1.isPrivateTaskSessionId)(runtimeSessionId) ? sourceSessionId : runtimeSessionId;
     const receipt = {
         schema: "ccm-task-conversation-projection-receipt-v1",
         taskId,
@@ -465,6 +476,7 @@ function shouldSyncTaskConversationProjection(updates) {
         "file_changes", "verification", "work_items", "receipt", "recovery", "recovery_pending", "recovery_preflight",
         "recovery_transaction", "execution_attempt", "active_execution_session_id", "execution_session_id", "task_context",
         "queue_state", "queue_position", "queue_target_key", "queued_at",
+        "dispatch_profile", "dispatch_profile_snapshot", "scope_expansion_requests", "dispatch_delivery_approvals", "rework_round", "rework_exhausted",
     ].some(key => keys.has(key));
 }
 //# sourceMappingURL=task-conversation-projection.js.map

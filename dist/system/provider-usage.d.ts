@@ -5,6 +5,7 @@
  */
 export type NormalizedProviderUsage = {
     reported: boolean;
+    cacheUsageReported: boolean;
     directInputTokens: number;
     cacheReadInputTokens: number;
     cacheCreationInputTokens: number;

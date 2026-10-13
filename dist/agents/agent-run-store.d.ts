@@ -58,6 +58,20 @@ export declare function appendAgentRunEvent(runId: string, event: {
     previousChecksum: string;
     createdAt: string;
 };
+export declare function appendAgentRunEventInTransaction(db: Database.Database, runId: string, event: Parameters<typeof appendAgentRunEvent>[1]): {
+    checksum: string;
+    eventId: string;
+    runId: string;
+    sequence: number;
+    eventType: string;
+    status: string;
+    message: string;
+    payload: any;
+    payloadRef: string;
+    idempotencyKey: string;
+    previousChecksum: string;
+    createdAt: string;
+};
 export declare function touchAgentRunLease(runId: string, leaseId?: string): AgentRun;
 /** Persist provider/session bindings discovered after a Runtime starts. */
 export declare function updateAgentRunBindings(runId: string, patch: {

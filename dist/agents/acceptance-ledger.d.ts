@@ -40,8 +40,9 @@ type Ledger = {
     contract: AcceptanceContract;
     executions: AcceptanceExecution[];
     observations: AcceptanceObservation[];
+    history?: Omit<Ledger, "history">[];
 };
-export declare function readAcceptanceLedger(taskId: string): Ledger | null;
+export declare function readAcceptanceLedger(taskId: string, contractChecksum?: string): Ledger | null;
 export declare function registerAcceptanceExecution(contract: AcceptanceContract, input: {
     projectId: string;
     workItemId: string;

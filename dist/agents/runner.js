@@ -50,6 +50,7 @@ const runtime_tool_sync_1 = require("../tools/runtime-tool-sync");
 const db_1 = require("../core/db");
 const storage_1 = require("../modules/collaboration/storage");
 const role_skills_1 = require("../skills/role-skills");
+const group_runner_assignment_1 = require("./group-runner-assignment");
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const internal_mcp_runtime_1 = require("../integrations/internal-mcp-runtime");
 const execution_kernel_1 = require("./execution-kernel");
@@ -65,6 +66,9 @@ const agent_cache_affinity_1 = require("../system/agent-cache-affinity");
 const provider_cache_scope_metrics_1 = require("../system/provider-cache-scope-metrics");
 const agent_run_store_1 = require("./agent-run-store");
 const agent_runtime_adapter_1 = require("./agent-runtime-adapter");
+const external_runner_fence_1 = require("./external-runner-fence");
+const dispatch_runtime_launch_1 = require("./dispatch-runtime-launch");
+const dispatch_tool_continuation_1 = require("./dispatch-tool-continuation");
 const agent_receipt_resolution_1 = require("./agent-receipt-resolution");
 const agent_execution_coordinator_1 = require("./agent-execution-coordinator");
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
@@ -378,7 +382,7 @@ function validateRuntimeToolSnapshotV2(request, snapshot, currentScope, options 
         const taskProject = String(task?.target_project || task?.project || "");
         const taskGroup = String(task?.group_id || "");
         const taskSession = String(task?.group_session_id || task?.project_session_id || "");
-        if (taskProject && taskProject !== requestProject)
+        if (taskProject && taskProject !== requestProject && !(0, group_runner_assignment_1.validateGroupRunnerAssignment)(task, identity))
             return { ok: false, reason: "任务与运行时授权项目不匹配" };
         if (taskGroup !== requestGroup)
             return { ok: false, reason: "任务与运行时授权群聊不匹配" };
@@ -733,6 +737,14 @@ async function runRequest(file) {
         finishAgentRun("cancelled", "外部 Agent Runner 启动前已取消", { error: { code: "cancelled" } });
         return true;
     }
+    try {
+        (0, external_runner_fence_1.authorizeExternalRunnerLaunch)(request);
+    }
+    catch {
+        writeJsonAtomic(resultFile, { id: request.id, success: false, error: "外部 Runner 启动门禁或租约校验失败", completed_at: new Date().toISOString() });
+        markRequest(file, { status: "failed", completed_at: new Date().toISOString(), error: "运行门禁阻止启动" });
+        return true;
+    }
     markRequest(file, { status: "running", runner_pid: process.pid, started_at: new Date().toISOString() });
     finishAgentRun("running", "外部 Agent Runner 已开始执行", { leaseId: request.leaseId || request.lease_id || "" });
     writeHeartbeat("running", `${request.projectName || "agent"} ${request.id}`);
@@ -787,14 +799,14 @@ async function runRequest(file) {
         if (providerMemoryChannel.developerPrompt)
             fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
         let effectiveAgentSession = request.agentSession || {};
-        let providerCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(msgFile, {
+        let providerCommand = await (0, dispatch_runtime_launch_1.buildRuntimeLaunchCommand)(agentType, msgFile, {
             cliAllowedTools,
             disableBuiltinTools: request.disableBuiltinTools === true,
             mcpConfigPath: effectiveMcpConfigPath,
             appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
             developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
             ...effectiveAgentSession,
-        });
+        }, { taskId, runId: agentRunId, workspacePath: workDir, taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id });
         providerMemoryChannelEvidence = (0, provider_memory_channel_1.bindProviderMemoryChannelLaunch)(providerMemoryChannel, {
             command: providerCommand,
             systemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
@@ -875,6 +887,8 @@ async function runRequest(file) {
         }
         let commandFailure = (0, runtime_1.detectAgentCommandFailure)(agentType, String(managed?.stdout || resumeLaunchError?.stdout || ""), managed?.exitCode ?? resumeLaunchError?.status ?? 1, String(managed?.stderr || resumeLaunchError?.stderr || resumeLaunchError?.message || ""));
         if (effectiveAgentSession?.resumeSession === true && (resumeLaunchError || (commandFailure.failed && isMissingNativeSessionFailure(commandFailure.message)))) {
+            if ((0, db_1.loadTasks)().find(task => task.id === taskId)?.dispatch_profile_snapshot)
+                throw Object.assign(new Error("原生 Session 在启动后失效，禁止自动重放任务；需恢复核验"), { code: "CCM_DISPATCH_RESUME_UNVERIFIED" });
             // The CCM task remains recoverable even when the provider's native
             // conversation cache has been cleaned. Re-run the same signed work
             // packet in a fresh provider session inside this attempt; do not fake a
@@ -887,14 +901,14 @@ async function runRequest(file) {
                 resumeSession: false,
                 sessionId: "",
             };
-            providerCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(msgFile, {
+            providerCommand = await (0, dispatch_runtime_launch_1.buildRuntimeLaunchCommand)(agentType, msgFile, {
                 cliAllowedTools,
                 disableBuiltinTools: request.disableBuiltinTools === true,
                 mcpConfigPath: effectiveMcpConfigPath,
                 appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
                 developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
                 ...effectiveAgentSession,
-            });
+            }, { taskId, runId: agentRunId, workspacePath: workDir });
             providerMemoryChannelEvidence = (0, provider_memory_channel_1.bindProviderMemoryChannelLaunch)(providerMemoryChannel, {
                 command: providerCommand,
                 systemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
@@ -1003,16 +1017,22 @@ async function runRequest(file) {
                     trustedMemoryEnvelopeSourceChecksum: request.trustedMemoryEnvelopeSourceChecksum || "",
                     providerWorkCompleted: true,
                 }, async (recoveryRequest) => {
+                    const binding = (0, dispatch_tool_continuation_1.bindDispatchToolContinuation)({ taskId, executionId, parentRunId: agentRunId, agentType, round: -1 });
+                    (0, dispatch_tool_continuation_1.recordDispatchToolContinuationUsage)(binding, normalizedOutput.usage, 0);
+                    await (0, dispatch_tool_continuation_1.observeDispatchToolContinuation)(binding, nativeContinuationEvidence);
                     fs.writeFileSync(memoryReceiptRecoveryPromptFile, recoveryRequest.prompt, "utf-8");
-                    const recoveryCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(memoryReceiptRecoveryPromptFile, {
+                    const recoveryCommand = await (0, dispatch_runtime_launch_1.buildRuntimeLaunchCommand)(agentType, memoryReceiptRecoveryPromptFile, {
                         cliAllowedTools,
                         mcpConfigPath: effectiveMcpConfigPath,
                         persistSession: true,
                         resumeSession: true,
                         sessionId: recoveryRequest.nativeSessionId,
-                    });
+                    }, binding ? { ...binding, runId: binding.agentRunId || binding.parentRunId } : {});
                     const recoveryRun = await (0, execution_kernel_1.runManagedCommand)({
-                        taskId: `${taskId}:memory-receipt-recovery`,
+                        taskId,
+                        executionId,
+                        agentType,
+                        leaseOwnerId: request.leaseOwnerId || "",
                         command: recoveryCommand,
                         cwd: workDir,
                         timeoutMs: Math.min(60_000, Math.max(15_000, timeoutMs)),
@@ -1029,9 +1049,11 @@ async function runRequest(file) {
                         worktreeId: request.worktreeId || request.worktree_id,
                         triggerType: "resume",
                         deferAgentRunFinalization: true,
+                        ...(binding || {}),
                     });
                     memoryReceiptRecoveryProviderOutput = String(recoveryRun.stdout || "");
                     const recoveryOutput = (0, runtime_1.normalizeAgentCommandOutput)(agentType, memoryReceiptRecoveryProviderOutput, { runtimeVersionSnapshot });
+                    (0, dispatch_tool_continuation_1.recordDispatchToolContinuationUsage)(binding, recoveryOutput.usage, -1);
                     return {
                         success: true,
                         exitCode: recoveryRun.exitCode,
@@ -1159,12 +1181,14 @@ async function runRequest(file) {
         (0, execution_kernel_1.disposeManagedCommandRawOutput)(error);
         const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
         const cancelled = failure.failureClass === "cancelled";
+        const recoveryRequired = error?.code === "CCM_DISPATCH_RESUME_UNVERIFIED";
         const output = failure.failureClass === "timeout" ? "Agent 响应超时" : failure.message.slice(0, 4000);
         const fileChanges = (0, utils_1.getFileChanges)(request.projectName || "", changeSnapshot);
         writeJsonAtomic(resultFile, {
             id: request.id,
             success: false,
             cancelled,
+            recoveryRequired,
             sessionLifecycleStale: !!runtimeSessionLifecycleValidation,
             session_lifecycle_stale: !!runtimeSessionLifecycleValidation,
             sessionLifecycleValidation: runtimeSessionLifecycleValidation,
@@ -1188,7 +1212,7 @@ async function runRequest(file) {
         markRequest(file, { status: cancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), error: output });
         if (executionId)
             (0, execution_kernel_1.transitionExecution)(executionId, cancelled ? "cancelled" : "failed", output, { failure, failureClass: failure.failureClass });
-        finishAgentRun(cancelled ? "cancelled" : "failed", cancelled ? "外部 Agent Runner 已取消" : "外部 Agent Runner 执行失败", {
+        finishAgentRun(recoveryRequired ? "recovery_required" : cancelled ? "cancelled" : "failed", cancelled ? "外部 Agent Runner 已取消" : "外部 Agent Runner 执行失败", {
             error: { code: failure.failureClass || "runner_failed", message: output.slice(0, 1000) },
         });
     }

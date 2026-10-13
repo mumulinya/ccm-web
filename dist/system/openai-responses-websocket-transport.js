@@ -44,6 +44,8 @@ exports.probeResponsesWebSocket = probeResponsesWebSocket;
 exports.runResponsesWebSocketSelfTest = runResponsesWebSocketSelfTest;
 const undici_1 = require("undici");
 const crypto = __importStar(require("crypto"));
+const provider_request_diagnostics_1 = require("./provider-request-diagnostics");
+const cache_validation_budget_1 = require("./cache-validation-budget");
 function safeError(value) {
     return String(value?.message || value || "Responses WebSocket failed").replace(/[\r\n\t]+/g, " ").slice(0, 300);
 }
@@ -113,7 +115,15 @@ class EventQueue {
             } };
     }
 }
-async function requestResponsesWebSocket(endpoint, init = {}) {
+async function requestResponsesWebSocket(endpoint, init = {}, meta) {
+    if (!responsesWebSocketUrl(endpoint, init.responsesWebSocketUrl))
+        throw new Error('Responses WebSocket URL is invalid');
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body;
+    if (!Array.isArray(body?.input))
+        throw new Error('Responses WebSocket input must be a list');
+    return (0, provider_request_diagnostics_1.auditedProviderFetch)(sendResponsesWebSocketRequest, endpoint, init, meta || { options: (0, provider_request_diagnostics_1.withRequestDiagnostics)(init.requestOptions || {}, init.config), config: init.config || {}, protocol: 'responses' });
+}
+async function sendResponsesWebSocketRequest(endpoint, init = {}) {
     const url = responsesWebSocketUrl(endpoint, init.responsesWebSocketUrl);
     if (!url)
         throw new Error("Responses WebSocket URL is invalid");
@@ -190,7 +200,45 @@ function sendResponsesCreate(connection, body) {
         throw new Error("Responses WebSocket connection is not writable");
     if (!Array.isArray(body?.input))
         throw new Error("Responses WebSocket input must be a list");
-    connection.send(JSON.stringify({ type: "response.create", ...body, store: false }));
+    const config = connection.config || {}, options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(connection.requestOptions || {}, config);
+    options._cacheValidationPermit = (0, cache_validation_budget_1.reserveCacheValidationRequest)(options, config, 'responses', 'websocket');
+    const request = { ...body, store: false };
+    (0, provider_request_diagnostics_1.startProviderAttempt)(options, config, request, 'responses', connection.url);
+    let closed = false;
+    const finish = (ok, usage, error) => {
+        if (closed)
+            return;
+        closed = true;
+        (0, provider_request_diagnostics_1.finishProviderAttempt)(options, { ok, usage, error });
+        connection.removeEventListener?.('message', message);
+        connection.removeEventListener?.('error', failed);
+        connection.removeEventListener?.('close', ended);
+    };
+    const message = (event) => {
+        let value;
+        try {
+            value = JSON.parse(String(event.data));
+        }
+        catch {
+            return;
+        }
+        if (value.type === 'response.completed')
+            finish(true, value.response?.usage);
+        else if (['response.failed', 'response.incomplete', 'error'].includes(value.type) || value.error)
+            finish(false, value.response?.usage, { code: 'CCM_RESPONSES_WEBSOCKET_FAILED' });
+    };
+    const failed = () => finish(false, undefined, { code: 'CCM_RESPONSES_WEBSOCKET_FAILED' });
+    const ended = () => finish(false, undefined, { code: 'CCM_RESPONSES_WEBSOCKET_CLOSED' });
+    connection.addEventListener?.('message', message);
+    connection.addEventListener?.('error', failed);
+    connection.addEventListener?.('close', ended);
+    try {
+        connection.send(JSON.stringify({ type: 'response.create', ...request }));
+    }
+    catch (error) {
+        finish(false, undefined, error);
+        throw error;
+    }
 }
 function closeResponsesWebSocket(connection) {
     try {
@@ -205,42 +253,50 @@ function isResponsesWebSocketSupported(config = {}) {
 }
 async function probeResponsesWebSocket(config, options = {}) {
     const endpoint = String(config?.apiUrl || "");
-    const response = await requestResponsesWebSocket(endpoint, {
-        timeoutMs: options.timeoutMs || 15000,
-        responsesWebSocketUrl: config?.responsesWebSocketUrl,
-        headers: { Authorization: `Bearer ${config?.apiKey || ""}` },
-        body: JSON.stringify({ model: config?.model, input: [{ role: "user", content: [{ type: "input_text", text: "Reply with OK" }] }], max_output_tokens: 8, store: false }),
-    });
-    let completed = false;
-    let usageReported = false;
-    const eventTypes = new Set();
-    let responseId = "";
-    for await (const chunk of response.body) {
-        const text = new TextDecoder().decode(chunk);
-        for (const line of text.split("\n"))
-            if (line.startsWith("data: ")) {
-                try {
-                    const event = JSON.parse(line.slice(6));
-                    const eventType = String(event?.type || "");
-                    if (eventType)
-                        eventTypes.add(eventType);
-                    if (["response.completed", "response.incomplete"].includes(eventType))
-                        completed = true;
-                    if (event?.response?.usage || event?.usage)
-                        usageReported = true;
-                    responseId = responseId || String(event?.response?.id || event?.id || "");
+    const auditOptions = (0, provider_request_diagnostics_1.withRequestDiagnostics)({ requestAttribution: { purpose: 'responses_websocket_probe', requestClass: 'probe' } }, config);
+    try {
+        const response = await requestResponsesWebSocket(endpoint, {
+            timeoutMs: options.timeoutMs || 15000,
+            responsesWebSocketUrl: config?.responsesWebSocketUrl,
+            headers: { Authorization: `Bearer ${config?.apiKey || ""}` },
+            body: JSON.stringify({ model: config?.model, input: [{ role: "user", content: [{ type: "input_text", text: "Reply with OK" }] }], max_output_tokens: 8, store: false }),
+        }, { options: auditOptions, config, protocol: 'responses' });
+        let completed = false;
+        let usageReported = false;
+        const eventTypes = new Set();
+        let responseId = "";
+        for await (const chunk of response.body) {
+            const text = new TextDecoder().decode(chunk);
+            for (const line of text.split("\n"))
+                if (line.startsWith("data: ")) {
+                    try {
+                        const event = JSON.parse(line.slice(6));
+                        const eventType = String(event?.type || "");
+                        if (eventType)
+                            eventTypes.add(eventType);
+                        if (["response.completed", "response.incomplete"].includes(eventType))
+                            completed = true;
+                        if (event?.response?.usage || event?.usage)
+                            usageReported = true;
+                        responseId = responseId || String(event?.response?.id || event?.id || "");
+                    }
+                    catch { }
                 }
-                catch { }
-            }
+        }
+        (0, provider_request_diagnostics_1.finishProviderAttempt)(auditOptions, { ok: completed });
+        return {
+            handshake: true,
+            responseCreate: completed,
+            usageReported,
+            responseIdPresent: !!responseId,
+            eventTypes: Array.from(eventTypes).sort(),
+            urlFingerprint: responsesWebSocketUrlFingerprint(responsesWebSocketUrl(endpoint, config?.responsesWebSocketUrl)),
+        };
     }
-    return {
-        handshake: true,
-        responseCreate: completed,
-        usageReported,
-        responseIdPresent: !!responseId,
-        eventTypes: Array.from(eventTypes).sort(),
-        urlFingerprint: responsesWebSocketUrlFingerprint(responsesWebSocketUrl(endpoint, config?.responsesWebSocketUrl)),
-    };
+    catch (error) {
+        (0, provider_request_diagnostics_1.finishProviderAttempt)(auditOptions, { ok: false, error });
+        throw error;
+    }
 }
 function runResponsesWebSocketSelfTest() {
     const https = responsesWebSocketUrl("https://gateway.example/v1/responses");

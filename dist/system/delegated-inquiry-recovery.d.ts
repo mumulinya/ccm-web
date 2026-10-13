@@ -30,6 +30,8 @@ export declare function requestRecoverableProjectSourceInquiry(input: {
     signal?: AbortSignal;
 }): Promise<RecoverableDelegatedInquiryResult>;
 export declare function requestRecoverableGroupSourceInquiry(input: {
+    sourceRun?: any;
+    principal?: any;
     group: any;
     exactSessionId: string;
     question: string;

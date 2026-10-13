@@ -46,6 +46,7 @@ exports.searchKnowledgeBase = searchKnowledgeBase;
 exports.queryKnowledgeBase = queryKnowledgeBase;
 exports.queryKnowledgeBaseScoped = queryKnowledgeBaseScoped;
 exports.runKnowledgeIndexSelfTest = runKnowledgeIndexSelfTest;
+const performance_monitor_1 = require("../../system/performance-monitor");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const knowledge_files_1 = require("./knowledge-files");
@@ -953,7 +954,10 @@ function keywordSearch(query, options = {}) {
         return { chunk, score, keywordScore, vectorScore, coverage, embeddingMode: "hashing" };
     }).filter(item => item.score > 0.02).sort((a, b) => b.score - a.score);
 }
-async function searchKnowledgeBase(query, options = {}) {
+function searchKnowledgeBase(...args) {
+    return (0, performance_monitor_1.measureAsyncPerformance)('knowledge.search', () => searchKnowledgeBaseMeasured(...args));
+}
+async function searchKnowledgeBaseMeasured(query, options = {}) {
     if (indexStatus.state !== "ready" && documentChunks.length === 0)
         await waitForKnowledgeIndex("search");
     if (indexStatus.state !== "ready" && documentChunks.length === 0) {

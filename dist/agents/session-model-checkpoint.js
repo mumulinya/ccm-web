@@ -92,7 +92,11 @@ function writeModelCheckpoint(value, expectedRevision) {
             throw Object.assign(new Error('会话模型检查点已被较新的执行更新'), { code: 'CCM_MODEL_CHECKPOINT_STALE' });
         if (previous?.turnId === value.turnId && previous.generation === value.generation && previous.attempt > value.attempt)
             throw Object.assign(new Error('旧 attempt 不得覆盖模型检查点'), { code: 'CCM_MODEL_CHECKPOINT_STALE' });
-        const body = { ...value, revision: expectedRevision + 1 };
+        const body = { ...value, messages: require('../system/global-source-model-content').sourceSafeCheckpointValue(value.messages),
+            pending: require('../system/global-source-model-content').sourceSafeCheckpointValue(value.pending),
+            toolBatches: require('../system/global-source-model-content').sourceSafeCheckpointValue(value.toolBatches),
+            source: { ...value.source, pending: require('../system/global-source-model-content').sourceSafeCheckpointValue(value.source?.pending),
+                afterPending: require('../system/global-source-model-content').sourceSafeCheckpointValue(value.source?.afterPending) }, revision: expectedRevision + 1 };
         const next = { ...body, checksum: (0, exports.modelCheckpointHash)(body) };
         (0, atomic_json_file_1.writeJsonAtomic)(file, next);
         return next;
@@ -117,11 +121,14 @@ function stamp(row, index) {
 function replaySourceFor(input) {
     if (!input.persistContext?.sessionId)
         return;
+    const last = (input.conversation || []).at(-1);
+    const currentUserMessageId = last?.role === 'user' && String(last.content ?? last.text ?? '') === String(input.currentUserText || '')
+        ? String(last.id || last.uuid || last.messageId || '') : undefined;
     return { identity: input.persistContext, family: input.family || 'openai',
         protocolFamily: input.protocolFamily || (input.family === 'json' ? 'openai' : input.family || 'openai'),
         boundary: (0, exports.modelCheckpointHash)({ summary: input.canonicalSummary, placement: input.canonicalSummaryPlacement, pivot: input.canonicalSummaryAfterMessageId,
             cleared: Array.from(input.clearedToolCallIds || []), replaced: input.replacedToolResults instanceof Map ? [...input.replacedToolResults] : input.replacedToolResults }),
-        conversation: (input.conversation || []).map(stamp), currentUserText: String(input.currentUserText || ''),
+        conversation: (input.conversation || []).map(stamp), currentUserText: String(input.currentUserText || ''), currentUserMessageId,
         metaChecksum: (0, exports.modelCheckpointHash)(input.metaBlocks || []),
         executionIds: (input.executionEvents || []).map((event) => event.id) };
 }
@@ -200,7 +207,7 @@ function restoreModelCheckpoint(input, source) {
                 && !resultRows.has(event.toolCallId))
                 resultRows.set(event.toolCallId, (0, model_tool_result_1.executionModelToolResult)(event));
         }
-        source.pending = { turn: saved.pending.turn, results: [...resultRows.values()] };
+        source.pending = { ...saved.pending, results: [...resultRows.values()] };
     }
     source.restoredRevision = saved.revision;
     // Checkpoints contain conversation content only; current policy comes from the adapter.
@@ -209,7 +216,10 @@ function restoreModelCheckpoint(input, source) {
     const suffix = additions;
     if (source.metaChecksum !== saved.source.metaChecksum && input.metaBlocks?.length)
         suffix.push({ role: 'user', isMeta: true, content: input.metaBlocks.map((block) => `【${block.title}】\n${block.body}`).join('\n\n') });
-    if (source.currentUserText)
+    const savedUserId = saved.source.currentUserMessageId || (saved.source.currentUserText === source.currentUserText ? saved.source.conversation.at(-1)?.id : undefined);
+    const sameSubmittedMessage = !!source.currentUserMessageId && source.currentUserMessageId === savedUserId
+        && source.currentUserText === saved.source.currentUserText && !saved.terminalText;
+    if (source.currentUserText && !sameSubmittedMessage)
         suffix.push({ role: 'user', content: source.currentUserText });
     if (saved.pending)
         source.afterPending = suffix;

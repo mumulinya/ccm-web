@@ -1013,6 +1013,7 @@ function normalizeLlmAnalysis(parsed, fallback) {
         needsCoordination: parsed?.shouldDelegate !== false,
         coordinationStrategy: String(parsed?.coordinationStrategy || fallback?.coordinationStrategy || (0, group_orchestrator_routing_1.inferCoordinatorStrategy)(fallback, Array.isArray(parsed?.targets) ? parsed.targets.length : 0)),
         architecturePlan: parsed?.architecturePlan || parsed?.architecture_plan || null,
+        implementationPlan: parsed?.implementationPlan || parsed?.implementation_plan || null,
         reasoning: {
             knownFacts: Array.isArray(parsed?.reasoning?.knownFacts) ? parsed.reasoning.knownFacts.map((x) => String(x)).filter(Boolean).slice(0, 20) : [],
             assumptionsToVerify: Array.isArray(parsed?.reasoning?.assumptionsToVerify) ? parsed.reasoning.assumptionsToVerify.map((x) => String(x)).filter(Boolean).slice(0, 20) : [],
@@ -1247,6 +1248,7 @@ async function runLlmGroupOrchestrator(input) {
             visibleTurnId,
             visibleAnchorMessageId,
             recoveryAttempt: Math.max(1, Number(input.recoveryAttempt || 1)),
+            sourceInquiryContext: input.sourceInquiryContext,
             signal: input.signal,
             onDelta: input.onDelta,
             onRetry: input.onRetry,

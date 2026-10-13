@@ -227,4 +227,6 @@ export declare function buildExecutionDashboard(limit?: number): {
 };
 export declare function continueDailyDevTasksFromGaps(ctx: CollabCtx, options?: any): any;
 export declare function continueTaskWithMessage(taskId: string, message: string, ctx: CollabCtx, options?: any): any;
-export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, autoExecute?: boolean, parentRunId?: string): any;
+export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, autoExecute?: boolean, parentRunId?: string, options?: {
+    automaticRecovery?: boolean;
+}): any;

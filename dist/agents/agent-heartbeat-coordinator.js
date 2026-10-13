@@ -168,10 +168,10 @@ function requestAgentHeartbeatInTransaction(db, input) {
         AND status IN ('queued', 'claimed')
       ORDER BY created_at DESC LIMIT 1
   `).get(text(input.agentId), scopeId, taskId);
-    // A Supervisor resume is intentionally attached to the recovering Run so
-    // the durable queue can be consumed by the existing Runner. Ordinary
-    // duplicate wakes still coalesce against an active Run.
-    const forceResume = reason === "resume" && requestedRunId && active?.runId === requestedRunId;
+    // Resume and an approved confirmation are intentionally attached to the
+    // existing Run so the durable queue can be consumed by the current Runner.
+    // Ordinary duplicate wakes still coalesce against an active Run.
+    const forceResume = (reason === "resume" || reason === "approval") && requestedRunId && active?.runId === requestedRunId;
     if ((active || existingPending) && !forceResume) {
         heartbeatCounters.activeRunDuplicate += active ? 1 : 0;
         heartbeatCounters.wakeCoalesced += 1;
@@ -654,22 +654,7 @@ function heartbeatMetrics(filters = {}) {
             eventValues.push(text(filters.to));
         }
         const eventWhere = eventFilters.length ? `WHERE ${eventFilters.join(" AND ")}` : "";
-        const diagnosticRows = db.prepare(`SELECT e.event_type, e.status, e.payload_json, r.error_json
-      FROM agent_run_events e JOIN agent_runs r ON r.run_id = e.run_id ${eventWhere}`).all(...eventValues);
-        const diagnosticReason = (row) => {
-            try {
-                const payload = JSON.parse(String(row.payload_json || "{}"));
-                const error = JSON.parse(String(row.error_json || "{}"));
-                return `${row.event_type || ""} ${JSON.stringify(payload)} ${JSON.stringify(error)}`.toLowerCase();
-            }
-            catch {
-                return String(row.event_type || "").toLowerCase();
-            }
-        };
-        const diagnosticCount = (matcher) => diagnosticRows.reduce((total, row) => total + (matcher(diagnosticReason(row), row) ? 1 : 0), 0);
-        const runtimeVersionIncompatible = diagnosticCount(value => value.includes("runtime_version_incompatible"));
-        const nativeSessionInvalid = diagnosticCount(value => value.includes("native_session_invalid") || value.includes("native_session_missing"));
-        const workspaceEvidenceFailed = diagnosticCount(value => value.includes("workspace") && (value.includes("drift") || value.includes("invalid") || value.includes("missing") || value.includes("changed")));
+        const { runtimeVersionIncompatible, nativeSessionInvalid, workspaceEvidenceFailed } = require('./agent-event-metrics-query').queryAgentEventDiagnostics(eventWhere, eventValues);
         const recoverySuccess = count(`SELECT COUNT(*) AS count FROM agent_run_events WHERE event_type IN ('run.recovered','run.recovery_in_place','run.recovering')`);
         const recoveryFailure = count(`SELECT COUNT(*) AS count FROM agent_run_events WHERE event_type='run.recovery_blocked'`) + count(`SELECT COUNT(*) AS count FROM agent_run_events WHERE event_type='run.recovery_forked'`);
         return {

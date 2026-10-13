@@ -3,13 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildProjectTestTargetBrowserChecks = buildProjectTestTargetBrowserChecks;
 exports.projectTestAgentProblems = projectTestAgentProblems;
 exports.projectTestAgentReworkProblems = projectTestAgentReworkProblems;
+exports.scopeAuditForTask = scopeAuditForTask;
 exports.runProjectTaskTestAgentReview = runProjectTaskTestAgentReview;
 const test_agent_runner_1 = require("../collaboration/test-agent-runner");
 const test_agent_review_policy_1 = require("../collaboration/test-agent-review-policy");
 const project_test_targets_1 = require("./project-test-targets");
 const evidence_projection_1 = require("../../test-agent/evidence-projection");
 const surface_audit_1 = require("../../test-agent/surface-audit");
-const scope_expansion_1 = require("../../agents/scope-expansion");
+const dispatch_profile_1 = require("../../agents/dispatch-profile");
 const runtime_fingerprint_1 = require("../../test-agent/runtime-fingerprint");
 const hardening_policy_1 = require("../../test-agent/hardening-policy");
 const completion_gate_1 = require("../../test-agent/completion-gate");
@@ -271,17 +272,16 @@ function explicitTaskVerificationCommands(task, workItems = []) {
     }
     return cleanList(values, 30, 300);
 }
-function scopeAuditForTask(task, actualFiles) {
-    const policy = task?.file_change_policy || {};
-    const initial = (policy.editablePaths || policy.initialEditablePaths || task?.editable_paths || task?.editablePaths || []);
-    const fixtures = (policy.synchronizedFixturePaths || task?.synchronized_fixture_paths || task?.synchronizedFixturePaths || []).map((item) => item?.path || item);
-    const allowed = new Set([...initial, ...fixtures, ...(0, scope_expansion_1.approvedScopePaths)(task)].map((p) => String(p || "").replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase()).filter(Boolean));
-    if (!allowed.size)
-        return { status: "unavailable", outOfScopeFiles: [] };
-    const outOfScopeFiles = actualFiles.filter(file => !allowed.has(String(file).replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase()));
-    return { status: outOfScopeFiles.length ? "blocked" : "passed", outOfScopeFiles };
+function scopeAuditForTask(task, actualFiles, workspacePath = "") {
+    const dispatchProfile = (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task).profile;
+    const dispatchScope = (0, dispatch_profile_1.resolveDispatchScope)(task);
+    const decisions = actualFiles.map(file => ({ file, decision: (0, dispatch_profile_1.evaluateDispatchPath)(file, dispatchScope, dispatchProfile, workspacePath || task.workspace_path || task.worktree_path) }));
+    const blocked = decisions.filter(row => !row.decision.allowed).map(row => row.file);
+    const advisoryFiles = decisions.filter(row => row.decision.advisory).map(row => row.file);
+    return { status: blocked.length ? "blocked" : "passed", outOfScopeFiles: blocked, advisoryFiles };
 }
 async function runProjectTaskTestAgentReview(input) {
+    input.task = require("../../core/db").loadTasks().find((task) => task.id === input.task.id) || input.task;
     const contractMetadata = require("../../agents/task-acceptance-service").taskAcceptanceVerificationMetadata(input.task.id, input.project);
     const targets = (0, project_test_targets_1.resolveProjectTestTargets)(input.project);
     const taskPlanCommands = explicitTaskVerificationCommands(input.task, input.workItems || []);
@@ -383,7 +383,7 @@ async function runProjectTaskTestAgentReview(input) {
         baselineRef: deliveryBaselineRef,
         mode: hardeningPolicy.surfaceAuditMode,
     });
-    const initialScopeAudit = scopeAuditForTask(input.task, surfaceAudit.actualFiles.map((item) => item.path));
+    const initialScopeAudit = scopeAuditForTask(input.task, surfaceAudit.actualFiles.map((item) => item.path), input.workDir);
     if (initialScopeAudit.status !== "unavailable") {
         surfaceAudit.scopeAudit = initialScopeAudit;
         if (initialScopeAudit.status === "blocked")
@@ -553,7 +553,7 @@ async function runProjectTaskTestAgentReview(input) {
         baselineRef: deliveryBaselineRef,
         mode: hardeningPolicy.surfaceAuditMode,
     });
-    const finalScopeAudit = scopeAuditForTask(input.task, surfaceAuditAfter.actualFiles.map((item) => item.path));
+    const finalScopeAudit = scopeAuditForTask(input.task, surfaceAuditAfter.actualFiles.map((item) => item.path), input.workDir);
     if (finalScopeAudit.status !== "unavailable") {
         surfaceAuditAfter.scopeAudit = finalScopeAudit;
         if (finalScopeAudit.status === "blocked")

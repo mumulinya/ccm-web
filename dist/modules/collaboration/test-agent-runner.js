@@ -57,6 +57,8 @@ const operation_registry_1 = require("../../system/operation-registry");
 const evidence_projection_1 = require("../../test-agent/evidence-projection");
 const runtime_fingerprint_1 = require("../../test-agent/runtime-fingerprint");
 const agent_run_store_1 = require("../../agents/agent-run-store");
+const dispatch_verification_identity_1 = require("../../agents/dispatch-verification-identity");
+const dispatch_test_agent_finalization_1 = require("../../agents/dispatch-test-agent-finalization");
 const agent_execution_coordinator_1 = require("../../agents/agent-execution-coordinator");
 const RUN_DIR = path.join(utils_1.CCM_DIR, "test-agent-runs");
 const HANDOFF_DIR = path.join(utils_1.CCM_DIR, "test-agent-handoffs");
@@ -478,6 +480,7 @@ async function waitForRecoveredRecord(record) {
     }
     if (!parsed && !record.error)
         record.error = "TestAgent process ended without a contract-valid result.";
+    (0, dispatch_test_agent_finalization_1.settleDispatchTestAgentRun)(record, parsed);
     saveRecord(record);
     const result = resultFromRecord(record, true);
     removeTransientOutputFiles(record);
@@ -510,24 +513,7 @@ function finalizeRecord(record, status, exitCode, signal, error = "") {
     }
     record.finishedAt = nowIso();
     record.heartbeatAt = record.finishedAt;
-    if (record.agentRunId) {
-        try {
-            const runStatus = record.status === "completed" ? "succeeded" : record.status === "cancelled" ? "cancelled" : record.status === "interrupted" ? "recovery_required" : "failed";
-            if (runStatus === "recovery_required") {
-                (0, agent_execution_coordinator_1.markPersistentAgentExecutionRecoveryRequired)(record.agentRunId, `TestAgent ${record.mode} 需要恢复`, record.error ? { message: record.error.slice(0, 500) } : {});
-            }
-            else {
-                (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({
-                    runId: record.agentRunId,
-                    leaseOwnerId: record.leaseOwnerId,
-                    status: runStatus,
-                    error: record.error ? { message: record.error.slice(0, 500) } : {},
-                    result: { status: record.status, runnerId: record.id },
-                });
-            }
-        }
-        catch { }
-    }
+    (0, dispatch_test_agent_finalization_1.settleDispatchTestAgentRun)(record, parsed);
     saveRecord(record);
     const result = resultFromRecord(record, false);
     removeTransientOutputFiles(record);
@@ -578,16 +564,15 @@ async function startJob(input, key) {
         const taskId = String(input.taskId || input.handoff?.taskId || input.handoff?.task_id || "");
         const groupId = String(input.groupId || input.handoff?.groupId || input.handoff?.group_id || "");
         record.leaseOwnerId = `test-agent:${process.pid}:${id}`;
+        const verificationIdentity = (0, dispatch_verification_identity_1.resolveDispatchVerificationIdentity)(taskId, input.handoff, String(input.attemptScope || input.mode));
         const coordinatedExecution = await (0, agent_execution_coordinator_1.startPersistentAgentExecution)({
-            taskId, traceId: String(input.handoff?.trace_id || input.handoff?.traceId || `task:${taskId}`),
-            attemptId: String(input.attemptScope || input.mode), parentRunId: String(input.handoff?.parent_run_id || ""),
-            scope: groupId ? "group" : "test_agent", scopeId: groupId || taskId, agentId: "test-agent", runtimeId: "test-agent",
+            taskId, ...verificationIdentity,
+            scope: "test_agent", scopeId: groupId || taskId, agentId: "test-agent", runtimeId: "test-agent",
             taskAgentSessionId: String(input.runtimeProgressContext?.exactSessionId || input.runtimeProgressContext?.exact_session_id || ""),
             nativeSessionId: String(input.handoff?.native_session_id || ""), executionId: id, workspacePath: String(input.allowedWorkDirs?.[0] || ""),
             triggerType: "user", source: "test-agent", idempotencyKey: `test-agent:${key}`, leaseOwnerId: record.leaseOwnerId,
         });
-        if (coordinatedExecution.mode === "coalesced")
-            throw Object.assign(new Error("TestAgent 已存在同一幂等执行"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinatedExecution.run.runId });
+        require("../../agents/agent-execution-coordinator").assertPersistentExecutionLaunchAllowed(coordinatedExecution);
         const run = coordinatedExecution.run;
         record.agentRunId = run.runId;
         (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(run.runId, coordinatedExecution.lease?.run?.leaseId || "");

@@ -13,6 +13,9 @@ export type ProjectSourceInquiryResultV1 = {
             checksum: string;
             evidenceId: string;
             chars: number;
+            startLine?: number;
+            endLine?: number;
+            truncated?: boolean;
         }>;
     };
     missingEvidence: Array<{

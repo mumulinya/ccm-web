@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-acceptance.ts — merged from 3 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -54,6 +53,8 @@ exports.buildTaskGapContinuationDraft = buildTaskGapContinuationDraft;
 exports.getTaskGapItems = getTaskGapItems;
 exports.getTaskGapFingerprint = getTaskGapFingerprint;
 exports.canAutoContinueTaskGaps = canAutoContinueTaskGaps;
+const dispatch_receipt_template_1 = require("../../agents/dispatch-receipt-template");
+const dispatch_quick_acceptance_1 = require("./dispatch-quick-acceptance");
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const task_acceptance_policy_1 = require("./task-acceptance-policy");
@@ -78,6 +79,8 @@ const collaboration_1 = require("./collaboration");
 // ===== merged from collaboration-acceptance-part-01-part-01.ts =====
 // Extracted functional module. The original entry remains a compatibility facade.
 function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, context = {}) {
+    if (!(0, dispatch_receipt_template_1.dispatchRequiresMemoryReceipt)(task))
+        return (0, dispatch_receipt_template_1.lightDispatchMemoryReceiptStatus)();
     const snapshots = Array.from(new Map((0, collaboration_1.getTaskAgentMemoryContextSnapshotSources)(context)
         .map(collaboration_1.summarizeTaskAgentMemoryContextSnapshot)
         .map((snapshot) => [
@@ -445,6 +448,7 @@ function scoreChildAgentReceipt(task, receipt = {}, context = {}) {
     const taskAgentMemorySnapshot = evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt, context);
     const snapshotMatchedGateIds = new Set(taskAgentMemorySnapshot.matched_gate_ids || []);
     const memoryGateProvenBySnapshot = memoryGate.required
+        && taskAgentMemorySnapshot.profile_exempt !== true
         && memoryGate.declared
         && taskAgentMemorySnapshot.pass === true
         && (memoryGate.missing_gate_ids || []).every((gateId) => snapshotMatchedGateIds.has(gateId));
@@ -452,6 +456,7 @@ function scoreChildAgentReceipt(task, receipt = {}, context = {}) {
         ? { ...memoryGate, pass: true, missing_gate_ids: [], proven_by_memory_context_snapshot: true }
         : memoryGate;
     const globalMemoryHealthProvenBySnapshot = globalMemoryHealthGate.required
+        && taskAgentMemorySnapshot.profile_exempt !== true
         && globalMemoryHealthGate.declared
         && taskAgentMemorySnapshot.pass === true
         && (globalMemoryHealthGate.missing_gate_ids || []).every((gateId) => snapshotMatchedGateIds.has(gateId))
@@ -468,15 +473,15 @@ function scoreChildAgentReceipt(task, receipt = {}, context = {}) {
     const handoffQuality = (0, collaboration_1.evaluateChildAgentHandoffQuality)(task, receipt);
     const checks = [
         { id: "status_done", label: "状态明确", ok: String(receipt.status || "") === "done" },
-        { id: "structured_ack", label: "结构化 ACK", ok: !!ack && (!!ack.understoodGoal || !!ack.goal || (Array.isArray(ack.plannedScope) && ack.plannedScope.length > 0)) },
+        { id: "structured_ack", label: "结构化 ACK", ok: !(0, dispatch_receipt_template_1.dispatchRequiresAck)(task) || !!ack && (!!ack.understoodGoal || !!ack.goal || (Array.isArray(ack.plannedScope) && ack.plannedScope.length > 0)) },
         { id: "summary", label: "说明完成内容", ok: String(receipt.summary || "").trim().length >= 8 },
         { id: "actions", label: "列出执行动作", ok: Array.isArray(receipt.actions) && receipt.actions.length > 0 },
         { id: "files", label: "列出文件变更", ok: !(0, collaboration_1.taskRequiresCodeChanges)(task) || (Array.isArray(receipt.filesChanged || receipt.files_changed || receipt.files) && (receipt.filesChanged || receipt.files_changed || receipt.files).length > 0) },
         { id: "verification", label: "列出已执行验证", ok: !(0, collaboration_1.taskRequiresVerification)(task) || (Array.isArray(receipt.verification || receipt.tests) && (receipt.verification || receipt.tests).length > 0) },
         { id: "not_handoff_only", label: "完成执行而非仅建议", ok: handoffQuality.pass, detail: handoffQuality.reason },
-        { id: "contract_changes", label: "结构化契约变化", ok: !contractLikely || contractChanges.length > 0 },
+        { id: "contract_changes", label: "结构化契约变化", ok: !(0, dispatch_receipt_template_1.dispatchRequiresAck)(task) || !contractLikely || contractChanges.length > 0 },
         { id: "no_open_blockers", label: "无开放阻塞", ok: !(Array.isArray(receipt.blockers) && receipt.blockers.length) && !(Array.isArray(receipt.needs) && receipt.needs.length) },
-        { id: "memory_declared", label: "声明记忆使用", ok: Array.isArray(receipt.memoryUsed || receipt.memory_used) || Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) },
+        { id: "memory_declared", label: "声明记忆使用", ok: !(0, dispatch_receipt_template_1.dispatchRequiresAck)(task) || Array.isArray(receipt.memoryUsed || receipt.memory_used) || Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) },
         { id: "task_agent_memory_snapshot", label: "匹配本轮记忆快照", ok: !taskAgentMemorySnapshot.required || taskAgentMemorySnapshot.pass, detail: taskAgentMemorySnapshot.required ? `snapshot=${taskAgentMemorySnapshot.matched_snapshot_ids.join(",") || "missing"} session=${taskAgentMemorySnapshot.receipt_task_agent_session_id || "missing"}` : "not_required" },
         { id: "memory_gate", label: "引用记忆派发 gate", ok: !effectiveMemoryGate.required || effectiveMemoryGate.pass, detail: effectiveMemoryGate.required ? `gate=${effectiveMemoryGate.gate_ids.join(",") || "unknown"}` : "not_required" },
         { id: "global_memory_usage", label: "声明全局记忆使用状态", ok: !globalMemoryGate.required || globalMemoryGate.pass, detail: globalMemoryGate.required ? `global_memory=${globalMemoryGate.global_memory_ids.join(",") || "unknown"}` : "not_required" },
@@ -587,13 +592,13 @@ function buildAcceptanceGate(task, execution, summary, finalStatus) {
     const readPlanRevalidationGateSummary = (0, collaboration_1.buildReadPlanRevalidationGateVisibleSummary)(summary);
     const reinjectionGateSummary = (0, collaboration_1.buildPostCompactReinjectionGateVisibleSummary)(summary);
     const apiMicrocompactSummary = (0, collaboration_1.buildApiMicrocompactReceiptVisibleSummary)(summary);
-    const taskAgentMemorySnapshotRequired = Number(summary.task_agent_memory_context_snapshot_count || summary.taskAgentMemoryContextSnapshotCount || 0) > 0;
+    const taskAgentMemorySnapshotRequired = (0, dispatch_receipt_template_1.dispatchRequiresMemoryReceipt)(task) && Number(summary.task_agent_memory_context_snapshot_count || summary.taskAgentMemoryContextSnapshotCount || 0) > 0;
     const checks = [
         { id: "coordinator_plan", label: "主 Agent 计划", ok: Number(summary.coordination_plan_count || 0) > 0, detail: `计划 ${summary.coordination_plan_count || 0} 条` },
         { id: "assignment", label: "子 Agent 派发", ok: Number(summary.assignment_count || 0) > 0 || task?.assign_type !== "group", detail: `派发 ${summary.assignment_count || 0} 条` },
         { id: "worker_receipt", label: "子 Agent 结果说明", ok: (summary.receipt_statuses || []).some((item) => item.status === "done") || task?.assign_type !== "group", detail: `结果说明 ${(summary.receipt_statuses || []).length} 条` },
         { id: "work_items", label: "执行队列收敛", ok: !summary.work_item_summary?.total || summary.work_item_summary?.all_completed === true, detail: summary.work_item_summary?.total ? `未完成 ${summary.team_shutdown?.unresolved_work_item_count || 0}/${summary.work_item_summary.total}` : "无独立工作项" },
-        { id: "ack_gate", label: "ACK 前置审核", ok: !((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task)) || summary.ack_gate_passed === true, detail: summary.ack_review?.rejected?.length ? `需重写 ACK ${summary.ack_review.rejected.length} 条` : "通过" },
+        { id: "ack_gate", label: "ACK 前置审核", ok: !(0, dispatch_receipt_template_1.dispatchRequiresAck)(task) || !((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task)) || summary.ack_gate_passed === true, detail: summary.ack_review?.rejected?.length ? `需重写 ACK ${summary.ack_review.rejected.length} 条` : "通过" },
         { id: "receipt_quality", label: "结果说明质量", ok: !(0, collaboration_1.taskRequiresCodeChanges)(task) && !(0, collaboration_1.taskRequiresVerification)(task) || summary.receipt_quality_gate_passed === true, detail: summary.weak_receipt_quality?.length ? `待补结果说明 ${summary.weak_receipt_quality.length} 条` : "通过" },
         { id: "task_agent_memory_snapshot_receipt", label: "子 Agent 记忆快照匹配", ok: !taskAgentMemorySnapshotRequired || summary.task_agent_memory_snapshot_receipt_passed === true, detail: taskAgentMemorySnapshotRequired ? `快照 ${summary.task_agent_memory_context_snapshot_count || 0} 个` : "未触发" },
         { id: "memory_gate_receipt", label: "记忆使用声明", ok: !memoryGateSummary.required || memoryGateSummary.pass === true, detail: memoryGateSummary.summary },
@@ -895,7 +900,7 @@ function buildDeliverySummary(task, execution, finalStatus) {
         ? true
         : doneReceiptQuality.length > 0 && doneReceiptQuality.every((item) => item.grade === "good");
     const taskAgentMemorySnapshotReceiptRows = receiptQuality.filter((item) => item.task_agent_memory_snapshot?.required);
-    const taskAgentMemorySnapshotReceiptPassed = taskAgentMemoryContextSnapshots.length === 0 || (taskAgentMemorySnapshotReceiptRows.length > 0 && taskAgentMemorySnapshotReceiptRows.every((item) => item.task_agent_memory_snapshot?.pass === true));
+    const taskAgentMemorySnapshotReceiptPassed = !(0, dispatch_receipt_template_1.dispatchRequiresMemoryReceipt)(task) || taskAgentMemoryContextSnapshots.length === 0 || (taskAgentMemorySnapshotReceiptRows.length > 0 && taskAgentMemorySnapshotReceiptRows.every((item) => item.task_agent_memory_snapshot?.pass === true));
     const memoryGateReceiptRows = receiptQuality.filter((item) => item.memory_gate?.required);
     const memoryGateReceiptPassed = memoryDispatchGates.length === 0 || (memoryGateReceiptRows.length > 0 && memoryGateReceiptRows.every((item) => item.memory_gate?.pass === true));
     const globalMemoryReceiptRows = receiptQuality.filter((item) => item.global_memory_gate?.required);
@@ -1013,7 +1018,7 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const ackReviewForGate = (0, protocol_gates_1.buildAckPreflightReview)(task, implementationReceiptEvidence, assignmentEvidence
         .filter((item) => !(0, collaboration_1.isCoordinatorTestAgentName)(item.project))
         .map((item) => ({ project: item.project, objective: item.task })));
-    const ackGatePassed = !((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task))
+    const ackGatePassed = !(0, dispatch_receipt_template_1.dispatchRequiresAck)(task) || !((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task))
         || (ackReviewForGate.status === "approved" && !ackReviewForGate.rejected?.length);
     const contractSyncForGate = (0, protocol_gates_1.extractContractSyncHints)(task, {
         receipts: receiptEvidence,
@@ -1056,10 +1061,11 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const resumedAgentQa = taskAgentQa.filter((item) => item.status === "resumed" || item.resumed_at);
     const agentQaRequired = (0, collaboration_1.taskRequiresAgentQa)(task);
     const acceptancePolicyResult = (0, task_acceptance_policy_1.resolveTaskAcceptancePolicy)(task);
-    const selfVerificationMode = acceptancePolicyResult.valid && acceptancePolicyResult.snapshot
+    const quickAcceptance = (0, dispatch_quick_acceptance_1.dispatchQuickAcceptance)(task);
+    const selfVerificationMode = quickAcceptance.enabled || (acceptancePolicyResult.valid && acceptancePolicyResult.snapshot
         ? !(0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(task, acceptancePolicyResult.snapshot)
-        : String(task?.acceptance_policy_snapshot?.mode || task?.acceptance_mode || "") === "main_agent_self_verification";
-    const selfVerificationGatePassed = selfVerificationMode
+        : String(task?.acceptance_policy_snapshot?.mode || task?.acceptance_mode || "") === "main_agent_self_verification");
+    const selfVerificationGatePassed = quickAcceptance.enabled ? quickAcceptance.passed : selfVerificationMode
         && task?.main_agent_self_verification?.canAccept === true
         && task?.main_agent_self_verification?.deterministic_gate?.pass === true;
     const independentReviewGate = selfVerificationMode
@@ -1069,7 +1075,7 @@ function buildDeliverySummary(task, execution, finalStatus) {
         required: independentReviewGate.required && independentReviewGate.pass,
         receipts: receiptEvidence,
     });
-    const independentVerificationSourcePassed = independentReviewGate.pass === true
+    const independentVerificationSourcePassed = independentReviewGate.required === true && independentReviewGate.pass === true
         && postReviewSpotCheckGate.pass === true;
     const headline = finalStatus === "done"
         ? "已完成最终验收"
@@ -1235,7 +1241,7 @@ function buildDeliverySummary(task, execution, finalStatus) {
         actual_file_change_count: actualFileChanges.length,
         has_actual_file_changes: actualFileChanges.length > 0,
         verification,
-        verification_executed: (0, collaboration_1.uniqueStrings)(verificationGate.executed, selfVerificationCommands),
+        verification_executed: (0, collaboration_1.uniqueStrings)(verificationGate.executed, selfVerificationCommands, quickAcceptance.commands),
         verification_suggested: verificationGate.suggested,
         verification_failed: verificationGate.failed,
         verification_required: requiredVerificationCoverage.required,
@@ -1244,6 +1250,7 @@ function buildDeliverySummary(task, execution, finalStatus) {
         external_runner_verification: externalRunnerVerification,
         external_runner_verification_count: externalRunnerVerification.length,
         verification_sources: [
+            ...(quickAcceptance.passed ? ["quick_check"] : []),
             ...(externalRunnerVerification.length ? ["external_runner"] : []),
             ...(independentVerificationSourcePassed ? ["test_agent_and_main_agent_spot_check"] : []),
             ...(verificationGate.executed.length > externalRunnerVerification.length ? ["agent_receipt"] : []),
@@ -1671,7 +1678,7 @@ function canCompleteDailyDevFromDeliverySummary(task, execution, summary) {
         return false;
     if (summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true)
         return false;
-    if (((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task)) && summary.ack_gate_passed !== true)
+    if ((0, dispatch_receipt_template_1.dispatchRequiresAck)(task) && ((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task)) && summary.ack_gate_passed !== true)
         return false;
     if (((0, collaboration_1.taskRequiresCodeChanges)(task) || (0, collaboration_1.taskRequiresVerification)(task)) && summary.receipt_quality_gate_passed !== true)
         return false;

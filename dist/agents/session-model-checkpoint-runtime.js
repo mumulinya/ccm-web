@@ -68,6 +68,21 @@ function createModelCheckpointRuntime(input, family) {
     // Claim the revision immediately. Any earlier runtime can no longer commit.
     save(source?.restoredRevision ? 'restored' : previous ? 'history_or_projection_changed' : 'created');
     return {
+        beforeExecute(calls) {
+            if (!enabled || !pending)
+                return;
+            const writes = calls.filter(call => {
+                if (pending.results.some(row => row.callId === call.id))
+                    return false;
+                const resolved = input.resolveToolCall?.(call);
+                const target = resolved ? { ...call, name: resolved.name, arguments: resolved.arguments } : call;
+                return input.isReadOnly?.(target) !== true;
+            });
+            if (!writes.length)
+                return;
+            pending.startedWriteCallIds = [...new Set([...(pending.startedWriteCallIds || []), ...writes.map(call => call.id)])];
+            save('write_dispatch_reserved');
+        },
         forJson(next) {
             // Transport downgrade retains the current loop, including completed tools.
             const converted = next.map(responses_output_replay_1.stripResponsesReplay).map(message => {
@@ -98,6 +113,11 @@ function createModelCheckpointRuntime(input, family) {
             for (const call of pending.turn.toolCalls) {
                 if (completed.has(call.id))
                     continue;
+                if (pending.startedWriteCallIds?.includes(call.id)) {
+                    pending.verificationRequired = true;
+                    save('write_outcome_unknown');
+                    throw Object.assign(new Error('写操作已开始但执行结果未保存，需要核验后继续'), { code: 'CCM_CHECKPOINT_WRITE_OUTCOME_UNKNOWN' });
+                }
                 if (input.signal?.aborted)
                     throw new Error('CCM_MODEL_CHECKPOINT_RESUME_ABORTED');
                 const available = input.getTools?.() || input.tools;
@@ -163,7 +183,7 @@ function createModelCheckpointRuntime(input, family) {
                 toolBatches.push((0, native_replay_batches_1.replayBatchDeclaration)(turn, binding?.attempt_id));
             }
             if (turn.toolCalls.length)
-                pending = { turn: structuredClone(turn), results: pending?.results || [] };
+                pending = { ...pending, turn: structuredClone(turn), results: pending?.results || [] };
             save('model_turn');
         },
         results(rows) {

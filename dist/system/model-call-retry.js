@@ -32,6 +32,7 @@ function resolveModelRetryProfile(id = "long_running_task", configuredAttemptTim
         totalTimeoutMs: source.totalTimeoutMs,
     };
 }
+const provider_transport_errors_1 = require("./provider-transport-errors");
 const RETRYABLE_HTTP_STATUS = new Set([408, 409, 425, 429]);
 const NON_RETRYABLE_HTTP_STATUS = new Set([400, 401, 403, 404, 405, 410, 413, 415, 422]);
 function errorText(error) {
@@ -44,7 +45,11 @@ function httpStatus(error) {
     return Number(errorText(error).match(/\bHTTP\s+(\d{3})\b/i)?.[1] || 0);
 }
 function shouldRetryModelCallError(error) {
+    if ((0, provider_transport_errors_1.isPermanentProviderTlsError)(error))
+        return false;
     const code = String(error?.code || "");
+    if (code.startsWith('CCM_CACHE_VALIDATION_') || code.startsWith('CCM_SCOPE_NAVIGATION_') || code === 'CCM_CHECKPOINT_WRITE_OUTCOME_UNKNOWN')
+        return false;
     if ([
         "CCM_MODEL_CALL_CANCELLED",
         "CCM_MODEL_CALL_ACTIVITY_FAILED",

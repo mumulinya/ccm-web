@@ -67,6 +67,7 @@ const unified_evidence_registry_1 = require("../../system/unified-evidence-regis
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const task_context_1 = require("../../tasks/task-context");
 const session_task_timeline_1 = require("../../tasks/session-task-timeline");
+const task_replay_cursor_1 = require("./task-replay-cursor");
 const STAGE_ORDER = ["intake", "planning", "dispatch", "execution", "change", "test", "rework", "review", "completion", "system"];
 const TERMINAL = new Set(["done", "completed", "failed", "blocked", "cancelled", "reverted"]);
 function safeTechnical(value, depth = 0) {
@@ -993,8 +994,7 @@ function paginateReplayEventsForView(allEvents, options = {}) {
     let eventOffset = Number.isFinite(requestedOffset) ? Math.max(0, Math.floor(requestedOffset)) : 0;
     let mode = "full";
     if (paginated && afterAt) {
-        const firstNewIndex = filteredEvents.findIndex(item => item.at > afterAt || (item.at === afterAt && item.id > afterId));
-        eventOffset = firstNewIndex < 0 ? filteredEvents.length : firstNewIndex;
+        eventOffset = (0, task_replay_cursor_1.replayCursorOffset)(filteredEvents, afterAt, afterId);
         mode = "incremental";
     }
     else if (paginated && options.eventTail) {

@@ -66,8 +66,13 @@ function validate(context) {
         throw new Error("Agent Communication MCP群聊绑定不一致");
     if (context.groupSessionId && String(task.group_session_id || task.groupSessionId || "") !== context.groupSessionId)
         throw new Error("Agent Communication MCP精确群聊会话已失效");
-    if (String(task.target_project || task.targetProject || context.project) !== context.project && context.role === "project-child-agent")
-        throw new Error("Agent Communication MCP项目绑定不一致");
+    if (String(task.target_project || task.targetProject || context.project) !== context.project && context.role === "project-child-agent") {
+        // A group task targets its coordinator; the worker's actual project is
+        // authorized by its persisted assignment, not the parent target label.
+        if (!context.groupId || !context.communicationMessageId)
+            throw new Error("Agent Communication MCP项目绑定不一致");
+        messageFor(context, context.communicationMessageId);
+    }
     return task;
 }
 function buildAgentCommunicationMcpServerConfig(context) {

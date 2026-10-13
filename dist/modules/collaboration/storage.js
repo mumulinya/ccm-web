@@ -260,6 +260,8 @@ function defaultGroupSessionRecord(groupId) {
 }
 function normalizeGroupSessionKind(groupId, session, automatedSessionIds) {
     const explicit = String(session?.session_kind || session?.sessionKind || session?.purpose || "").trim().toLowerCase();
+    if (explicit === "conversation")
+        return "conversation";
     if (["recovery", "recovery_task", "task_recovery"].includes(explicit))
         return "recovery";
     if (["automation", "automated_task", "task"].includes(explicit))
@@ -271,7 +273,7 @@ function normalizeGroupSessionKind(groupId, session, automatedSessionIds) {
 function listGroupChatSessions(groupId) {
     const manifest = readGroupSessionManifest(groupId);
     const legacyExists = fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID));
-    const automatedSessionIds = new Set((0, db_1.listTaskSessionIdsByGroupId)(groupId));
+    const automatedSessionIds = require("./legacy-task-chat-kind").legacyAutomaticGroupSessionIds(groupId);
     const sessions = (manifest.sessions.length ? [...manifest.sessions] : [defaultGroupSessionRecord(groupId)])
         .filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID || legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID);
     if ((legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID) && !sessions.some((item) => item.id === GROUP_DEFAULT_SESSION_ID)) {
@@ -728,6 +730,9 @@ function getGroupMessages(groupId, sessionId = "") {
     }
 }
 function appendGroupMessage(groupId, msg) {
+    const privateMessage = require("./task-group-message-boundary").redirectPrivateTaskGroupMessage(groupId, msg);
+    if (privateMessage)
+        return privateMessage;
     const sessionId = resolveGroupMessageSessionId(groupId, msg);
     const messages = getGroupMessages(groupId, sessionId);
     const messageId = String(msg?.id || "").trim();
@@ -778,6 +783,7 @@ function appendGroupMessage(groupId, msg) {
             console.warn(`[群聊会话] 自动命名失败 (${groupId}/${sessionId})：${error?.message || error}`);
         });
     }
+    require("./task-session-store").synchronizeTaskSessionSourceMessage("group", groupId, sessionId, next);
     return next;
 }
 function saveGroupMessages(groupId, messages, sessionId = "") {

@@ -9,7 +9,7 @@ type WsResponse = {
 };
 export declare function responsesWebSocketUrl(endpoint: string, configured?: string): string;
 export declare function responsesWebSocketUrlFingerprint(value: string): string;
-export declare function requestResponsesWebSocket(endpoint: string, init?: any): Promise<WsResponse>;
+export declare function requestResponsesWebSocket(endpoint: string, init?: any, meta?: any): Promise<WsResponse>;
 /** Low-level names kept intentionally thin so HTTP and WebSocket callers share one request body. */
 export declare function openResponsesWebSocket(endpoint: string, init?: any): Promise<WsResponse>;
 export declare function sendResponsesCreate(connection: any, body: any): void;

@@ -149,6 +149,8 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_type);
     CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_tasks_unfinished_position ON tasks(position)
+      WHERE archived = 0 AND status NOT IN ('done','completed','failed','cancelled','canceled','archived');
 
     CREATE TABLE IF NOT EXISTS session_timeline_heads (
       scope TEXT NOT NULL,
@@ -468,6 +470,7 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_agent_wake_ready ON agent_wake_requests(status, available_at, created_at);
     CREATE INDEX IF NOT EXISTS idx_agent_wake_scope ON agent_wake_requests(agent_id, scope, scope_id, task_id, status);
     CREATE INDEX IF NOT EXISTS idx_agent_wake_run ON agent_wake_requests(run_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_task_status ON agent_wake_requests(task_id, status, created_at);
 
     CREATE TABLE IF NOT EXISTS agent_wake_attempts (
       attempt_id TEXT PRIMARY KEY,
@@ -686,13 +689,11 @@ function createSchema(db) {
     ensureColumn(db, "agent_runs", "workspace_evidence_json", "TEXT NOT NULL DEFAULT '{}'");
     ensureColumn(db, "agent_wake_requests", "attempt_id", "TEXT NOT NULL DEFAULT ''");
     try {
-        db.exec(`DROP INDEX IF EXISTS uq_agent_runs_active_identity;
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_runs_active_identity
-      ON agent_runs(agent_id, scope_id, task_id)
-      WHERE status NOT IN ('succeeded', 'failed', 'cancelled', 'recovery_required')`);
+        require('./task-store-index-maintenance').ensureActiveRunIdentityIndex(db);
     }
     catch { }
-    setMeta(db, "schema_version", STORE_SCHEMA_VERSION);
+    if (getMeta(db, "schema_version") !== STORE_SCHEMA_VERSION)
+        setMeta(db, "schema_version", STORE_SCHEMA_VERSION);
 }
 function ensureColumn(db, table, column, definition) {
     const columns = db.prepare(`PRAGMA table_info("${table.replaceAll('"', '""')}")`).all();
@@ -923,15 +924,18 @@ function getDatabase() {
     database = new better_sqlite3_1.default(DATABASE_FILE);
     configureDatabase(database);
     createSchema(database);
+    require('./task-store-legacy-import').importLegacyTaskJson(database, STORE_DIR, {
+        tasks: (value) => insertTasks(database, value),
+        task_logs: (value) => insertTaskLogs(database, value),
+        group_logs: (value) => insertGroupLogs(database, value),
+    });
     return database;
 }
 function withSqliteTaskStore(operation) {
     return operation(getDatabase());
 }
 function loadTasksFromSqlite() {
-    const db = getDatabase();
-    const rows = db.prepare("SELECT payload_json FROM tasks ORDER BY position ASC, rowid ASC").all();
-    return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean).map(task => hydrateTaskAuthority(db, task));
+    return require('./task-query').queryHydratedTasks();
 }
 function getTaskByIdFromSqlite(id) {
     const taskId = String(id || "").trim();

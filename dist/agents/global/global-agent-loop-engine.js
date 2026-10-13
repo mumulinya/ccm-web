@@ -1,5 +1,4 @@
 "use strict";
-// global-agent-loop-engine.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -53,6 +52,8 @@ exports.continueGlobalAgentRunWithClarification = continueGlobalAgentRunWithClar
 exports.pauseGlobalAgentRun = pauseGlobalAgentRun;
 exports.cancelGlobalAgentRun = cancelGlobalAgentRun;
 exports.recoverInterruptedGlobalAgentRuns = recoverInterruptedGlobalAgentRuns;
+const deferred_tool_invocation_1 = require("../deferred-tool-invocation");
+// global-agent-loop-engine.ts — merged from 2 part files (behavior-freeze merge).
 const crypto = __importStar(require("crypto"));
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const runtime_kernel_1 = require("../runtime-kernel");
@@ -85,7 +86,7 @@ const { compactObservation, GLOBAL_MODEL_ROUTE_KEYS, GLOBAL_MODEL_FORBIDDEN_FIEL
 const { nowIso, stripNonExecutionReportSections, GLOBAL_USER_SUMMARY_INTERNAL_PATTERN, GLOBAL_USER_SUMMARY_TECHNICAL_EVIDENCE_PATTERN, hasGlobalUserSummaryTechnicalDetails, compactGlobalUserSummaryText, uniqueGlobalStrings, sanitizeGlobalVisibleReplyTerminology, globalVisibleReplyFallback, buildGlobalVisibleReplyContent, attachGlobalReplyTechnicalContent, getGlobalToolUserLabel, summarizeGlobalToolTarget, buildGlobalClarificationSummary, buildGlobalConfirmationSummary, buildGlobalPlanSteps, buildGlobalPlanExecutionFollowup, buildGlobalPlanModeSummary, buildGlobalStructuredPlanModeSummary, updateGlobalPlanModeStatus, GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN, sanitizeGlobalDispatchVisibleText, normalizeDispatchDependency, buildGlobalDispatchRow, isGlobalDispatchTool, normalizeGlobalDispatchLaunchRowStatus, buildGlobalDispatchLaunchSummary } = globalAgentRunReplies;
 const { GLOBAL_AGENT_TOOL_SPECS, STORE_DIR, STORE_FILE, STORE_BACKUP, MAX_STORED_RUNS, MAX_OBSERVATION_CHARS, GLOBAL_DISPATCH_TOOL_NAMES, LIGHT_UI_TOOL_NAMES, activeRuns, pauseRequests, cancelRequests, volatileRuns, activeRunObjects, destructiveOperation, writeJsonAtomic, normalizeGlobalAgentUserSteer, normalizeGlobalAgentUserSteers, normalizeRun, loadStore, saveRun, getGlobalAgentRun, listGlobalAgentRuns, findWaitingGlobalAgentRun, findClarifyingGlobalAgentRun, getGlobalAgentToolSpec, classifyGlobalAgentToolRisk, classifyGlobalAgentRunPresentation, isReadOnlyGlobalConsultation, stable, toolSignature, validateTool } = globalAgentRunStore;
 const activeRunAbortControllers = new Map();
-_a = (0, global_agent_run_supervision_1.createGlobalAgentRunSupervision)({ appendTraceEvent: reliability_ledger_1.appendTraceEvent, buildGlobalDisplayStreamFromWorkchain, buildGlobalRunWorkchain, getGlobalAgentRun, normalizeRun, recordGlobalAgentRuntimeOutput: runtime_1.recordGlobalAgentRuntimeOutput, saveRun, volatileRuns }), exports.attachGlobalAgentRunSupervision = _a.attachGlobalAgentRunSupervision, exports.completeGlobalAgentSupervision = _a.completeGlobalAgentSupervision, exports.globalSupervisionStateVisibleSummary = _a.globalSupervisionStateVisibleSummary, exports.updateGlobalAgentSupervisionState = _a.updateGlobalAgentSupervisionState;
+_a = (0, global_agent_run_supervision_1.createGlobalAgentRunSupervision)({ appendTraceEvent: reliability_ledger_1.appendTraceEvent, buildGlobalDisplayStreamFromWorkchain, buildGlobalRunWorkchain, getGlobalAgentRun, normalizeRun, recordGlobalAgentRuntimeOutput: runtime_1.recordGlobalAgentRuntimeOutput, saveRun, volatileRuns, startPersistentAgentExecutionSync: agent_execution_coordinator_1.startPersistentAgentExecutionSync, markPersistentAgentExecutionStarted: agent_execution_coordinator_1.markPersistentAgentExecutionStarted }), exports.attachGlobalAgentRunSupervision = _a.attachGlobalAgentRunSupervision, exports.completeGlobalAgentSupervision = _a.completeGlobalAgentSupervision, exports.globalSupervisionStateVisibleSummary = _a.globalSupervisionStateVisibleSummary, exports.updateGlobalAgentSupervisionState = _a.updateGlobalAgentSupervisionState;
 function emitGlobalDispatchLaunchProgress(runtime, run, step) {
     if (!isGlobalDispatchTool(step.tool?.name) || step.error || step.observation?.success === false || step.observation?.error)
         return;
@@ -953,14 +954,14 @@ function completeRun(run, runtime, status, reply, error = "") {
     run.display_stream = buildGlobalDisplayStreamFromWorkchain(workchain);
     if (!includeDetails)
         run.final_report = run.final_report || workchain.completion_summary;
-    const finalReplyCandidate = includeDetails && run.final_delivery_report
+    const finalReplyCandidate = ordinaryConversation ? rawReply : includeDetails && run.final_delivery_report
         ? (0, delivery_report_1.formatMainAgentDeliveryReply)(run.final_delivery_report)
         : (0, workchain_1.formatMainAgentCompletionReply)({ reply: rawReply, workchain, includeDetails: false });
     const visibleReply = buildGlobalVisibleReplyContent({
         value: finalReplyCandidate,
         rawSource: rawReply,
         status,
-        max: 8000,
+        max: ordinaryConversation ? Math.max(8000, rawReply.length) : 8000,
     });
     if (visibleReply.technical_content) {
         run.final_report = run.final_report || {};
@@ -1292,6 +1293,8 @@ async function continueLoop(run, runtime) {
             let risk;
             let signature;
             try {
+                const resolvedDeferred = (0, deferred_tool_invocation_1.resolveGlobalDeferredToolCall)(run, decision.tool.name, decision.tool.arguments);
+                decision.tool = { ...decision.tool, name: resolvedDeferred.name, arguments: resolvedDeferred.arguments };
                 args = validateTool(decision.tool.name, decision.tool.arguments || {});
                 risk = classifyGlobalAgentToolRisk(decision.tool.name, args);
                 signature = toolSignature(decision.tool.name, args);
@@ -1841,8 +1844,7 @@ async function startGlobalAgentRun(input, runtime) {
             taskAgentSessionId: run.session_id, executionId: run.id, triggerType: "user", source: "global-agent",
             idempotencyKey: `global-agent:${run.id}`,
         });
-        if (coordinatedExecution.mode === "coalesced")
-            throw Object.assign(new Error("全局 Agent 已存在同一幂等执行"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinatedExecution.run.runId });
+        require("../agent-execution-coordinator").assertPersistentExecutionLaunchAllowed(coordinatedExecution);
         const ccmRun = coordinatedExecution.run;
         run.ccm_agent_run_id = ccmRun.runId;
         (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(ccmRun.runId, coordinatedExecution.lease?.run?.leaseId || "");
@@ -1996,6 +1998,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
         const step = [...run.steps].reverse().find(item => item.tool?.signature === pending.signature && item.observation === undefined);
         const started = runtime.now ? runtime.now() : Date.now();
         try {
+            (0, deferred_tool_invocation_1.validateGlobalDeferredConfirmation)(run, pending);
             const preHooks = (0, runtime_1.runGlobalAgentHooks)("pre_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk });
             if (preHooks.blocked)
                 throw new Error(`Hook 阻止执行 ${pending.name}${preHooks.message ? `：${preHooks.message}` : ""}`);
@@ -2094,9 +2097,9 @@ async function continueGlobalAgentRunWithClarification(id, answer, runtime, opti
     // This is an explicit continuation of a known waiting run. Natural-language
     // interpretation happens in the next main Agent loop call, not in a separate classifier.
     const clarificationDecision = run.workflow_decision || run.workflowDecision || null;
-    const revokesAuthorization = false;
-    const inheritedAuthorization = run.explicit_write_authorization;
-    const currentAuthorization = options.explicitWriteAuthorization === true;
+    const revokesAuthorization = (0, global_agent_authorization_1.clarificationRevokesGlobalAuthorization)(run, clarification, options);
+    const inheritedAuthorization = !revokesAuthorization && run.explicit_write_authorization;
+    const currentAuthorization = !revokesAuthorization && options.explicitWriteAuthorization === true;
     (0, reasoning_loop_1.appendReasoningClarification)(run.reasoning_loop, {
         question: run.clarification_question || run.final_reply || "请补充目标和影响范围",
         answer: clarification,

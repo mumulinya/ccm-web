@@ -12,7 +12,8 @@ export type NativeTestAgentDispatchState = {
     testAgentReviewSummary: any;
     targetWorkEvents: any[];
 };
-export declare function runNativeTestAgentDispatchBranch(input: {
+export declare function runNativeTestAgentDispatchBranch(input: Parameters<typeof executeNativeTestAgentDispatch>[0]): Promise<void>;
+declare function executeNativeTestAgentDispatch(input: {
     mention: any;
     deps: any;
     ctx: any;
@@ -25,9 +26,11 @@ export declare function runNativeTestAgentDispatchBranch(input: {
     runtimeAttemptTimeoutMs: number;
     laneExecutionId: string;
     sourceTask: any;
+    communicationEnvelope: any;
     executionOrder: string;
     activeTaskSession: any;
     testAgentProjectWorkDir: string;
     tWorkDir: string;
     state: NativeTestAgentDispatchState;
 }): Promise<void>;
+export {};

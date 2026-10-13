@@ -8,6 +8,7 @@ exports.summarizeTestAgentBrowserProviderGaps = summarizeTestAgentBrowserProvide
 exports.applyTestAgentProviderGapPlaywrightReroute = applyTestAgentProviderGapPlaywrightReroute;
 exports.deriveIndependentReviewDecision = deriveIndependentReviewDecision;
 const test_agent_environment_prep_1 = require("./test-agent-environment-prep");
+const acceptance_failure_routing_1 = require("../../agents/acceptance-failure-routing");
 function asArray(value) {
     return Array.isArray(value) ? value : [];
 }
@@ -102,23 +103,15 @@ function deriveIndependentReviewDecision(input) {
     const providerGaps = summarizeTestAgentBrowserProviderGaps(report, verdict);
     const flakyStabilityGroups = (0, test_agent_environment_prep_1.countTestAgentFlakyStabilityGroups)(report, verdict);
     const hasFlakyStability = flakyStabilityGroups > 0;
-    const needsRework = input.forceReworkSignals === true
-        || input.receiptStatus === "failed"
-        || verdict?.needsRework === true
-        || String(verdict?.recommendation || "").toLowerCase().includes("rework")
-        || String(verdict?.status || "").toLowerCase() === "failed";
-    const needsRecheck = !needsRework && (input.forceRecheckSignals === true
-        || spotCheckNeedsRecheck
-        || verdict?.needsRecheck === true
-        || providerGaps.hasGaps
-        || hasFlakyStability);
-    const needsEnvironment = !needsRework && !needsRecheck && (input.forceEnvironmentSignals === true
-        || verdict?.needsEnvironment === true);
-    const needsHuman = !needsRework && !needsRecheck && !needsEnvironment && (input.forceHumanSignals === true
-        || verdict?.needsHuman === true
-        || input.receiptStatus === "blocked");
+    const feedback = (0, acceptance_failure_routing_1.classifyAcceptanceFailure)({ ...input, report, verdict, canAccept: input.receiptStatus === "done" || verdict.canAccept === true,
+        evidenceMissing: spotCheckNeedsRecheck || providerGaps.hasGaps || hasFlakyStability,
+        forceReworkSignals: input.forceReworkSignals === true });
+    const needsRework = feedback.can_auto_rework;
+    const needsRecheck = feedback.failure_kind === "evidence";
+    const needsEnvironment = feedback.failure_kind === "environment";
+    const needsHuman = ["permission", "criteria_conflict", "reconciliation", "unknown"].includes(feedback.failure_kind);
     let status;
-    if (input.receiptStatus === "done" && !spotCheckNeedsRecheck && !needsRework && !needsRecheck && !needsEnvironment && !needsHuman && !hasFlakyStability) {
+    if (feedback.failure_kind === null) {
         status = "passed";
     }
     else if (needsRework) {
@@ -132,9 +125,6 @@ function deriveIndependentReviewDecision(input) {
     }
     else if (needsHuman) {
         status = "needs_user";
-    }
-    else if (verdict?.canAccept === true) {
-        status = "passed";
     }
     else {
         status = "needs_user";
@@ -161,6 +151,7 @@ function deriveIndependentReviewDecision(input) {
         providerGapCount: providerGaps.count,
         spotCheckNeedsRecheck,
         flakyStabilityGroups,
+        acceptance_feedback: feedback,
     };
 }
 //# sourceMappingURL=test-agent-independent-review-decision.js.map

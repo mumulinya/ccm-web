@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-runtime-task-queue.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -147,6 +146,7 @@ exports.normalizeMentionTask = normalizeMentionTask;
 exports.escapeRegExp = escapeRegExp;
 exports.extractActionableMentions = extractActionableMentions;
 exports.buildAgentQaProtocolInstructions = buildAgentQaProtocolInstructions;
+const dispatch_projection_1 = require("../../agents/dispatch-projection");
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const task_conversation_projection_1 = require("../../system/task-conversation-projection");
@@ -947,6 +947,7 @@ function buildInlineTaskRuntime(task) {
     const reviewing = executions.filter(item => item.state === "reviewing");
     const mergeReady = executions.filter(item => item.green?.level === "merge_ready");
     return {
+        ...(0, dispatch_projection_1.buildDispatchProjection)(task, executions),
         taskId: task.id,
         status: task.status,
         statusText: task.status_detail || "",
@@ -983,6 +984,15 @@ function buildInlineTaskRuntime(task) {
 function updateGroupTaskInlineStatus(task, status, detail = "", sessionId = groupSessionIdForTask(task)) {
     if (!task?.group_id || !task?.id)
         return null;
+    if (require("./task-session-boundary").isPrivateTaskSessionId(sessionId)) {
+        const projected = require("./task-group-message-boundary").redirectPrivateTaskGroupMessage(task.group_id, {
+            id: `task-status:${task.id}:${task.revision || 0}:${status}`, task_id: task.id, role: "assistant",
+            content: detail || task.status_detail || status, timestamp: task.updated_at || new Date().toISOString(),
+        });
+        if (!projected)
+            throw new Error("内部任务状态投影缺少权威任务绑定");
+        return { ...buildInlineTaskRuntime({ ...task, status, status_detail: detail || task.status_detail }), projectionUpdated: true, projectionRejected: false };
+    }
     const messages = (0, storage_1.getGroupMessages)(task.group_id, sessionId);
     const runtime = buildInlineTaskRuntime({ ...task, status, status_detail: detail || task.status_detail });
     const projectionContent = String(task?.conversation_projection_content || "")

@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleTaskIntakePreviewRoute = handleTaskIntakePreviewRoute;
+const task_intake_session_binding_1 = require("./task-intake-session-binding");
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const secure_multipart_1 = require("../../system/secure-multipart");
@@ -43,6 +44,8 @@ const storage_1 = require("./storage");
 const access_policy_1 = require("../system/access-policy");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const task_session_planning_1 = require("./task-session-planning");
+const task_session_related_intake_1 = require("./task-session-related-intake");
+const task_intake_request_identity_1 = require("./task-intake-request-identity");
 const pending = new Map();
 function handleTaskIntakePreviewRoute(pathname, req, res, deps) {
     const { compactFormText, removeUploadedFiles, bindRequirementPlanTargetSessions, decideWorkflowWithModel, createTask, updateTask, appendTraceEvent, appendTaskTimelineEvent } = deps;
@@ -55,8 +58,9 @@ function handleTaskIntakePreviewRoute(pathname, req, res, deps) {
                 const planningTarget = (0, task_session_planning_1.taskPlanningTargetContext)(payload, groups, configs);
                 if (!canAccessTarget(planningTarget, req.ccmAuth))
                     throw new Error("当前账户不能向此目标创建任务");
-                const submissionKey = String(payload.idempotency_key || payload.idempotencyKey || "");
-                const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ payload: { ...payload, idempotency_key: undefined, idempotencyKey: undefined }, files: files.map(file => ({ name: file.filename, size: file.size })) })).digest("hex");
+                const relatedTask = (0, task_session_related_intake_1.resolveRelatedTaskIntake)(payload, req.ccmAuth);
+                const submissionKey = (0, task_intake_request_identity_1.taskIntakeSubmissionKey)(payload);
+                const fingerprint = await (0, task_intake_request_identity_1.taskIntakeSubmissionFingerprint)(payload, files);
                 const owner = String(req.ccmAuth?.userId || req.ccmAuth?.username || "internal");
                 const identity = submissionKey ? `${owner}:${submissionKey}` : "";
                 const existing = identity ? (0, db_1.loadTasks)().find((task) => task.planning_submission?.identity === identity) : null;
@@ -101,7 +105,8 @@ function handleTaskIntakePreviewRoute(pathname, req, res, deps) {
                 const targetProject = resolvedTarget.targetProject;
                 const requestOrigin = compactFormText(payload.source || payload.request_origin || payload.requestOrigin, "workbench");
                 const automationSource = (0, automation_session_bindings_1.normalizeAutomationTaskSource)(requestOrigin) || "workbench";
-                const resolvedAutomationSession = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+                const resolvedAutomationSession = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
+                    requestId: submissionKey,
                     scope: group ? "group" : "project",
                     scopeId: group?.id || targetProject,
                     source: automationSource,
@@ -213,6 +218,7 @@ function handleTaskIntakePreviewRoute(pathname, req, res, deps) {
                     approval_policy: payload.approval_policy,
                     workflow_decision: workflowDecision,
                     workflow_meta: {
+                        ...(relatedTask ? { related_task_context: relatedTask } : {}),
                         intake: {
                             source: requestOrigin,
                             channel: payload.channel || "web",
@@ -246,7 +252,7 @@ function handleTaskIntakePreviewRoute(pathname, req, res, deps) {
             }
         };
         const handleIntakePreview = async (payload, files = []) => {
-            const key = String(payload.idempotency_key || payload.idempotencyKey || "");
+            const key = (0, task_intake_request_identity_1.taskIntakeSubmissionKey)(payload);
             const lockKey = `${req.ccmAuth?.userId || req.ccmAuth?.username || "internal"}:${key}`;
             if (key && pending.has(lockKey))
                 await pending.get(lockKey);

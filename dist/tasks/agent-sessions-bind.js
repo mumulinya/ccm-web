@@ -48,6 +48,7 @@ const trusted_memory_prompt_envelope_1 = require("../agents/trusted-memory-promp
 const group_post_turn_summary_1 = require("../modules/collaboration/group-post-turn-summary");
 const task_agent_memory_entry_sync_1 = require("./task-agent-memory-entry-sync");
 const agent_sessions_shared_1 = require("./agent-sessions-shared");
+const task_group_memory_identity_1 = require("../modules/collaboration/task-group-memory-identity");
 function prepareTaskAgentMemoryEntrySyncContext(sessionId, memoryContextInput) {
     const id = String(sessionId || "").trim();
     if (!id || !memoryContextInput || typeof memoryContextInput !== "object")
@@ -59,9 +60,9 @@ function prepareTaskAgentMemoryEntrySyncContext(sessionId, memoryContextInput) {
             return { memoryContext: memoryContextInput, plan: null, prepared: false };
         const binding = (0, agent_sessions_shared_1.extractGroupSessionMemoryBinding)(memoryContextInput || {});
         const groupSessionId = String(binding?.groupSessionId || "");
-        if (!groupSessionId.startsWith("gcs_"))
+        if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(session.groupId, groupSessionId, session.taskId))
             return { memoryContext: memoryContextInput, plan: null, prepared: false };
-        if (session.groupSessionId?.startsWith("gcs_") && session.groupSessionId !== groupSessionId) {
+        if (session.groupSessionId && session.groupSessionId !== groupSessionId) {
             const error = new Error(`task Agent memory entry sync belongs to another group session: ${session.groupSessionId} -> ${groupSessionId}`);
             error.code = "TASK_AGENT_MEMORY_SNAPSHOT_CROSS_SESSION_REJECTED";
             throw error;
@@ -217,7 +218,7 @@ function prepareTaskAgentMemoryEntrySyncContext(sessionId, memoryContextInput) {
         if (!reuseRenderLease && existingRenderLease?.lease_id) {
             session.memoryEntrySyncRenderLeaseHistory = [...previousHistory, existingRenderLease].slice(-agent_sessions_shared_1.MEMORY_ENTRY_RENDER_LEASE_HISTORY_LIMIT);
         }
-        if (!session.groupSessionId && groupSessionId.startsWith("gcs_"))
+        if (!session.groupSessionId)
             session.groupSessionId = groupSessionId;
         session.memoryEntrySyncRenderLease = sealedRenderLease;
         session.memoryEntrySyncRenderFencingToken = renderFencingToken;
@@ -431,8 +432,16 @@ function bindTaskAgentMemoryContextSnapshot(sessionId, input = {}) {
                 entryIssues.push("entry_sync_render_lease_plan_mismatch");
             if (String(currentRenderLease?.manifest_checksum || "") !== String(memoryEntrySync?.current_manifest?.manifest_checksum || ""))
                 entryIssues.push("entry_sync_render_lease_manifest_mismatch");
-            if (String(currentRenderLease?.base_snapshot_id || "") !== String(memoryEntrySync?.previous_snapshot_id || ""))
+            // A full fallback deliberately has no trusted continuation baseline. The
+            // render fence still binds the physically latest snapshot, so compare that
+            // fence independently from the plan's optional trusted baseline.
+            const latestRenderBase = refs.length ? refs[refs.length - 1] : null;
+            if (String(currentRenderLease?.base_snapshot_id || "") !== String(latestRenderBase?.snapshotId || "")
+                || (memoryEntrySync.previous_baseline_trusted === true
+                    && String(currentRenderLease?.base_snapshot_id || "") !== String(memoryEntrySync.previous_snapshot_id || "")))
                 entryIssues.push("entry_sync_render_lease_base_snapshot_mismatch");
+            if (String(currentRenderLease?.base_snapshot_checksum || "") !== String(latestRenderBase?.checksum || ""))
+                entryIssues.push("entry_sync_render_lease_base_snapshot_checksum_mismatch");
             if (String(currentRenderLease?.base_manifest_checksum || "") !== String(memoryEntrySync?.previous_manifest_checksum || ""))
                 entryIssues.push("entry_sync_render_lease_base_manifest_mismatch");
             if (String(memoryEntrySync?.current_manifest?.manifest_checksum || "") !== String(currentManifest.manifest_checksum || ""))

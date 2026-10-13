@@ -1395,6 +1395,9 @@ function renderMemoryDispatchFreshnessGateForContract(memory, handoff = null) {
     return `- 记忆派发门禁：dispatch_gate_id=${gate.dispatch_gate_id || ""}；status=${gate.status || "unknown"}；action=${gate.action || "unknown"}；reload=${gate.reload_audit?.reason || "unknown"}；回执 memoryUsed/memoryIgnored 必须引用该 gate，说明是否实际使用平台记忆。`;
 }
 function buildChildAgentDevelopmentContract(targetProject, taskText = "", options = {}) {
+    const dispatchProfile = String(options.dispatch_profile || options.dispatchProfile || options.dispatch_profile_snapshot?.profile || options.dispatchProfileSnapshot?.profile || "standard").toLowerCase();
+    const lightDispatch = dispatchProfile === "light";
+    const strictDispatch = dispatchProfile === "strict";
     const requiresCodeChanges = options.requires_code_changes !== false && options.requiresCodeChanges !== false;
     const source = options.source ? `- 来源：${options.source}` : "";
     const acceptance = options.acceptance || options.acceptance_criteria || options.acceptanceCriteria || "";
@@ -1404,13 +1407,15 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
     const capabilityProfile = options.capability_profile || options.capabilityProfile || (0, collaboration_1.getProjectAgentCapabilityProfile)(targetProject, options.work_dir || options.workDir || "");
     const capabilityLines = buildProjectAgentProfileContractLines(capabilityProfile);
     const handoff = options.handoff || (0, collaboration_1.buildChildAgentWorkerHandoff)(targetProject, taskText, options);
-    const handoffText = (0, worker_handoff_1.renderSelfContainedWorkerHandoff)(handoff);
+    const handoffText = lightDispatch ? require("../../agents/dispatch-work-order-template").renderLightDispatchWorkOrder(handoff, options.task || options) : (0, worker_handoff_1.renderSelfContainedWorkerHandoff)(handoff);
     const memoryFreshnessGateLine = renderMemoryDispatchFreshnessGateForContract(options.memory || options.memory_packet || options.memoryPacket || null, handoff);
-    return [
+    const contractLines = [
         handoffText,
+        require("./task-session-continuation-context").renderTaskSessionContinuationContext(options.task || options),
         "",
         "子 Agent 开发契约（必须遵守）：",
         `- 你的身份：${targetProject} 项目子 Agent。只在自己的项目职责和工作目录内处理。`,
+        `- 派发档位：${dispatchProfile}。${lightDispatch ? "这是低风险轻量任务，优先快速完成并提供最小真实验证。" : strictDispatch ? "这是严格任务，必须完整遵守范围、证据和独立验收门禁。" : "这是标准任务，保留 ACK、结构化回执和主 Agent 验收。"}`,
         source,
         ...capabilityLines,
         taskText ? `- 本次工作单：${(0, memory_1.compactMemoryText)(taskText, 900)}` : "",
@@ -1419,7 +1424,7 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
             ? "- 完成条件：必须产生可捕获的实际文件变更；没有实际变更时不得把 status 写为 done。"
             : "- 完成条件：如不需要代码变更，必须说明原因、产出和验证依据。",
         "- 实施要求：先理解上下文，再做最小必要改动；不要改无关模块，不要删除用户已有改动。",
-        "- 接单确认：开始执行前先用 1-3 句话确认你理解的目标、准备查看/修改的范围；如果范围不清楚，先写 blocked/needs_info，不要盲改。",
+        lightDispatch ? "- 轻量执行：目标明确时直接处理；只有目标、禁止路径或权限不清楚时才写 blocked/needs_info。" : "- 接单确认：开始执行前先用 1-3 句话确认你理解的目标、准备查看/修改的范围；如果范围不清楚，先写 blocked/needs_info，不要盲改。",
         "- 进度心跳：长任务中请在关键阶段说明当前状态，例如正在读文件、正在修改、正在运行验证、等待依赖或遇到阻塞；不要长时间无状态输出。",
         "- 契约同步：如果你改动接口、字段、schema、路由、类型、配置或前后端契约，必须在回执 actions/summary 中写清契约变化，方便主 Agent 通知依赖 Agent。",
         "- 验证要求：只记录实际运行过的命令或人工核验；未运行的验证必须明确写成建议，不能伪造。",
@@ -1428,20 +1433,27 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
         "- 阻塞处理：缺字段、缺权限、接口不明确、环境失败时，status 写 blocked/needs_info，并列出需要谁补什么。",
         "- 复核交接不算阻塞：实现与验证完成后 status 写 done；等待 TestAgent、主 Agent 抽查或最终总结属于主 Agent 后续流程，不得写入 blockers/needs。",
         memoryFreshnessGateLine,
-        "- 记忆使用要求：如果本轮使用了平台注入的群聊摘要、项目记忆、历史结论、共享文档或知识库，请在回执 memoryUsed 写明使用项；如果没有使用或无法判断，请在 memoryIgnored 写明原因。",
-        "- 类型化记忆逐项回执：如果 WorkerContextPacket 下发了 surfaced MEMORY.md 文档，回执必须在 typedMemoryUsage 中覆盖每个 relPath，并逐项填写 usageState（used/verified/ignored）和 reason；不得声明未下发的 relPath；verified 还必须提供可由平台复算的 currentSourceEvidence。",
-        "- 全局记忆要求：如果上下文包含 global_memory_id、semantic_risk 或 cross_group_suppression，回执必须在 globalMemoryUsage 中逐条声明 globalMemoryId、usageState（used/ignored/verified/background/advisory）、currentSourceVerified、semanticRiskAcknowledged、crossGroupSuppression 和 reason。",
-        "- 全局记忆健康门禁要求：如果上下文包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；status=fail 或 action=block_global_agent_memory_recall 时必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
-        "- API microcompact 要求：如果上下文包含 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 native_applied/advisory/ignored/not_supported；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied；声明 native_applied 时还必须填写 apiMicrocompactNativeApplyRequestTelemetry；强证明必须来自 fresh native_request_adapter telemetry，agent_receipt 来源只能算弱证据。",
-        "- 压缩候选要求：如果上下文包含压缩后重注入 gate / candidate_id，回执必须在 postCompactCandidateUsage 中逐条声明每个 candidate_id 的 usageState，只能是 used、ignored 或 verified。",
-        "- Provider switch 要求：如果上下文包含 approved Provider switch decision receipt，回执 providerSwitchExecution 必须引用 decisionReceiptId，并填写 expectedProvider、executedProvider、taskAgentSessionId、nativeSessionId、executionId；平台会用实际 runner/session 覆盖并验证该执行证明。",
-        "- 回执质量要求：status=done 只有在目标覆盖、文件/产出和验证证据都齐全时才能写；缺文件、缺验证、仍有依赖或不确定时写 blocked/needs_info/partial。",
-        "- ACK 结构要求：CCM_AGENT_RECEIPT 中必须包含 ack 对象，字段包括 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；如果不清楚，unclear 必须列出问题且 status 不得写 done。",
-        "- contractChanges 结构要求：如果涉及接口、字段、schema、路由、类型、配置或前后端契约变化，CCM_AGENT_RECEIPT 中必须包含 contractChanges 数组，写明 type、endpoint/path、request、response、fields、consumers、note。",
-        "- 项目长期记忆要求：CCM_AGENT_RECEIPT.projectMemory 只填写跨会话仍有价值且可由本轮证据支持的内容，分类为 constraints、decisions、facts、lessons、risks、openItems、contracts；普通完成总结、文件清单、测试输出、临时状态和可直接从源码读取的信息不要写入，确实没有长期内容时各分类留空。",
-        "- contract injection 消费要求：如果工作单包含 injection_id，回执必须写 consumedInjectionIds，并说明是否已适配、无需适配或仍阻塞。",
-        "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、projectMemory、consumedInjectionIds、memoryUsed、memoryIgnored、typedMemoryUsage、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
-    ].filter(Boolean).join("\n");
+        ...(!lightDispatch ? [
+            "- 记忆使用要求：如果本轮使用了平台注入的群聊摘要、项目记忆、历史结论、共享文档或知识库，请在回执 memoryUsed 写明使用项；如果没有使用或无法判断，请在 memoryIgnored 写明原因。",
+            "- 类型化记忆逐项回执：如果 WorkerContextPacket 下发了 surfaced MEMORY.md 文档，回执必须在 typedMemoryUsage 中覆盖每个 relPath，并逐项填写 usageState（used/verified/ignored）和 reason；不得声明未下发的 relPath；verified 还必须提供可由平台复算的 currentSourceEvidence。",
+            "- 全局记忆要求：如果上下文包含 global_memory_id、semantic_risk 或 cross_group_suppression，回执必须在 globalMemoryUsage 中逐条声明 globalMemoryId、usageState（used/ignored/verified/background/advisory）、currentSourceVerified、semanticRiskAcknowledged、crossGroupSuppression 和 reason。",
+            "- 全局记忆健康门禁要求：如果上下文包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；status=fail 或 action=block_global_agent_memory_recall 时必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
+            "- API microcompact 要求：如果上下文包含 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 native_applied/advisory/ignored/not_supported；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied；声明 native_applied 时还必须填写 apiMicrocompactNativeApplyRequestTelemetry；强证明必须来自 fresh native_request_adapter telemetry，agent_receipt 来源只能算弱证据。",
+            "- 压缩候选要求：如果上下文包含压缩后重注入 gate / candidate_id，回执必须在 postCompactCandidateUsage 中逐条声明每个 candidate_id 的 usageState，只能是 used、ignored 或 verified。",
+            "- Provider switch 要求：如果上下文包含 approved Provider switch decision receipt，回执 providerSwitchExecution 必须引用 decisionReceiptId，并填写 expectedProvider、executedProvider、taskAgentSessionId、nativeSessionId、executionId；平台会用实际 runner/session 覆盖并验证该执行证明。",
+            "- 回执质量要求：status=done 只有在目标覆盖、文件/产出和验证证据都齐全时才能写；缺文件、缺验证、仍有依赖或不确定时写 blocked/needs_info/partial。",
+            "- ACK 结构要求：CCM_AGENT_RECEIPT 中必须包含 ack 对象，字段包括 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；如果不清楚，unclear 必须列出问题且 status 不得写 done。",
+            "- contractChanges 结构要求：如果涉及接口、字段、schema、路由、类型、配置或前后端契约变化，CCM_AGENT_RECEIPT 中必须包含 contractChanges 数组，写明 type、endpoint/path、request、response、fields、consumers、note。",
+            "- 项目长期记忆要求：CCM_AGENT_RECEIPT.projectMemory 只填写跨会话仍有价值且可由本轮证据支持的内容，分类为 constraints、decisions、facts、lessons、risks、openItems、contracts；普通完成总结、文件清单、测试输出、临时状态和可直接从源码读取的信息不要写入，确实没有长期内容时各分类留空。",
+            "- contract injection 消费要求：如果工作单包含 injection_id，回执必须写 consumedInjectionIds，并说明是否已适配、无需适配或仍阻塞。",
+            "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、projectMemory、consumedInjectionIds、memoryUsed、memoryIgnored、typedMemoryUsage、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
+        ] : []),
+    ];
+    if (lightDispatch)
+        contractLines.push("- 最小回执要求：CCM_AGENT_RECEIPT 至少包含 status、summary、actions、filesChanged、verification 和 blockers；只记录真实执行过的验证。");
+    return contractLines
+        .filter(Boolean)
+        .join("\n");
 }
 function isSuggestedOnlyVerification(value) {
     const text = String(value || "").trim();

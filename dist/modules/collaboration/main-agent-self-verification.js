@@ -268,6 +268,11 @@ async function runMainAgentSelfVerification(input) {
             ? cleanList(project.verificationCommands, 8, 300)
             : (0, project_verification_discovery_1.discoverProjectVerificationCommands)(project.workDir, 4),
     }));
+    if (task.dispatch_profile_snapshot?.profile === "light")
+        for (const project of projects) {
+            const explicit = cleanList(task.quick_check_commands || task.verification_commands || task.verificationCommands, 4, 300);
+            project.verificationCommands = explicit.length ? explicit : ["git diff --check"];
+        }
     changedFiles = applyTaskLifetimeFileProvenance(task, projects, changedFiles);
     const verificationResults = await runConfiguredVerification(projects, Math.max(10_000, Math.min(300_000, Number(input.commandTimeoutMs || 120_000))), task.id);
     const workerReceipts = (Array.isArray(input.workerReceipts) ? input.workerReceipts : []).slice(0, 12).map((receipt, index) => ({
@@ -299,6 +304,10 @@ async function runMainAgentSelfVerification(input) {
         { id: "verification_configured", pass: !requiresVerification || projects.some(project => project.verificationCommands?.length), detail: verificationResults.length ? `${verificationResults.length} 个验证命令已执行` : "没有可执行的项目验证命令" },
         { id: "verification_passed", pass: !requiresVerification || (verificationResults.length > 0 && verificationResults.every(item => item.status === "passed")), detail: verificationResults.every(item => item.status === "passed") ? "所有验证命令通过" : "存在失败、阻塞或超时验证" },
     ];
+    if (task.dispatch_profile_snapshot) {
+        const audits = projects.map(project => require("../projects/dispatch-worker-scope").validateDispatchWorkerScope(task, null, changedFiles.filter(file => !file.project || file.project === project.name).map(file => file.path), project.workDir));
+        checks.push({ id: "dispatch_scope", pass: audits.every(audit => audit.valid), detail: audits.flatMap(audit => audit.issues).join("；") || "工作区安全边界检查通过" });
+    }
     let semanticReceipt = null;
     let semanticValue = null;
     let modelError = "";
@@ -446,11 +455,18 @@ function validateQuickTaskVerificationReceipt(task, receipt) {
         return { valid: false, reason: "quick_check_receipt_checksum_mismatch" };
     if (String(receipt.task_id || "") !== String(task?.id || ""))
         return { valid: false, reason: "quick_check_task_mismatch" };
+    if (Number(task?.task_session_boundary_version || 0) >= 1) {
+        if (receipt.scope !== (task.group_id ? "group" : "project") || receipt.scope_id !== String(task.group_id || task.target_project || "")
+            || receipt.exact_session_id !== String(task.exact_session_id || task.group_session_id || task.project_session_id || ""))
+            return { valid: false, reason: "quick_check_scope_mismatch" };
+        if (receipt.attempt !== Math.max(1, Number(task.execution_attempt || task.attempt || 1)))
+            return { valid: false, reason: "quick_check_attempt_mismatch" };
+    }
     if (receipt.canAccept !== true || receipt.status !== "passed")
         return { valid: false, reason: "quick_check_failed" };
     if (!Array.isArray(receipt.changed_files) || receipt.changed_files.length === 0)
         return { valid: false, reason: "quick_check_changed_files_missing" };
-    if (!Array.isArray(receipt.verification_results) || receipt.verification_results.some((item) => item?.status !== "passed"))
+    if (!Array.isArray(receipt.verification_results) || receipt.verification_results.length === 0 || receipt.verification_results.some((item) => item?.status !== "passed"))
         return { valid: false, reason: "quick_check_verification_failed" };
     return { valid: true, reason: "ok" };
 }

@@ -4,6 +4,8 @@ export declare function callLlm(config: any, messages: any[], options?: {
     onDelta?: (delta: string) => void;
     providerContextCache?: any;
     requestAttribution?: any;
+    modelRequestContext?: import('../../system/model-request-context').ModelRequestContext;
+    executionOrigin?: 'business' | 'test' | 'probe' | 'unknown';
     onProviderContextCache?: (receipt: any) => void;
     retryProfile?: ModelRetryProfileId;
     signal?: AbortSignal;
@@ -23,6 +25,8 @@ export declare function callGlobalModelWithRetry(config: any, messages: any[], o
     onDelta?: (delta: string) => void;
     providerContextCache?: any;
     requestAttribution?: any;
+    modelRequestContext?: import('../../system/model-request-context').ModelRequestContext;
+    executionOrigin?: 'business' | 'test' | 'probe' | 'unknown';
     onProviderContextCache?: (receipt: any) => void;
     retryProfile?: ModelRetryProfileId;
     signal?: AbortSignal;

@@ -37,6 +37,7 @@ exports.delegatedInquiryId = delegatedInquiryId;
 exports.beginDelegatedInquiryProjection = beginDelegatedInquiryProjection;
 exports.finishDelegatedInquiryProjection = finishDelegatedInquiryProjection;
 exports.getDelegatedInquiryProjection = getDelegatedInquiryProjection;
+exports.delegatedInquiryActionWasHandled = delegatedInquiryActionWasHandled;
 exports.updateDelegatedInquiryProjection = updateDelegatedInquiryProjection;
 exports.listDelegatedInquiryProjections = listDelegatedInquiryProjections;
 const crypto = __importStar(require("crypto"));
@@ -45,6 +46,7 @@ const utils_1 = require("../core/utils");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const credential_store_1 = require("../core/credential-store");
 const runtime_events_1 = require("./runtime-events");
+const source_evidence_metadata_1 = require("./source-evidence-metadata");
 const STORE_FILE = path.join(utils_1.CCM_DIR, "delegated-inquiry-projections.json");
 const MAX_RECORDS = 500;
 function digest(value) {
@@ -90,10 +92,13 @@ function normalizeProjection(value) {
         sourceScope: "global",
         sourceScopeId: "global",
         sourceSessionId,
+        ...(value.sourceRunId ? { sourceRunId: safeText(value.sourceRunId, 160), sourceMessageId: safeText(value.sourceMessageId, 160), toolCallId: safeText(value.toolCallId, 180), evidenceRefs: (0, source_evidence_metadata_1.sourceEvidenceMetadata)(value.evidenceRefs),
+            evidenceRevisions: (value.evidenceRevisions || []).slice(-20).map(row => ({ revision: row.revision, status: row.status, evidenceRefs: (0, source_evidence_metadata_1.sourceEvidenceMetadata)(row.evidenceRefs), conclusionSummary: safeText(row.conclusionSummary, 800), missingEvidenceSummaries: (row.missingEvidenceSummaries || []).map(item => safeText(item, 500)), completedAt: row.completedAt })) } : {}),
         exactSessionId: sourceSessionId,
         generation: Math.max(0, Math.floor(Number(value?.generation || 0))),
         targetScope,
         targetId,
+        ...(Array.isArray(value.requestedProjectIds) ? { requestedProjectIds: [...new Set(value.requestedProjectIds.map(id => safeText(id, 160)).filter(Boolean))].slice(0, 20) } : {}),
         status,
         ...(outcome ? { outcome } : {}),
         questionSummary: safeText(value?.questionSummary || value?.question_summary, 500),
@@ -177,7 +182,7 @@ function delegatedInquiryId(input) {
     return `inq_${digest([input.sourceSessionId, input.targetScope, input.targetId, safeText(input.question, 8_000)]).slice(0, 28)}`;
 }
 function beginDelegatedInquiryProjection(input) {
-    const inquiryId = safeText(input.inquiryId, 120) || delegatedInquiryId(input);
+    const inquiryId = safeText(input.inquiryId, 120) || (input.sourceRunId ? `inq_${digest([input.sourceRunId, input.toolCallId, input.targetScope, input.targetId, input.question]).slice(0, 28)}` : delegatedInquiryId(input));
     const now = new Date().toISOString();
     const projection = (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
         const store = loadStore();
@@ -191,10 +196,12 @@ function beginDelegatedInquiryProjection(input) {
             sourceScope: "global",
             sourceScopeId: "global",
             sourceSessionId: safeText(input.sourceSessionId, 160),
+            ...(input.sourceRunId ? { sourceRunId: input.sourceRunId, sourceMessageId: input.sourceMessageId, toolCallId: input.toolCallId } : {}),
             exactSessionId: safeText(input.sourceSessionId, 160),
             generation: Math.max(0, Math.floor(Number(input.generation || 0))),
             targetScope: input.targetScope,
             targetId: safeText(input.targetId, 160),
+            ...(input.requestedProjectIds ? { requestedProjectIds: input.requestedProjectIds } : {}),
             status: "running",
             questionSummary: safeText(input.question, 500),
             evidenceCount: 0,
@@ -226,6 +233,7 @@ function finishDelegatedInquiryProjection(input) {
         const base = {
             ...projectionBase(existing),
             revision: existing.revision + 1,
+            ...(existing.sourceRunId ? { evidenceRefs: (0, source_evidence_metadata_1.sourceEvidenceMetadata)(input.evidenceRefs || existing.evidenceRefs), evidenceRevisions: (0, source_evidence_metadata_1.retainEvidenceRevision)(existing) } : {}),
             status: input.status,
             outcome: input.status,
             evidenceCount: Math.max(evidenceIds.length, Math.max(0, Math.floor(Number(input.evidenceCount || 0)))),
@@ -252,6 +260,9 @@ function getDelegatedInquiryProjection(inquiryId) {
     const found = loadStore().inquiries.find(item => item.inquiryId === safeText(inquiryId, 120));
     return found ? publicProjection(found) : null;
 }
+function delegatedInquiryActionWasHandled(inquiryId, key) {
+    return loadStore().inquiries.find(row => row.inquiryId === inquiryId)?.handledActionKeys.includes(key) === true;
+}
 function updateDelegatedInquiryProjection(input) {
     const claimed = (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
         const store = loadStore();
@@ -268,6 +279,7 @@ function updateDelegatedInquiryProjection(input) {
             ...projectionBase(existing),
             ...input.patch,
             revision: existing.revision + 1,
+            ...(existing.sourceRunId ? { evidenceRevisions: (0, source_evidence_metadata_1.retainEvidenceRevision)(existing) } : {}),
             ...(input.patch.status ? { availableActions: input.patch.availableActions || actionsForStatus(input.patch.status) } : {}),
             ...(input.patch.conclusionSummary !== undefined ? { conclusionSummary: safeText(input.patch.conclusionSummary, 800) } : {}),
             ...(input.patch.missingEvidenceSummaries ? { missingEvidenceSummaries: Array.from(new Set(input.patch.missingEvidenceSummaries.map(item => safeText(item, 500)).filter(Boolean))).slice(0, 8) } : {}),

@@ -51,13 +51,13 @@ exports.buildDailyDevTaskDescription = buildDailyDevTaskDescription;
 exports.evaluateDailyDevIntakeQuality = evaluateDailyDevIntakeQuality;
 exports.normalizeDailyDevQualityDecision = normalizeDailyDevQualityDecision;
 exports.decideDailyDevIntakeQuality = decideDailyDevIntakeQuality;
+const task_intake_session_binding_1 = require("./task-intake-session-binding");
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const storage_1 = require("./storage");
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
-const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const automation_definition_service_1 = require("../scheduling/automation-definition-service");
 let runtimeDeps = {};
 function configureDailyDevBacklogRuntime(deps) {
@@ -541,14 +541,15 @@ function claimReadyDailyDevBacklogUnlocked(groupId, claim = {}) {
     let targetSession;
     let automationBindingSnapshot = null;
     try {
-        const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+        const resolution = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
+            requestId: file.id,
             scope: "group",
             scopeId: groupId,
             source: "requirement_pool",
             title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
             actor: String(claim.source || "daily_dev_automation"),
         });
-        targetSession = (0, storage_1.listGroupChatSessions)(groupId).sessions.find((session) => String(session?.id || "") === resolution.snapshot.exactSessionId);
+        targetSession = { id: resolution.snapshot.exactSessionId, title: file.name || "任务执行上下文" };
         if (!targetSession)
             throw new Error("绑定的自动化任务会话不存在");
         automationBindingSnapshot = resolution.snapshot;
@@ -836,14 +837,15 @@ function dispatchDailyDevBacklogUnlocked(groupId, fileName, ctx, options = {}) {
     let targetSession;
     let automationBindingSnapshot = null;
     try {
-        const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+        const resolution = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
+            requestId: file.id,
             scope: "group",
             scopeId: groupId,
             source: "requirement_pool",
             title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
             actor: String(options.source || "manual_backlog_dispatch"),
         });
-        targetSession = (0, storage_1.listGroupChatSessions)(groupId).sessions.find((session) => String(session?.id || "") === resolution.snapshot.exactSessionId);
+        targetSession = { id: resolution.snapshot.exactSessionId, title: file.name || "任务执行上下文" };
         if (!targetSession)
             throw new Error("绑定的自动化任务会话不存在");
         automationBindingSnapshot = resolution.snapshot;

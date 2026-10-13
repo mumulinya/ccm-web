@@ -38,6 +38,7 @@ exports.buildTaskConversationLinks = buildTaskConversationLinks;
 exports.validateTaskMutationGuard = validateTaskMutationGuard;
 exports.buildGlobalMissionSafeProjection = buildGlobalMissionSafeProjection;
 const crypto = __importStar(require("crypto"));
+const task_session_boundary_1 = require("../modules/collaboration/task-session-boundary");
 const path = __importStar(require("path"));
 const db_1 = require("../core/db");
 const utils_1 = require("../core/utils");
@@ -101,6 +102,8 @@ function normalizeRef(value) {
     const scope = clean(value.scope, 16);
     const scopeId = clean(value.scopeId || value.scope_id, 160);
     const exactSessionId = clean(value.exactSessionId || value.exact_session_id || value.sessionId || value.session_id, 240);
+    if ((0, task_session_boundary_1.isPrivateTaskSessionId)(exactSessionId))
+        return null;
     if (!["global", "project", "group"].includes(scope) || !scopeId || !exactSessionId)
         return null;
     return {
@@ -121,6 +124,8 @@ function sourceRefForTask(task, mission) {
     return sessionId ? { scope: "global", scopeId: "global-agent", exactSessionId: sessionId, messageId: "", title: "全局 Agent 任务" } : null;
 }
 function targetRefForTask(task) {
+    if ((0, task_session_boundary_1.isPrivateTaskSessionId)(task?.target_conversation_ref?.exactSessionId || task?.group_session_id || task?.project_session_id))
+        return null;
     const explicit = normalizeRef(task?.target_conversation_ref || task?.targetConversationRef);
     if (explicit)
         return explicit;
@@ -221,8 +226,12 @@ function validateTaskMutationGuard(task, payload = {}, options = {}) {
     if (expectedBinding && expectedBinding !== bindingChecksum) {
         return { valid: false, status: 409, code: "TASK_BINDING_CONFLICT", error: "任务目标绑定已变化，请刷新后重试", details: { expected_binding_checksum: expectedBinding, actual_binding_checksum: bindingChecksum } };
     }
-    if (options.requireTarget && target?.available === false) {
-        return { valid: false, status: 409, code: "TASK_TARGET_UNAVAILABLE", error: target.unavailableReason || "任务目标会话当前不可用", details: { scope: target.scope, scope_id: target.scopeId, exact_session_id: target.exactSessionId } };
+    const authoritativeTargetAvailable = task?.task_session_boundary_version
+        ? task.group_id ? (0, storage_1.loadGroups)().some(row => row.id === task.group_id)
+            : task.target_project === "global-agent" || (0, db_1.getConfigs)().some(row => row.name === task.target_project)
+        : target?.available !== false;
+    if (options.requireTarget && !authoritativeTargetAvailable) {
+        return { valid: false, status: 409, code: "TASK_TARGET_UNAVAILABLE", error: target?.unavailableReason || "任务目标会话当前不可用", details: { scope: target?.scope, scope_id: target?.scopeId, exact_session_id: target?.exactSessionId } };
     }
     return { valid: true, revision, generation, bindingChecksum };
 }

@@ -47,6 +47,7 @@ exports.readLatestProviderNeutralContextCacheState = readLatestProviderNeutralCo
 exports.readContextEngineV2Status = readContextEngineV2Status;
 exports.providerNeutralContextCacheCapability = providerNeutralContextCacheCapability;
 exports.runProviderNeutralContextCacheSelfTest = runProviderNeutralContextCacheSelfTest;
+const provider_cache_rolling_metrics_1 = require("./provider-cache-rolling-metrics");
 const provider_cache_observation_1 = require("./provider-cache-observation");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
@@ -59,6 +60,7 @@ const model_token_preflight_1 = require("./model-token-preflight");
 const context_budget_1 = require("./context-budget");
 const context_engine_observability_1 = require("./context-engine-observability");
 const provider_cache_diagnostics_1 = require("./provider-cache-diagnostics");
+const provider_cache_window_1 = require("./provider-cache-window");
 const provider_cache_scope_metrics_1 = require("./provider-cache-scope-metrics");
 const automatic_provider_cache_optimization_1 = require("./automatic-provider-cache-optimization");
 const agent_cache_affinity_1 = require("./agent-cache-affinity");
@@ -70,6 +72,8 @@ const provider_prefix_classification_1 = require("./provider-prefix-classificati
 const provider_cache_transcript_1 = require("./provider-cache-transcript");
 const provider_cache_public_profile_1 = require("./provider-cache-public-profile");
 const provider_usage_1 = require("./provider-usage");
+const model_cache_eligibility_1 = require("./model-cache-eligibility");
+const model_cache_metrics_1 = require("./model-cache-metrics");
 const provider_local_materialization_cache_1 = require("./provider-local-materialization-cache");
 // Use the same runtime root as the rest of CCM. The previous hard-coded
 // os.homedir() path made cache receipts/checkpoints bypass CCM_TASK_STORE_DIR,
@@ -645,7 +649,7 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
     const startedAtMs = Date.now();
     const inputMessages = Array.isArray(messagesInput) ? messagesInput : [];
     const publicPrefix = (0, ccm_public_stable_prefix_1.buildCcmPublicStablePrefixMessage)();
-    const messages = inputMessages.some((message) => message?.id === publicPrefix.id)
+    const messages = options.preserveWire || inputMessages.some((message) => message?.id === publicPrefix.id)
         ? inputMessages
         : [publicPrefix, ...inputMessages];
     const previousSameEpoch = previous?.schema === "ccm-context-plan-state-v2"
@@ -952,7 +956,8 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         cacheIdentityPersistent: true,
         localMaterializationStatus: materialized.localMaterializationStatus,
         finalContextProjection: safeFinalContextProjection(options.finalContextProjection),
-        prefixExtensionEligible: stablePrefixTokens >= 1_024,
+        cacheEligibility: (0, model_cache_eligibility_1.modelCacheEligibility)(options, promptSegments.cacheablePrefixTokens ?? stablePrefixTokens),
+        prefixExtensionEligible: (0, model_cache_eligibility_1.modelCacheEligibility)(options, promptSegments.cacheablePrefixTokens ?? stablePrefixTokens).status === 'eligible',
         publicStablePrefixTokens,
         publicStablePrefixChecksum: publicMeta.checksum,
         // Keep the public run explicit so protocol adapters can place an optional
@@ -1063,6 +1068,7 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
     plan.contextPlanChecksum = planChecksum(plan);
     plan.planChecksum = plan.contextPlanChecksum;
     atomicWriteJson(file, {
+        ...(0, provider_cache_window_1.preserveProviderCacheHistory)(previous),
         schema: "ccm-context-plan-state-v2",
         version: 2,
         ...binding,
@@ -1206,75 +1212,6 @@ function estimatedInputCostUsd(plan, usage) {
     const cost = (direct * Number(rates.directInput || 0) + read * Number(rates.cacheRead || 0) + creation * Number(rates.cacheCreation || 0)) / 1_000_000;
     return { configured, costUsd: configured ? Math.round(cost * 1_000_000) / 1_000_000 : 0 };
 }
-function nextRollingMetrics(current, completion, plan) {
-    const previous = current?.rollingMetrics || {};
-    const samples = Math.max(0, Number(previous.samples || 0));
-    const nextSamples = samples + 1;
-    const reportedSamples = Math.max(0, Number(previous.reportedSamples || 0)) + (completion.providerUsageReported === true ? 1 : 0);
-    const unreportedSamples = Math.max(0, Number(previous.unreportedSamples || 0)) + (completion.providerUsageReported === true ? 0 : 1);
-    const average = (previousValue, nextValue, includeNext = true, sampleCount = samples) => {
-        const priorCount = Math.max(0, Number(previousValue == null ? 0 : sampleCount));
-        const nextCount = includeNext ? priorCount + 1 : priorCount;
-        if (!nextCount)
-            return null;
-        return Math.round((((Number(previousValue || 0) * priorCount) + (includeNext ? Number(nextValue || 0) : 0)) / nextCount) * 1000) / 1000;
-    };
-    const previousForeground = Array.isArray(previous.recentForegroundSamples) ? previous.recentForegroundSamples : [];
-    const recentForegroundSamples = completion.requestClass === "foreground_main"
-        ? [...previousForeground, {
-                at: completion.completedAt,
-                hit: completion.cacheReadInputTokens > 0,
-                cacheReadTokens: completion.cacheReadInputTokens,
-                providerInputTokens: completion.providerInputTokens + completion.cacheCreationInputTokens + completion.cacheReadInputTokens,
-                usageReported: completion.providerUsageReported === true,
-                missReason: completion.cacheMissReason,
-                warmState: completion.cacheWarmState,
-            }].slice(-50)
-        : previousForeground.slice(-50);
-    const trend = (size) => {
-        const rows = recentForegroundSamples.slice(-size);
-        const hits = rows.filter((row) => row.hit === true).length;
-        const cacheReadTokens = rows.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0);
-        const providerInputTokens = rows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0);
-        const reportedRows = rows.filter((row) => row.usageReported === true
-            || (row.usageReported == null && Number(row.providerInputTokens || 0) > 0));
-        return {
-            samples: rows.length,
-            reportedSamples: reportedRows.length,
-            unreportedSamples: rows.length - reportedRows.length,
-            hits: reportedRows.filter((row) => row.hit === true).length,
-            misses: reportedRows.filter((row) => row.hit !== true).length,
-            requestHitRate: reportedRows.length ? reportedRows.filter((row) => row.hit === true).length / reportedRows.length : null,
-            cacheReadTokens: reportedRows.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0),
-            providerInputTokens: reportedRows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0),
-            tokenReuseRate: reportedRows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0) > 0
-                ? Math.min(1, reportedRows.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0) / reportedRows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0))
-                : null,
-        };
-    };
-    return {
-        schema: "ccm-context-cache-rolling-metrics-v1",
-        samples: nextSamples,
-        averageProjectionDurationMs: average(previous.averageProjectionDurationMs, plan.projectionDurationMs),
-        averageProviderLatencyMs: average(previous.averageProviderLatencyMs, completion.providerLatencyMs),
-        averageCacheHitRate: completion.cacheHitRate == null
-            ? (previous.averageCacheHitRate == null ? null : previous.averageCacheHitRate)
-            : average(previous.averageCacheHitRate, completion.cacheHitRate, true, Math.max(0, Number(previous.averageCacheHitSamples ?? samples))),
-        averageCacheHitSamples: Math.max(0, Number(previous.averageCacheHitSamples || 0)) + (completion.cacheHitRate == null ? 0 : 1),
-        reportedSamples,
-        unreportedSamples,
-        averageReusedBlockRatio: average(previous.averageReusedBlockRatio, completion.reusedBlockCount / Math.max(1, completion.reusedBlockCount + completion.changedBlockCount)),
-        totalDirectInputTokens: Math.max(0, Number(previous.totalDirectInputTokens || 0)) + completion.providerInputTokens,
-        totalCacheReadInputTokens: Math.max(0, Number(previous.totalCacheReadInputTokens || 0)) + completion.cacheReadInputTokens,
-        totalCacheCreationInputTokens: Math.max(0, Number(previous.totalCacheCreationInputTokens || 0)) + completion.cacheCreationInputTokens,
-        totalEstimatedCostUsd: Math.round((Math.max(0, Number(previous.totalEstimatedCostUsd || 0)) + completion.estimatedInputCostUsd) * 1_000_000) / 1_000_000,
-        recentForegroundSamples,
-        recent20: trend(20),
-        recent50: trend(50),
-        lastUpdatedAt: completion.completedAt,
-        contentStored: false,
-    };
-}
 function contextCacheRecommendation(plan, completion, rolling) {
     const samples = Math.max(0, Number(rolling?.samples || 0));
     const reuse = Math.max(0, Number(rolling?.averageReusedBlockRatio || 0));
@@ -1327,15 +1264,19 @@ function contextCacheRecommendation(plan, completion, rolling) {
 function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) {
     if (!plan?.requestId || plan?.schema !== "ccm-context-plan-v2")
         return null;
+    const replay = (0, provider_cache_window_1.priorProviderCacheCompletion)(readJson(stateFile(plan)), input, plan);
+    if (replay)
+        return replay.receipt;
     const usage = input.usage && typeof input.usage === "object" ? input.usage : {};
     const normalizedUsage = (0, provider_usage_1.normalizeProviderUsage)(usage, String(plan.provider || "openai"));
     const reportedInputTokens = normalizedUsage.directInputTokens;
     const reportedCacheReadTokens = normalizedUsage.cacheReadInputTokens;
     const reportedCacheCreationTokens = normalizedUsage.cacheCreationInputTokens;
-    const providerCacheHitRatio = reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens > 0
+    const providerCacheHitRatio = normalizedUsage.cacheUsageReported && reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens > 0
         ? Math.min(1, reportedCacheReadTokens / Math.max(1, reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens))
         : null;
     const completion = {
+        ...(0, model_cache_metrics_1.modelCacheCompletionProjection)(plan, usage, input),
         schema: "ccm-context-plan-usage-receipt-v2",
         version: 2,
         requestId: plan.requestId,
@@ -1483,7 +1424,7 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         cacheDeletedInputTokens: Math.max(0, Number(usage.cacheDeletedInputTokens || usage.cache_deleted_input_tokens || 0)),
         cacheCreation5mInputTokens: Math.max(0, Number(usage.cacheCreation5mInputTokens || usage.ephemeral_5m_input_tokens || 0)),
         cacheCreation1hInputTokens: Math.max(0, Number(usage.cacheCreation1hInputTokens || usage.ephemeral_1h_input_tokens || 0)),
-        cacheHitRate: reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens > 0
+        cacheHitRate: normalizedUsage.cacheUsageReported && reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens > 0
             ? Math.min(1, reportedCacheReadTokens / Math.max(1, reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens))
             : null,
         // Preserve an explicit Provider usage flag even when the Provider reports
@@ -1623,11 +1564,10 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         completion.stable_model_payload_checksum = completion.workspaceModelAudit.stable_model_payload_checksum;
         completion.provider_cache_hit_ratio = providerCacheHitRatio;
     }
-    const reportedCostUsd = Math.max(0, Number(usage.costUsd || usage.cost_usd || usage.reportedCostUsd || usage.reported_cost_usd || 0));
     const estimatedCost = estimatedInputCostUsd(plan, completion);
-    completion.reportedCostUsd = reportedCostUsd;
-    completion.estimatedInputCostUsd = reportedCostUsd > 0 ? reportedCostUsd : estimatedCost.costUsd;
-    completion.costSource = reportedCostUsd > 0 ? "provider_usage" : estimatedCost.configured ? "configured_token_rates" : "unavailable";
+    completion.estimatedCostUsd = estimatedCost.configured ? estimatedCost.costUsd : null;
+    completion.estimatedInputCostUsd = completion.reportedCostUsd ?? completion.estimatedCostUsd;
+    completion.costSource = completion.providerCostReported ? "provider_usage" : estimatedCost.configured ? "configured_token_rates" : "unavailable";
     const explicitUsageReported = typeof usage.reported === "boolean"
         ? usage.reported
         : typeof usage.providerUsageReported === "boolean"
@@ -1645,7 +1585,7 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         generation: plan.generation,
         boundaryGeneration: plan.boundaryGeneration,
     }));
-    Object.assign(completion, (0, provider_cache_observation_1.providerCacheObservation)(plan, usageReported, completion.cacheReadInputTokens, {
+    Object.assign(completion, (0, provider_cache_observation_1.providerCacheObservation)(plan, normalizedUsage.cacheUsageReported, completion.cacheReadInputTokens, {
         candidateTokens: Number(plan.cacheablePrefixTokens || plan.promptSegments?.cacheablePrefixTokens || 0),
         matchedTokens: Number(input.wireReuseEvidence?.matchingPrefixTokensEstimate || 0),
         matchingPrefixTokensEstimate: Number(input.wireReuseEvidence?.matchingPrefixTokensEstimate || 0),
@@ -1658,7 +1598,7 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         stablePrefixBlockCount: Number(plan.stablePrefixBlockCount || 0),
         breakpointCount: Array.isArray(plan._runtimeBreakpointChecksums) ? plan._runtimeBreakpointChecksums.length : Number(plan.cacheLifecycle?.breakpointCount || 0),
         stablePrefixChanged: plan.stablePrefixChanged === true,
-        usageReported,
+        usageReported: normalizedUsage.cacheUsageReported,
         hit: completion.cacheReadInputTokens > 0,
         localMaterializationStatus: plan.localMaterializationStatus || plan.materializationCache?.localMaterializationStatus,
         idleDurationMs: Math.max(0, Number(plan.cacheLifecycle?.idleDurationMs || 0)),
@@ -1696,7 +1636,7 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         && !!plan.previousPlanChecksum;
     const warm = (0, provider_cache_diagnostics_1.nextProviderCacheWarmState)({
         hit: completion.cacheReadInputTokens > 0,
-        usageReported,
+        usageReported: normalizedUsage.cacheUsageReported,
         eligible: completion.prefixExtensionEligible === true,
         stablePrefixChanged: plan.stablePrefixChanged === true,
         previousWarmState: previousState?.cacheWarmState,
@@ -1736,9 +1676,15 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         cacheAffinity: plan.cacheAffinity || null,
     };
     const file = stateFile(binding);
+    let duplicateCompletion = null;
     (0, atomic_json_file_1.withFileLock)(file, () => {
         const current = readJson(file);
-        const rollingMetrics = nextRollingMetrics(current, completion, plan);
+        const existing = (0, provider_cache_window_1.priorProviderCacheCompletion)(current, input, plan);
+        if (existing) {
+            duplicateCompletion = existing.receipt;
+            return;
+        }
+        const rollingMetrics = (0, provider_cache_rolling_metrics_1.nextRollingMetrics)(current, completion, plan);
         completion.rollingMetrics = rollingMetrics;
         completion.cacheRecommendation = contextCacheRecommendation(plan, completion, rollingMetrics);
         completion.receiptChecksum = checksum(completion);
@@ -1831,11 +1777,15 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
                     promptSegments: plan.promptSegments,
                 } : {}),
                 rollingMetrics,
+                completedPhysicalRequests: (0, provider_cache_window_1.rememberProviderCacheCompletion)(current, completion, input, plan),
                 cacheRecommendation: completion.cacheRecommendation,
-                updatedAt: completion.completedAt,
+                updatedAt: ownsLatestPlan ? completion.completedAt : current.updatedAt,
             });
+            (0, provider_cache_window_1.commitProviderCacheCompletion)(input, plan);
         }
     }, { timeoutMs: 30_000, retryMs: 20, staleMs: 2 * 60_000 });
+    if (duplicateCompletion)
+        return duplicateCompletion;
     if (!completion.receiptChecksum)
         completion.receiptChecksum = checksum(completion);
     (0, context_engine_observability_1.recordContextEngineEvent)({

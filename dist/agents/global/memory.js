@@ -863,7 +863,7 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
     const nextState = {
         ...state,
         latestProviderUsage: measurementUsage || null,
-        tokenMeasurement,
+        tokenMeasurement: require('../../system/model-visible-measurement-privacy').modelTokenMeasurementForPersistence(tokenMeasurement),
         modelVisiblePayload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(payload),
         modelVisiblePayloadChecksum: payload.payloadChecksum,
         fixedContextChecksum: payload.fixedContextChecksum,
@@ -1518,18 +1518,9 @@ function scheduleGlobalLongTermMemoryExtraction(sessionId) {
 function ingestGlobalAgentConversation(input) {
     const sessionId = String(input.sessionId || "default");
     const transcript = loadGlobalAgentTranscript(sessionId);
-    transcript.source = input.source || transcript.source || "global-agent";
-    const byId = new Map(transcript.messages.map((item) => [item.id, item]));
-    let assistantAdded = false;
-    for (const raw of input.messages || []) {
-        const message = normalizeMessage(raw, sessionId, input.source);
-        if (!message.content.trim())
-            continue;
-        const duplicate = [...byId.values()].reverse().find((item) => item.role === message.role && item.content === message.content && Math.abs(Date.parse(item.timestamp) - Date.parse(message.timestamp)) <= 10_000);
-        if (duplicate)
-            continue;
-        byId.set(message.id, message);
-        (0, session_task_timeline_1.recordSessionTimelineMessage)({
+    const source = input.source || transcript.source || "global-agent";
+    const merged = require('./transcript-ingestion-merge').mergeTranscriptIngestion(transcript.messages, input.messages || [], (raw) => normalizeMessage(raw, sessionId, input.source), (raw, message) => {
+        require('../../tasks/session-task-timeline').recordSessionTimelineMessageReceipt({
             exactSessionId: sessionId,
             scope: "global",
             scopeId: "global",
@@ -1538,11 +1529,12 @@ function ingestGlobalAgentConversation(input) {
             taskId: raw?.taskId || raw?.task_id,
             timestamp: message.timestamp,
         });
-        if (message.role === "assistant") {
-            assistantAdded = true;
-        }
-    }
-    transcript.messages = [...byId.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+    });
+    if (!merged.changed && transcript.source === source)
+        return { transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt }, extracted: 0, extraction: 'awaiting_complete_turn', rejected: 0, compaction: null };
+    const assistantAdded = merged.assistantAdded;
+    transcript.source = source;
+    transcript.messages = merged.messages.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     transcript.updatedAt = now();
     saveTranscript(transcript);
     const memory = loadGlobalAgentMemory();

@@ -1,1 +1,1 @@
-export declare function bootstrapServerRuntime(startupCollabCtx: any, port: number, deps: any): void;
+export declare function bootstrapServerRuntime(startupCollabCtx: any, port: number, deps: any): Promise<void>;

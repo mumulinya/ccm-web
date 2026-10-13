@@ -1,3 +1,4 @@
+import { DispatchProfileSnapshot } from "../../agents/dispatch-profile";
 export type TaskOrigin = "conversation" | "dispatch" | "workbench" | "automation" | "global_agent";
 export type TaskSessionArchivePolicy = "user_confirm" | "auto_terminal";
 export type TaskSessionCreationPolicy = "on_create" | "on_terminal";
@@ -22,7 +23,7 @@ export interface TaskSpecV1 {
     task_session_creation_policy: TaskSessionCreationPolicy;
     task_session_archive_policy: TaskSessionArchivePolicy;
     target: {
-        type: "project" | "group";
+        type: "project" | "group" | "global";
         id: string;
         exact_session_id: string;
     };
@@ -40,6 +41,7 @@ export interface TaskSpecV1 {
         channels: string[];
     };
     execution_policy: TaskExecutionPolicy;
+    dispatch_profile_snapshot?: DispatchProfileSnapshot;
     source_snapshot: {
         content_checksum: string;
         source_channel: string;
@@ -88,6 +90,8 @@ export interface AutomationDefinitionV1 {
     attachments: any[];
     schedule: string;
     timezone: string;
+    catch_up_policy?: "skip" | "catch_up_once" | "catch_up_all";
+    concurrency_policy?: "allow_one" | "queue_one" | "parallel";
     execution_policy: TaskExecutionPolicy;
     notification_policy: any;
     metadata?: any;
@@ -109,6 +113,7 @@ export declare function defaultTaskSessionCreationPolicy(task: any): TaskSession
 export declare function resolveTaskExecutionPolicy(task: any): TaskExecutionPolicy;
 export declare function buildTaskSpecV1(task: any, policy?: TaskExecutionPolicy): TaskSpecV1;
 export declare function buildTaskRunV1(task: any, spec: TaskSpecV1, trigger?: TaskRunTrigger): TaskRunV1;
+export declare function upgradeTaskSpecDispatchProfile(taskSpec: TaskSpecV1, snapshot: DispatchProfileSnapshot, executionPolicy?: TaskExecutionPolicy): TaskSpecV1;
 export declare function buildAutomationDefinitionV1(job: any, policy?: TaskExecutionPolicy): AutomationDefinitionV1;
 export declare function validateTaskWorkflowModel(task: any): {
     valid: boolean;

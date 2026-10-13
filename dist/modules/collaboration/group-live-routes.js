@@ -747,7 +747,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         };
     }
     else if (!explicitContinuationTask && !clarificationContext && !modelRecovery) {
-        const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision: taskIntent?.workflowDecision, candidates: recoverableCandidates, exactSessionId: groupSessionId, scope: "group" });
+        const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({ messageId: client_message_id, message: userMessage, scopeId: group_id, workflowDecision: taskIntent?.workflowDecision, candidates: recoverableCandidates, exactSessionId: groupSessionId, scope: "group" });
         if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
             explicitContinuationTask = routeDecision.candidate;
             explicitContinuationKind = routeDecision.decision === "revise_task" ? "revise_goal" : "supplement";
@@ -832,8 +832,10 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
             .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))[0]
         : null);
     const discussionTaskId = String(payload.discussion_task_id || payload.discussionTaskId || "").trim();
-    const discussionTask = !groupLiveFlag(payload.new_topic ?? payload.newTopic, false) && discussionTaskId
-        ? (0, db_1.loadTasks)().find((item) => String(item.id) === discussionTaskId
+    const discussionRoute = (0, conversation_message_routing_1.decideConversationMessageRoute)({ messageId: client_message_id, message: userMessage, scopeId: group_id, workflowDecision: taskIntent?.workflowDecision, candidates: recoverableCandidates, exactSessionId: groupSessionId, scope: "group" });
+    require("./task-session-source-discussion").saveTaskSourceDiscussion({ route: discussionRoute, scope: "group", scopeId: group_id, sessionId: groupSessionId, messageId: client_message_id, message: userMessage, newTopic: groupLiveFlag(payload.new_topic ?? payload.newTopic, false) });
+    const discussionTask = !groupLiveFlag(payload.new_topic ?? payload.newTopic, false) && discussionRoute.discussionTaskId
+        ? (0, db_1.loadTasks)().find((item) => String(item.id) === discussionRoute.discussionTaskId
             && String(item.group_id || "") === String(group_id)
             && String(item.group_session_id || "") === groupSessionId
             && item.task_spec?.task_session_archive_policy === "user_confirm") : null;
@@ -955,6 +957,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     }
     if (continuationTask) {
         const continuation = continueTaskWithMessage(continuationTask.id, messageForAgent, ctx, {
+            authorizationValid: explicitRouteChoice === "continue_original" && !readOnly,
             source: String(payload.source || "group_chat_followup"),
             continuationKind,
             auto_execute: groupLiveFlag(payload.auto_execute ?? payload.autoExecute, true),

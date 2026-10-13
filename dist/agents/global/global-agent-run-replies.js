@@ -103,11 +103,11 @@ function uniqueGlobalStrings(values) {
     return rows;
 }
 function sanitizeGlobalVisibleReplyTerminology(value) {
-    return (0, user_facing_text_1.sanitizeMainAgentUserFacingText)(String(value || "")
+    return String(value || "")
         .replace(/\bCoordinator\b/g, "我")
         .replace(/\bPipeline\b/g, "协作看板")
         .replace(/\bRuntime Kernel\b/g, "技术运行信息")
-        .replace(/\bTrace Replay\b/g, "技术回放"));
+        .replace(/\bTrace Replay\b/g, "技术回放").split('\n').map(line => (0, user_facing_text_1.sanitizeMainAgentUserFacingText)(line)).join('\n');
 }
 function globalVisibleReplyFallback(status) {
     if (status === "failed")

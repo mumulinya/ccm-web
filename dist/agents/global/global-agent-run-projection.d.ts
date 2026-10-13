@@ -63,4 +63,4 @@ export declare function parseGlobalAgentDecision(raw: string | GlobalAgentDecisi
 export declare function normalizeDecision(value: any, fallbackWorkflowDecision?: any): GlobalAgentDecision;
 export declare function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime, options?: {
     sessionContinuationOverride?: any;
-}): Promise<any[]>;
+}): Promise<any>;

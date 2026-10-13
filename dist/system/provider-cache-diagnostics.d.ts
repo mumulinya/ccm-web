@@ -17,7 +17,7 @@ export declare function stablePrefixChangeReasons(input: {
     reasoningModeChecksum?: string;
     breakpointLayoutChecksum?: string;
     transportParametersChecksum?: string;
-}): ("tool_schema_changed" | "protocol_changed" | "cold_start" | "compaction_boundary_changed" | "rules_changed" | "skills_changed" | "system_tools_changed" | "mcp_tools_changed" | "model_changed" | "endpoint_changed" | "generation_changed" | "ttl_policy_changed" | "reasoning_mode_changed" | "breakpoint_layout_changed" | "transport_parameters_changed")[];
+}): ("tool_schema_changed" | "protocol_changed" | "cold_start" | "compaction_boundary_changed" | "ttl_policy_changed" | "reasoning_mode_changed" | "breakpoint_layout_changed" | "transport_parameters_changed" | "rules_changed" | "skills_changed" | "system_tools_changed" | "mcp_tools_changed" | "model_changed" | "endpoint_changed" | "generation_changed")[];
 export declare function nextProviderCacheWarmState(input: {
     hit: boolean;
     usageReported: boolean;

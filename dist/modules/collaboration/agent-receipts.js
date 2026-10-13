@@ -200,6 +200,8 @@ function mergeRunnerVerificationIntoReceipt(receipt, raw) {
 function normalizeAgentReceipt(raw, agent) {
     if (!raw || typeof raw !== "object")
         return null;
+    if (raw.ccm_runner_verification === true)
+        return null;
     const status = String(raw.status || "").trim().toLowerCase();
     const allowed = new Set(["done", "partial", "blocked", "failed", "needs_info"]);
     if (!raw.ccm_receipt && !allowed.has(status))
@@ -287,6 +289,7 @@ function normalizeAgentReceipt(raw, agent) {
     };
     return {
         agent,
+        ...require("../../agents/dispatch-memory-receipt").normalizeDispatchMemoryReceipt(raw),
         status: allowed.has(status) ? status : "partial",
         summary: String(raw.summary || "").trim(),
         actions: normalizeReceiptStringArray(raw.actions),
@@ -324,13 +327,9 @@ function extractAgentReceipt(response, agent) {
     }
     const markerIndex = raw.lastIndexOf("CCM_AGENT_RECEIPT");
     const searchArea = markerIndex >= 0 ? raw.slice(markerIndex) : raw;
-    const start = searchArea.indexOf("{");
-    const end = searchArea.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-        const receipt = normalizeAgentReceipt(parseJsonCandidate(searchArea.slice(start, end + 1)), agent);
-        if (receipt)
-            return mergeRunnerVerificationIntoReceipt(receipt, raw);
-    }
+    const receipt = normalizeAgentReceipt(require("../../agents/receipt-json").readReceiptJsonObject(searchArea), agent);
+    if (receipt)
+        return mergeRunnerVerificationIntoReceipt(receipt, raw);
     return null;
 }
 function getReceiptAssignmentStatus(response, receipt) {

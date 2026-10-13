@@ -23,6 +23,16 @@ export declare function buildReviewFreshnessStamp(reviewedChanges: any[], at?: s
     reviewed_change_fingerprint: string;
     reviewedChangeCount: number;
 };
+/** Use the source-bound project's changed files. Report display strings are
+ * aliases, not additional changes, and must not duplicate qualified paths. */
+export declare function buildHandoffReviewFreshnessStamp(handoff: any, workOrder: any, reviewedFiles: any[]): {
+    schema: string;
+    reviewedAt: string;
+    reviewed_at: string;
+    reviewedChangeFingerprint: string;
+    reviewed_change_fingerprint: string;
+    reviewedChangeCount: number;
+};
 export declare function readReviewFingerprint(entry: any): string;
 /**
  * 消费端：比对复核结论指纹与当前变更集指纹。

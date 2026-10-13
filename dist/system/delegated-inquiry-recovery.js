@@ -17,8 +17,9 @@ function projectEvidence(result) {
         project: result.evidence.project,
         path: file.path,
         checksum: file.checksum,
-        from: 1,
-        to: 1,
+        from: file.startLine || 1,
+        to: file.endLine || 1,
+        ...(file.truncated ? { truncated: true } : {}),
         source: "source_read",
         contentStored: false,
     }));

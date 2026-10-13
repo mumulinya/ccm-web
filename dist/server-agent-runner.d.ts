@@ -48,7 +48,7 @@ export declare function createAgentRunnerRuntime(deps: any): {
     };
     callAgent: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, workspaceTarget?: any) => Promise<any>;
     callAgentForGroupStream: (projectName: string, message: string, workDir: string, agentType: string, options?: any) => Promise<string>;
-    callAgentStream: (projectName: string, message: string, workDir: string, agentType: string, res: any, options?: any) => void;
+    callAgentStream: (projectName: string, message: string, workDir: string, agentType: string, res: any, options?: any) => Promise<void>;
     sendRuntimeToolDispatchBlocked: (res: any, toolContext: any) => any;
     processAgentHeartbeatWake: (wake: any, run: any) => Promise<{
         runId: any;

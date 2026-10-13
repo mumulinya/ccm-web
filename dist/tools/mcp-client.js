@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.McpClient = void 0;
 exports.resolveMcpStdioCommand = resolveMcpStdioCommand;
+const performance_monitor_1 = require("../system/performance-monitor");
 const child_process_1 = require("child_process");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -232,7 +233,7 @@ class McpClient {
             return { content: [{ type: "text", text: "MCP 服务器未连接" }], isError: true };
         }
         try {
-            const result = await this.sendRequest("tools/call", { name, arguments: args }, timeoutMs);
+            const result = await (0, performance_monitor_1.measureAsyncPerformance)("mcp.remote_tool_round_trip", () => this.sendRequest("tools/call", { name, arguments: args }, timeoutMs));
             return result || { content: [{ type: "text", text: "无返回结果" }] };
         }
         catch (e) {

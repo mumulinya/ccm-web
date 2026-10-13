@@ -17,6 +17,8 @@ function catalogLoadedTools(toolContext) {
     return source.filter((tool) => {
         if (!DIRECT_NATIVE_SERVERS.has(String(tool?.server || '')))
             return false;
+        if (Array.isArray(catalog.loadedMcp) && tool.loadPolicy === 'search' && tool.alwaysLoad !== true)
+            return false;
         const name = String(tool?.canonicalName || tool?.name || '');
         if (!name || seen.has(name))
             return false;

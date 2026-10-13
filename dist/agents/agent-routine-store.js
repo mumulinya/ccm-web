@@ -36,6 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.upsertAgentRoutine = upsertAgentRoutine;
 exports.listAgentRoutines = listAgentRoutines;
 exports.createAgentRoutineRun = createAgentRoutineRun;
+exports.reserveAgentRoutineWindow = reserveAgentRoutineWindow;
+exports.getAgentRoutineWindowTime = getAgentRoutineWindowTime;
+exports.claimDeferredAgentRoutineWindow = claimDeferredAgentRoutineWindow;
 exports.updateAgentRoutineRun = updateAgentRoutineRun;
 exports.listAgentRoutineRuns = listAgentRoutineRuns;
 const crypto = __importStar(require("crypto"));
@@ -61,16 +64,51 @@ function listAgentRoutines() { return (0, task_store_1.withSqliteTaskStore)(db =
         return {};
     } })(), createdAt: text(row.created_at), updatedAt: text(row.updated_at) }))); }
 function createAgentRoutineRun(input) {
+    return reserveAgentRoutineWindow(input).run;
+}
+/** Creation and duplicate detection share the SQLite transaction. A replay
+ * must never mutate an already queued or running schedule window. */
+function reserveAgentRoutineWindow(input) {
     return (0, task_store_1.withImmediateTaskStoreTransaction)(db => {
         const existing = db.prepare("SELECT * FROM agent_routine_runs WHERE routine_id = ? AND schedule_window_id = ?").get(text(input.routineId), text(input.scheduleWindowId));
         if (existing)
-            return rowRun(existing);
+            return { run: rowRun(existing), created: false };
+        let status = input.status || "queued";
+        if (input.concurrencyPolicy && input.concurrencyPolicy !== "parallel") {
+            const active = db.prepare("SELECT status FROM agent_routine_runs WHERE routine_id = ? AND status IN ('queued', 'running', 'coalesced')").all(text(input.routineId));
+            if (active.length)
+                status = input.concurrencyPolicy === "queue_one" && !active.some(row => row.status === "coalesced") ? "coalesced" : "skipped";
+        }
         const routineRunId = id("routine_run");
         const timestamp = now();
         db.prepare("INSERT INTO agent_routine_runs(routine_run_id, routine_id, schedule_window_id, trigger_type, run_id, status, catch_up, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .run(routineRunId, text(input.routineId), text(input.scheduleWindowId), text(input.triggerType) || "cron", text(input.runId), input.status || "queued", input.catchUp ? 1 : 0, timestamp, timestamp);
-        (0, agent_governance_store_1.recordAgentActivityInTransaction)(db, { eventType: "routine.run_created", summary: "Routine 执行窗口已记录", payload: { routineId: input.routineId, routineRunId, scheduleWindowId: input.scheduleWindowId }, idempotencyKey: `routine-run-created:${input.routineId}:${input.scheduleWindowId}` });
-        return rowRun(db.prepare("SELECT * FROM agent_routine_runs WHERE routine_run_id = ?").get(routineRunId));
+            .run(routineRunId, text(input.routineId), text(input.scheduleWindowId), text(input.triggerType) || "cron", text(input.runId), status, input.catchUp ? 1 : 0, timestamp, timestamp);
+        (0, agent_governance_store_1.recordAgentActivityInTransaction)(db, { eventType: "routine.run_created", summary: "Routine 执行窗口已记录", payload: { routineId: input.routineId, routineRunId, scheduleWindowId: input.scheduleWindowId, scheduledFor: input.scheduledFor || timestamp, status }, idempotencyKey: `routine-run-created:${input.routineId}:${input.scheduleWindowId}` });
+        return { run: rowRun(db.prepare("SELECT * FROM agent_routine_runs WHERE routine_run_id = ?").get(routineRunId)), created: true };
+    });
+}
+function getAgentRoutineWindowTime(run) {
+    return (0, task_store_1.withSqliteTaskStore)(db => {
+        const row = db.prepare("SELECT payload_json FROM agent_activity_events WHERE idempotency_key = ?").get(`routine-run-created:${run.routineId}:${run.scheduleWindowId}`);
+        try {
+            return text(JSON.parse(row?.payload_json || "{}").scheduledFor) || run.createdAt;
+        }
+        catch {
+            return run.createdAt;
+        }
+    });
+}
+/** Promote the one retained window only after the previous delivery settles.
+ * This is a reservation in the existing ledger, not another task queue. */
+function claimDeferredAgentRoutineWindow(routineId) {
+    return (0, task_store_1.withImmediateTaskStoreTransaction)(db => {
+        if (db.prepare("SELECT 1 FROM agent_routine_runs WHERE routine_id = ? AND status IN ('queued', 'running') LIMIT 1").get(text(routineId)))
+            return null;
+        const row = db.prepare("SELECT * FROM agent_routine_runs WHERE routine_id = ? AND status = 'coalesced' ORDER BY created_at, rowid LIMIT 1").get(text(routineId));
+        if (!row)
+            return null;
+        db.prepare("UPDATE agent_routine_runs SET status = 'queued', updated_at = ? WHERE routine_run_id = ? AND status = 'coalesced'").run(now(), row.routine_run_id);
+        return rowRun(db.prepare("SELECT * FROM agent_routine_runs WHERE routine_run_id = ?").get(row.routine_run_id));
     });
 }
 function updateAgentRoutineRun(routineRunId, patch) {

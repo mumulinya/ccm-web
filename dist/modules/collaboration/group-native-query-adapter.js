@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runGroupMainNativeQueryLoop = runGroupMainNativeQueryLoop;
+const deferred_tool_invocation_1 = require("../../agents/deferred-tool-invocation");
 const crypto = __importStar(require("crypto"));
 const native_query_loop_1 = require("../../agents/native-query-loop");
 const main_agent_harness_1 = require("../../agents/main-agent-harness");
@@ -118,6 +119,8 @@ async function runGroupMainNativeQueryLoop(input) {
         input.markVisibleFeedback();
         return event;
     };
+    const sourceTools = require('../../system/group-delegated-source-tools').groupDelegatedSourceTools(input.sourceInquiryContext);
+    const nativeTools = () => sourceTools ? sourceTools.definitions : [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(toolContext)];
     const result = await (0, main_agent_harness_1.runMainAgentHarness)({
         harness: (0, main_agent_harness_1.buildMainAgentHarness)({
             scope: "group",
@@ -128,7 +131,7 @@ async function runGroupMainNativeQueryLoop(input) {
         }),
         config,
         messages: baseProviderMessages,
-        tools: [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(toolContext)],
+        tools: nativeTools(),
         scope: "group",
         scopeId: String(group.id || ""),
         exactSessionId: groupSessionId,
@@ -145,7 +148,8 @@ async function runGroupMainNativeQueryLoop(input) {
         loopBudget,
         planModeEnabled: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group.id), groupSessionId),
         promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_planning" },
-        getTools: () => [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(toolContext)],
+        getTools: nativeTools,
+        resolveToolCall: call => (0, deferred_tool_invocation_1.resolveDeferredToolCall)(call.name, call.arguments, toolContext.catalog.loadedMcp || []),
         getToolPromptLayout: () => toolContext.toolPromptLayout,
         onConversationContextPressure: async ({ messages, forcePromptTooLong }) => {
             const fallbackPrefixCount = String(messages[0]?.content || "").includes("Fallback protocol: return one JSON object") ? 1 : 0;
@@ -170,7 +174,9 @@ async function runGroupMainNativeQueryLoop(input) {
             return [...messages.slice(0, fallbackPrefixCount), ...baseProviderMessages, ...liveSuffix];
         },
         isReadOnly: (call) => {
-            if (["tool_search", "invoke_skill", "invoke_mcp", "ccm_dispatch"].includes(call.name))
+            if (sourceTools)
+                return sourceTools.definitions.some(tool => tool.name === call.name);
+            if (["tool_search", "invoke_skill", "invoke_mcp", "invoke_deferred_tool", "ccm_dispatch"].includes(call.name))
                 return false;
             if (["ccm_ask_user", "ccm_present_plan"].includes(call.name) || input.isBuiltinReadOnly(call.name))
                 return true;
@@ -411,7 +417,7 @@ async function runGroupMainNativeQueryLoop(input) {
                     arguments: call.arguments || {},
                 });
             }
-            const roundResults = await input.executeRequests({
+            const roundResults = sourceTools ? await sourceTools.execute(requests, input.signal) : await input.executeRequests({
                 requests,
                 toolContext: {
                     ...toolContext,
@@ -463,10 +469,10 @@ async function runGroupMainNativeQueryLoop(input) {
                     runId: visibleTurnId,
                     anchorMessageId: visibleAnchorMessageId,
                     status: mapped.ok ? "ok" : "error",
-                    observation: mapped.output,
+                    observation: require('../../system/global-source-model-content').sourceSafeCheckpointValue(mapped.output),
                     // Persist the canonical provider-visible body alongside the audit
                     // observation so later turns replay identical function output.
-                    modelContent: mapped.modelOutput !== undefined ? mapped.modelOutput : mapped.output,
+                    modelContent: require('../../system/global-source-model-content').sourceSafeCheckpointValue(mapped.modelOutput !== undefined ? mapped.modelOutput : mapped.output),
                     auditReceipt: mapped.auditReceipt,
                     error: mapped.error,
                 });

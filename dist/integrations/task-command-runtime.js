@@ -213,6 +213,7 @@ function tailOutput(run, limit) {
     return text.length > limit ? text.slice(-limit) : text;
 }
 async function runTaskBoundCommand(context, args) {
+    require("./dispatch-scope-tools").assertBoundDispatchControl(context);
     const command = String(args?.command || "");
     validateCommand(command);
     const description = String(args?.description || "").trim().slice(0, 160);

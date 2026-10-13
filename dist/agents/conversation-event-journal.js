@@ -33,17 +33,24 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.conversationEventJournalSnapshot = conversationEventJournalSnapshot;
 exports.readConversationEvents = readConversationEvents;
 exports.appendConversationEvent = appendConversationEvent;
 exports.streamConversationEvents = streamConversationEvents;
 exports.captureConversationSse = captureConversationSse;
+const bounded_sse_1 = require("../system/bounded-sse");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
+const conversation_event_reader_1 = require("./conversation-event-reader");
 const ROOT = process.env.CCM_CONVERSATION_EVENT_DIR || path.join(utils_1.CCM_DIR, "conversation-events");
 const listeners = new Map();
 const nextSequences = new Map();
+function conversationEventJournalSnapshot() {
+    return { sequenceCacheEntries: nextSequences.size, sequenceCacheLimit: 4096,
+        streams: [...listeners.values()].reduce((count, rows) => count + rows.size, 0) };
+}
 function key(turnId, attemptId) {
     return crypto.createHash("sha256").update(`${turnId}\0${attemptId}`).digest("hex");
 }
@@ -70,8 +77,7 @@ function appendConversationEvent(turnId, attemptId, payload) {
     const identity = key(turnId, attemptId);
     let next = nextSequences.get(identity);
     if (next == null) {
-        const rows = readConversationEvents(turnId, attemptId);
-        next = rows.length ? rows[rows.length - 1].sequence + 1 : 1;
+        next = (0, conversation_event_reader_1.readConversationTailSequence)(filename(turnId, attemptId), turnId, attemptId) + 1;
     }
     const event = {
         sequence: next, turn_id: turnId, attempt_id: attemptId,
@@ -79,19 +85,13 @@ function appendConversationEvent(turnId, attemptId, payload) {
     };
     fs.mkdirSync(ROOT, { recursive: true });
     fs.appendFileSync(filename(turnId, attemptId), `${JSON.stringify(event)}\n`, "utf8");
+    nextSequences.delete(identity);
+    if (nextSequences.size >= 4096)
+        nextSequences.delete(nextSequences.keys().next().value);
     nextSequences.set(identity, next + 1);
     for (const listener of listeners.get(identity) || [])
         listener(event);
     return event;
-}
-function writeEvent(res, event) {
-    if (res.destroyed || res.writableEnded)
-        return;
-    res.write(`id: ${event.sequence}\ndata: ${JSON.stringify({ ...event.payload, sequence: event.sequence, emitted_at: event.at })}\n\n`);
-    // Flush immediately when the runtime or proxy exposes a flush hook. This
-    // keeps small model deltas from waiting behind transport buffering while
-    // preserving the existing SSE response contract.
-    res.flush?.();
 }
 function streamConversationEvents(res, turnId, attemptId, after = 0, terminal = false) {
     const identity = key(turnId, attemptId);
@@ -102,39 +102,81 @@ function streamConversationEvents(res, turnId, attemptId, after = 0, terminal = 
         Connection: "keep-alive",
     });
     res.flushHeaders?.();
+    const writer = (0, bounded_sse_1.createBoundedSseWriter)(res);
     let last = Math.max(0, after);
-    const listener = (event) => {
+    let replaying = true, pendingBytes = 0, closed = false;
+    const pending = [];
+    const deliver = (event) => {
         if (event.sequence <= last)
             return;
         last = event.sequence;
-        writeEvent(res, event);
+        if (!writer.write(`id: ${event.sequence}\ndata: ${JSON.stringify({ ...event.payload, sequence: event.sequence, emitted_at: event.at })}\n\n`))
+            return;
+        res.flush?.();
         if (["done", "error", "execution_terminal"].includes(String(event.payload.type || "")))
             close();
+    };
+    const listener = (event) => {
+        if (closed)
+            return;
+        if (!replaying) {
+            deliver(event);
+            return;
+        }
+        pendingBytes += Buffer.byteLength(JSON.stringify(event));
+        if (pendingBytes > 256 * 1024) {
+            close();
+            res.destroy();
+            return;
+        }
+        pending.push(event);
     };
     const subscribers = listeners.get(identity) || new Set();
     subscribers.add(listener);
     listeners.set(identity, subscribers);
     const close = () => {
+        if (closed)
+            return;
+        closed = true;
+        pending.length = 0;
+        pendingBytes = 0;
         clearInterval(heartbeat);
         subscribers.delete(listener);
         if (!subscribers.size)
             listeners.delete(identity);
-        if (!res.writableEnded && !res.destroyed)
-            res.end();
+        writer.end();
     };
     const heartbeat = setInterval(() => {
         if (res.destroyed || res.writableEnded)
             close();
         else
-            res.write(`: heartbeat ${Date.now()}\n\n`);
+            writer.write(`: heartbeat ${Date.now()}\n\n`);
     }, 15_000);
     heartbeat.unref?.();
-    res.once("close", close);
-    const replay = readConversationEvents(turnId, attemptId, after);
-    for (const event of replay)
-        listener(event);
-    if (terminal && !res.writableEnded)
-        close();
+    writer.onClose(close);
+    void (async () => {
+        try {
+            for await (const event of (0, conversation_event_reader_1.iterateConversationEvents)(filename(turnId, attemptId), turnId, attemptId, after)) {
+                if (res.destroyed || res.writableEnded)
+                    break;
+                deliver(event);
+            }
+            replaying = false;
+            for (const event of pending) {
+                if (res.destroyed || res.writableEnded)
+                    break;
+                deliver(event);
+            }
+            pending.length = 0;
+            pendingBytes = 0;
+            if (terminal && !res.writableEnded)
+                close();
+        }
+        catch {
+            close();
+            res.destroy();
+        }
+    })();
 }
 function captureConversationSse(res, turnId, attemptId) {
     // Some identity and routing tests bind an attempt to a lightweight object

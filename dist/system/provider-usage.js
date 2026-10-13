@@ -11,6 +11,11 @@ function normalizeProviderUsage(value = {}, _provider = "openai") {
         ?? raw.promptTokensDetails?.cachedTokens ?? raw.prompt_tokens_details?.cached_tokens
         ?? raw.cachedContentTokenCount ?? raw.cached_content_token_count
         ?? raw.cachedTokens ?? raw.cached_tokens ?? raw.total_cached_tokens);
+    const cacheUsageReported = typeof raw.cacheUsageReported === 'boolean' ? raw.cacheUsageReported
+        : typeof raw.cache_usage_reported === 'boolean' ? raw.cache_usage_reported
+            : [raw.cacheReadInputTokens, raw.cache_read_input_tokens, raw.inputTokensDetails?.cachedTokens, raw.input_tokens_details?.cached_tokens,
+                raw.promptTokensDetails?.cachedTokens, raw.prompt_tokens_details?.cached_tokens, raw.cachedContentTokenCount,
+                raw.cached_content_token_count, raw.cachedTokens, raw.cached_tokens, raw.total_cached_tokens].some(value => value != null);
     const cacheCreationInputTokens = finite(raw.cacheCreationInputTokens ?? raw.cache_creation_input_tokens
         ?? raw.inputTokensDetails?.cacheCreationTokens ?? raw.input_tokens_details?.cache_creation_tokens
         ?? raw.inputTokensDetails?.cacheWriteTokens ?? raw.input_tokens_details?.cache_write_tokens
@@ -21,8 +26,13 @@ function normalizeProviderUsage(value = {}, _provider = "openai") {
         ?? raw.promptTokenCount ?? raw.prompt_token_count);
     const explicitDirect = raw.directInputTokens ?? raw.direct_input_tokens;
     const hasExplicitDirect = explicitDirect != null;
+    // CCM's historical camel-case inputTokens is direct input. Only known
+    // provider aggregate fields (or an explicit flag) include cache buckets.
+    const hasProviderAggregate = raw.prompt_tokens != null || raw.promptTokens != null
+        || raw.promptTokenCount != null || raw.prompt_token_count != null || raw.input_tokens != null;
     const includesCache = raw.inputTokensIncludesCache === true || raw.input_tokens_includes_cache === true
-        || (!provider.includes("anthropic") && !hasExplicitDirect && (cacheReadInputTokens > 0 || cacheCreationInputTokens > 0));
+        || (raw.inputTokensIncludesCache !== false && raw.input_tokens_includes_cache !== false
+            && !provider.includes("anthropic") && !hasExplicitDirect && hasProviderAggregate);
     const directInputTokens = hasExplicitDirect
         ? finite(explicitDirect)
         : includesCache
@@ -46,7 +56,7 @@ function normalizeProviderUsage(value = {}, _provider = "openai") {
         || inputTokens > 0 || directInputTokens > 0 || cacheReadInputTokens > 0 || cacheCreationInputTokens > 0
         || outputTokens > 0 || providerTotalTokens > 0 || finite(raw.costUsd ?? raw.totalCostUsd) > 0;
     const totalContextTokens = directInputTokens + cacheReadInputTokens + cacheCreationInputTokens;
-    return { reported, directInputTokens, cacheReadInputTokens, cacheCreationInputTokens,
+    return { reported, cacheUsageReported: reported && cacheUsageReported, directInputTokens, cacheReadInputTokens, cacheCreationInputTokens,
         totalContextTokens, providerTotalTokens, outputTokens, inputTokensIncludesCache: includesCache };
 }
 function providerUsageSelfTest() {

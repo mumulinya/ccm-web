@@ -6,6 +6,11 @@ export type ConversationEvent = {
     at: string;
     payload: Record<string, any>;
 };
+export declare function conversationEventJournalSnapshot(): {
+    sequenceCacheEntries: number;
+    sequenceCacheLimit: number;
+    streams: number;
+};
 export declare function readConversationEvents(turnId: string, attemptId: string, after?: number): ConversationEvent[];
 export declare function appendConversationEvent(turnId: string, attemptId: string, payload: Record<string, any>): ConversationEvent;
 export declare function streamConversationEvents(res: ServerResponse, turnId: string, attemptId: string, after?: number, terminal?: boolean): void;

@@ -75,6 +75,8 @@ function normalizeInput(input, fallback = {}) {
     merged.verification_policy = text(input?.verification_policy || input?.verificationPolicy, text(input?.execution_policy?.verification, text(fallback?.execution_policy?.verification)));
     merged.workspace_policy = text(input?.workspace_policy || input?.workspacePolicy, text(input?.execution_policy?.workspace, text(fallback?.execution_policy?.workspace)));
     merged.approval_policy = text(input?.approval_policy || input?.approvalPolicy, text(input?.execution_policy?.approval, text(fallback?.execution_policy?.approval)));
+    merged.catch_up_policy = text(input?.catch_up_policy || input?.catchUpPolicy, text(fallback?.catch_up_policy, "skip"));
+    merged.concurrency_policy = text(input?.concurrency_policy || input?.concurrencyPolicy, text(fallback?.concurrency_policy, "queue_one"));
     return merged;
 }
 function validateDefinitionInput(input) {
@@ -84,6 +86,10 @@ function validateDefinitionInput(input) {
         throw new Error("请输入 Cron 表达式");
     (0, schedule_expression_1.validateCronExpression)(input.schedule);
     (0, schedule_expression_1.normalizeCronTimezone)(input.timezone);
+    if (!["skip", "catch_up_once", "catch_up_all"].includes(input.catch_up_policy))
+        throw new Error("自动化补偿策略无效");
+    if (!["allow_one", "queue_one", "parallel"].includes(input.concurrency_policy))
+        throw new Error("自动化并发策略无效");
     const target = input?.target || {};
     const type = text(target.type, input?.group_id ? "group" : "project");
     if (!["project", "group"].includes(type) || !text(target.id || input?.group_id || input?.project))

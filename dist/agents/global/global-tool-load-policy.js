@@ -12,6 +12,7 @@ const GLOBAL_ALWAYS_INLINE_TOOLS = new Set([
     "invoke_mcp",
     "inspect_system",
     "read_scope_instruction",
+    'list_project_sources', 'search_project_sources', 'read_project_sources',
     "request_project_source_inquiry",
     "request_group_source_inquiry",
 ]);
@@ -29,6 +30,9 @@ function isGlobalDeferredTool(name, loadedToolNames = []) {
     return !uniqueNames(loadedToolNames).has(toolName);
 }
 function skinnySchema(spec) {
+    const source = require('../../system/global-source-model-content').globalSourceToolSchema(spec.name);
+    if (source)
+        return source;
     const douyin = (0, douyin_tool_schema_1.douyinToolSchema)(spec.name, spec.required);
     if (douyin)
         return douyin;

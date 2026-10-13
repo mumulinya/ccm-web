@@ -1,5 +1,4 @@
 "use strict";
-// group-compaction-engine.ts — merged from 3 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -57,6 +56,8 @@ exports.runGroupApiMicrocompactNativeApplyPlanSelfTest = runGroupApiMicrocompact
 exports.runGroupMemoryQualityGateSelfTest = runGroupMemoryQualityGateSelfTest;
 exports.runGroupMemoryMicroCompactSelfTest = runGroupMemoryMicroCompactSelfTest;
 exports.runGroupMemoryTimeBasedMicroCompactSelfTest = runGroupMemoryTimeBasedMicroCompactSelfTest;
+// group-compaction-engine.ts — merged from 3 part files (behavior-freeze merge).
+const group_unified_tool_restore_1 = require("./group-unified-tool-restore");
 const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("../../system/context-budget");
 const unified_session_compaction_model_1 = require("../../system/unified-session-compaction-model");
@@ -430,6 +431,7 @@ async function runUnifiedGroupConversationMemory(input) {
         payloadChecksum: String(canonical?.payloadChecksum || ""),
     });
     let acquiredChecksum = "";
+    let gatedToolRestore = null;
     const adapter = createGroupSessionCompactionAdapter({
         groupId,
         sessionId: groupSessionId,
@@ -508,6 +510,7 @@ async function runUnifiedGroupConversationMemory(input) {
             const state = (0, unified_session_compaction_1.buildUnifiedSessionCompactionStateV1)({ receipt: result.receipt, summaryQuality: result.summaryQuality, microCompact: result.microCompact, recoveryContext: result.recoveryContext, triggerReason: input.force ? "manual" : "request_preflight", summarizedThroughMessageId, summarizedMessageCount, preservedRecentMessageIds, compactionMode: result.compactionMode, partialCompaction: result.partialCompaction });
             input.memory.unifiedSessionSummary = summary;
             input.memory.unifiedSessionCompaction = state;
+            (0, group_unified_tool_restore_1.persistUnifiedGroupToolRestore)(input.memory, result, gatedToolRestore);
             input.memory.unifiedRecoveryContext = result.recoveryContext;
             input.memory.unifiedSessionBoundary = {
                 id: `unified-compact-${result.receipt.checksum.slice(0, 16)}`,
@@ -560,23 +563,26 @@ async function runUnifiedGroupConversationMemory(input) {
             mainAgentContextEnvelope: config.modelVisiblePayload?.mainAgentContextEnvelope || config.model_visible_payload?.mainAgentContextEnvelope,
             mainAgentCapabilityDirectory: config.modelVisiblePayload?.mainAgentCapabilityDirectory || config.model_visible_payload?.mainAgentCapabilityDirectory,
         }),
-        buildPostCompactPayload: ({ summary, preservedTimeline, recoveryContext, snapshot }) => (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
-            scope: "group",
-            sessionId: `${groupId}:${groupSessionId}`,
-            system: config.modelVisibleSystemContext || config.model_visible_system_context || null,
-            tools: config.modelVisibleTools || config.model_visible_tools || null,
-            activeSummary: summary,
-            recentMessages: preservedTimeline,
-            currentRequest: config.currentRequest || config.current_request || null,
-            recoveryContext: {
-                ...recoveryContext,
-                postCompactReinject: snapshot?.recoveryContext?.postCompactReinject || config.postCompactReinject || config.post_compact_reinject || null,
-            },
-            hookResults: [],
-            contextComponents: config.contextComponents || config.context_components || {},
-            mainAgentContextEnvelope: config.modelVisiblePayload?.mainAgentContextEnvelope || config.model_visible_payload?.mainAgentContextEnvelope,
-            mainAgentCapabilityDirectory: config.modelVisiblePayload?.mainAgentCapabilityDirectory || config.model_visible_payload?.mainAgentCapabilityDirectory,
-        }),
+        buildPostCompactPayload: ({ summary, preservedMessages, preservedTimeline, recoveryContext, snapshot }) => {
+            gatedToolRestore = (0, group_unified_tool_restore_1.buildUnifiedGroupToolRestore)(input, summary, preservedMessages);
+            return (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+                scope: "group",
+                sessionId: `${groupId}:${groupSessionId}`,
+                system: config.modelVisibleSystemContext || config.model_visible_system_context || null,
+                tools: config.modelVisibleTools || config.model_visible_tools || null,
+                activeSummary: summary,
+                recentMessages: preservedTimeline,
+                currentRequest: config.currentRequest || config.current_request || null,
+                recoveryContext: {
+                    ...recoveryContext,
+                    postCompactReinject: gatedToolRestore,
+                },
+                hookResults: [],
+                contextComponents: config.contextComponents || config.context_components || {},
+                mainAgentContextEnvelope: config.modelVisiblePayload?.mainAgentContextEnvelope || config.model_visible_payload?.mainAgentContextEnvelope,
+                mainAgentCapabilityDirectory: config.modelVisiblePayload?.mainAgentCapabilityDirectory || config.model_visible_payload?.mainAgentCapabilityDirectory,
+            });
+        },
         measure: (payload) => Number(payload?.totalTokens || (0, context_budget_1.estimateTextTokens)(JSON.stringify(payload || {}))),
         qualityReference: () => ({ authorizationBoundaries: [], fileReferences: [], verificationEvidence: [], pendingWork: [], sourceMessageIds: [] }),
         signal: config.compactionAbortSignal || config.compaction_abort_signal,

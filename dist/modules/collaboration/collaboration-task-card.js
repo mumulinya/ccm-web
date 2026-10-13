@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-task-card.ts — merged from 5 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -121,6 +120,9 @@ exports.buildTodoStepActions = buildTodoStepActions;
 exports.loopStageStatus = loopStageStatus;
 exports.planStepHasVerificationSignal = planStepHasVerificationSignal;
 exports.summaryHasExecutedVerification = summaryHasExecutedVerification;
+const dispatch_projection_1 = require("../../agents/dispatch-projection");
+const user_workflow_projection_1 = require("../../agents/user-workflow-projection");
+// collaboration-task-card.ts — merged from 5 part files (behavior-freeze merge).
 const task_user_runtime_1 = require("../../agents/task-user-runtime");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const collaboration_1 = require("./collaboration");
@@ -1375,7 +1377,10 @@ function buildTaskCardView(task, executions, sessions) {
     };
     const dispatchLabels = { direct_worker: "快速执行", planned_worker: "标准开发", orchestrated: "协同开发" };
     const verificationLabels = { quick_check: "快速检查", main_agent_self: "主 Agent 自验", test_agent: "独立验收" };
+    const userWorkflow = (0, user_workflow_projection_1.readUserWorkflow)(task);
     return {
+        ...(0, dispatch_projection_1.buildDispatchProjection)(task, executions),
+        user_workflow: userWorkflow,
         version: 1,
         visible: visible && presentation !== "reply",
         presentation,
@@ -1575,7 +1580,7 @@ function buildTaskCardView(task, executions, sessions) {
         pickup_summary: summary.delivery_report?.pickup_summary || summary.pickup_summary || null,
         pickupSummary: summary.delivery_report?.pickup_summary || summary.pickupSummary || null,
         delivery: { headline: summary.headline || task?.status_detail || "", files: files.slice(0, 30), changes: Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.slice(0, 30) : [], verification: verification.slice(0, 20), risks: (0, collaboration_1.uniqueStrings)([...(summary.risks || []), ...(summary.remaining_items || []), ...(summary.advisory_needs || [])]).slice(0, 10), acceptance_passed: deliveryAccepted },
-        available_actions: buildUserTaskActions(task, runtimeStatus.phase, executions),
+        available_actions: require("../../agents/user-workflow-projection").filterUserWorkflowActions(userWorkflow, buildUserTaskActions(task, runtimeStatus.phase, executions)),
         technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), source_ingestion: task?.source_ingestion || task?.sourceIngestion || null, requirement_extraction: task?.requirement_extraction || task?.requirementExtraction || null, work_item_ids: workItems.map((item) => item.id), work_item_summary: workItemSummary, work_item_claim_summary: workItemClaimSummary, work_item_unlock_summary: workItemUnlockSummary, completion_readiness_summary: completionReadinessSummary, recovery_summary: recoverySummary, continuation_state: task?.collaboration_state?.last_continuation || null, receipt_rework_summary: receiptReworkSummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: summary.post_review_spot_check || null, gap_fingerprint: terminalPhase ? "" : (0, collaboration_1.getTaskGapFingerprint)(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision, runtime_kernel: runtimeKernel, display_stream: displayStream },
         updated_at: task?.updated_at || new Date().toISOString(),
     };

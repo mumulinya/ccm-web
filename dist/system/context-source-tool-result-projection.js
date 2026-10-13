@@ -41,7 +41,9 @@ exports.projectContextSourceToolResultForPersistence = projectContextSourceToolR
 exports.contextSourceToolResultProjectionSelfTest = contextSourceToolResultProjectionSelfTest;
 const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("./context-budget");
+const global_source_model_content_1 = require("./global-source-model-content");
 const SOURCE_TOOL_NAMES = new Set([
+    'list_project_sources', 'search_project_sources', 'read_project_sources',
     "query_knowledge",
     "search_knowledge",
     "read_knowledge_document",
@@ -312,6 +314,8 @@ function isWorkspaceToolResultReference(value) {
         && value.contentStored === false;
 }
 function projectContextSourceToolResultForPersistence(toolName, value, query = "") {
+    if ((0, global_source_model_content_1.isGlobalSourceTool)(String(toolName)))
+        return (0, global_source_model_content_1.globalSourcePersistence)(value);
     if (isWorkspaceToolResultReference(value))
         return value;
     const normalizedTool = normalizedWorkspacePersistenceToolName(toolName);

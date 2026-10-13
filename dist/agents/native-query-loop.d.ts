@@ -24,6 +24,7 @@ export declare function mapNativeTurnToParsed(turn: ProviderAgentTurn, controlCa
     targets: any;
     workflowDecision: any;
     architecturePlan: any;
+    implementationPlan: any;
     coordinationPlan: any;
     plan?: undefined;
     questionForUser?: undefined;
@@ -38,6 +39,7 @@ export declare function mapNativeTurnToParsed(turn: ProviderAgentTurn, controlCa
     workflowDecision: any;
     targets?: undefined;
     architecturePlan?: undefined;
+    implementationPlan?: undefined;
     coordinationPlan?: undefined;
     questionForUser?: undefined;
     dispatchPolicy?: undefined;
@@ -56,6 +58,7 @@ export declare function mapNativeTurnToParsed(turn: ProviderAgentTurn, controlCa
     friendlyResponse?: undefined;
     targets?: undefined;
     architecturePlan?: undefined;
+    implementationPlan?: undefined;
     coordinationPlan?: undefined;
     plan?: undefined;
     directResponse?: undefined;
@@ -72,6 +75,7 @@ export declare function mapNativeTurnToParsed(turn: ProviderAgentTurn, controlCa
     };
     targets?: undefined;
     architecturePlan?: undefined;
+    implementationPlan?: undefined;
     coordinationPlan?: undefined;
     plan?: undefined;
     questionForUser?: undefined;
@@ -147,6 +151,11 @@ export type NativeQueryLoopInput = {
     jsonFallback?: () => Promise<NativeQueryLoopResult>;
     callTurn?: (config: any, options: LlmCallOptions) => Promise<ProviderAgentTurn>;
     getTools?: () => ProviderToolDefinition[];
+    resolveToolCall?: (call: ProviderToolCall) => {
+        name: string;
+        arguments: any;
+        targetSchemaChecksum?: string;
+    };
     getToolPromptLayout?: () => import('../tools/main-agent-tool-prompt').ToolPromptLayout;
     compactTranscript?: (messages: LlmChatMessage[]) => LlmChatMessage[];
     persistContext?: ToolResultPersistContext | null;

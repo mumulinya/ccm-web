@@ -163,15 +163,12 @@ function authorizeApiRequest(req, res, pathnameWithQuery) {
     req.ccmAuth = { kind: "browser", userId: auth.user.id, role, capabilities: auth.capabilities, sessionId: auth.session.id, readOnly };
     return true;
 }
-function allowedHosts() {
+let interfaceHosts = null;
+function allowedHosts(hostname) {
     const hosts = new Set(["localhost", "127.0.0.1", "::1"]);
     const configured = String(process.env.CCM_HOST || "").trim().replace(/^\[|\]$/g, "");
     if (configured && configured !== "0.0.0.0" && configured !== "::")
         hosts.add(configured.toLowerCase());
-    for (const rows of Object.values(os.networkInterfaces()))
-        for (const row of rows || [])
-            if (row.address)
-                hosts.add(row.address.toLowerCase());
     for (const raw of String(process.env.CCM_PUBLIC_ORIGIN || "").split(",")) {
         const value = raw.trim();
         if (!value)
@@ -183,6 +180,15 @@ function allowedHosts() {
             hosts.add(value.split(":")[0].toLowerCase());
         }
     }
+    if (hosts.has(hostname))
+        return hosts;
+    // Local/configured hosts need no OS inventory. LAN inventory is reused for
+    // at most five seconds; authorization and configuration are checked anew.
+    if (!interfaceHosts || Date.now() - interfaceHosts.at >= 5000) {
+        interfaceHosts = { at: Date.now(), values: Object.values(os.networkInterfaces()).flatMap(rows => (rows || []).map(row => row.address.toLowerCase())) };
+    }
+    for (const address of interfaceHosts.values)
+        hosts.add(address);
     return hosts;
 }
 function applySecurityHeaders(res) {
@@ -196,10 +202,10 @@ function validateRequestHost(req, res) {
     const raw = String(req.headers.host || "").trim();
     let hostname = "";
     try {
-        hostname = new URL(`http://${raw}`).hostname.toLowerCase();
+        hostname = new URL(`http://${raw}`).hostname.toLowerCase().replace(/^\[|\]$/g, '');
     }
     catch { }
-    if (hostname && allowedHosts().has(hostname))
+    if (hostname && allowedHosts(hostname).has(hostname))
         return true;
     (0, utils_1.sendJson)(res, { success: false, error: "请求 Host 未被 CCM 授权", code: "HOST_NOT_ALLOWED" }, 421);
     return false;

@@ -10,7 +10,7 @@ const execution_session_registry_1 = require("./execution-session-registry");
 const acceptance_user_projection_1 = require("./acceptance-user-projection");
 const acceptance_contract_1 = require("./acceptance-contract");
 const acceptance_ledger_1 = require("./acceptance-ledger");
-function startTaskAcceptance(task, root) {
+function startTaskAcceptance(task, root, projectId) {
     const contract = (0, acceptance_contract_1.taskAcceptanceContract)(task);
     if (!contract)
         return;
@@ -19,7 +19,9 @@ function startTaskAcceptance(task, root) {
         throw new Error(`验收合同无效：${validation.issues.join("；")}`);
     if (typeof root === "string" && new Set(contract.workItems.map(w => w.projectId)).size !== 1)
         throw new Error("跨项目验收必须逐项目绑定真实工作区，不能复用同一路径");
-    for (const item of contract.workItems) {
+    if (projectId && !contract.workItems.some(item => item.projectId === projectId))
+        throw new Error("验收项目不属于冻结合同");
+    for (const item of contract.workItems.filter(item => !projectId || item.projectId === projectId)) {
         const workRoot = typeof root === "string" ? root : root[item.projectId];
         if (!workRoot)
             throw new Error("验收项目工作区绑定缺失");
@@ -43,8 +45,13 @@ function taskAcceptanceVerificationMetadata(taskId, project) {
     return { acceptanceContract: ledger.contract, acceptanceExecutions: contexts };
 }
 /** Called before any lifecycle/session mutation, not after setting done. */
-function validateUnifiedTaskAcceptance(task, updates) {
+function validateUnifiedTaskAcceptance(task, updates, options = {}) {
     const contract = (0, acceptance_contract_1.taskAcceptanceContract)(task), next = (0, acceptance_contract_1.taskAcceptanceContract)({ ...task, ...updates });
+    if (contract && !next && updates.status === "pending" && options.developmentCycleSource
+        && Number(updates.generation) > contract.generation
+        && require("../modules/collaboration/task-session-development-cycle").validateTaskDevelopmentCycleTransition(task, updates, options.developmentCycleSource)
+        && (updates.delivery_history || []).some((row) => (0, acceptance_contract_1.taskAcceptanceContract)(row)?.checksum === contract.checksum))
+        return null;
     if (contract && (!next || next.checksum !== contract.checksum))
         return "验收合同不可在任务更新中替换；请通过已确认的新 generation 重新规划";
     if (!next)

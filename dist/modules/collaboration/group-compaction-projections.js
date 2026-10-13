@@ -2613,7 +2613,7 @@ function verifyGroupPostCompactTaskStatusProjectionReceipt(receipt, expected = {
         issues.push("post_compact_task_status_schema_invalid");
     if (!String(receipt?.group_id || "").trim())
         issues.push("post_compact_task_status_group_missing");
-    if (!String(receipt?.group_session_id || "").startsWith("gcs_"))
+    if (!require("./task-group-memory-identity").isAuthoritativeGroupMemorySession(String(receipt?.group_id || ""), String(receipt?.group_session_id || "")))
         issues.push("post_compact_task_status_exact_session_missing");
     if (receipt?.raw_tasks_preserved !== true)
         issues.push("post_compact_task_status_raw_preservation_missing");
@@ -2640,7 +2640,7 @@ function verifyGroupPostCompactTaskStatusProjectionReceipt(receipt, expected = {
 function buildGroupPostCompactTaskStatusProjection(tasks = [], options = {}) {
     const groupId = String(options.groupId || options.group_id || "").trim();
     const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
-    if (!groupId || !groupSessionId.startsWith("gcs_"))
+    if (!require("./task-group-memory-identity").isAuthoritativeGroupMemorySession(groupId, groupSessionId))
         throw new Error("exact_group_session_required_for_post_compact_task_status_projection");
     const currentTaskId = String(options.currentTaskId || options.current_task_id || "").trim();
     const budget = Math.max(1, Math.min(40, Number(options.taskStatusBudget || options.task_status_budget || group_compaction_receipts_1.GROUP_POST_COMPACT_TASK_STATUS_BUDGET)));

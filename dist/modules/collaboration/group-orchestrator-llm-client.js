@@ -63,6 +63,8 @@ exports.runLlmStreamingSelfTest = runLlmStreamingSelfTest;
 exports.runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest = runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest;
 const http = __importStar(require("http"));
 const provider_request_diagnostics_1 = require("../../system/provider-request-diagnostics");
+const cache_validation_budget_1 = require("../../system/cache-validation-budget");
+const provider_transport_errors_1 = require("../../system/provider-transport-errors");
 const responses_output_replay_1 = require("../../system/responses-output-replay");
 const main_agent_tool_prompt_1 = require("../../tools/main-agent-tool-prompt");
 const workspace_model_result_projection_1 = require("../../tools/workspace-model-result-projection");
@@ -82,6 +84,9 @@ const provider_cache_capability_registry_1 = require("../../system/provider-cach
 const automatic_provider_cache_optimization_1 = require("../../system/automatic-provider-cache-optimization");
 const provider_cache_observation_1 = require("../../system/provider-cache-observation");
 const provider_usage_1 = require("../../system/provider-usage");
+const model_cache_preparation_1 = require("../../system/model-cache-preparation");
+const model_request_context_1 = require("../../system/model-request-context");
+const model_cache_metrics_1 = require("../../system/model-cache-metrics");
 const context_budget_1 = require("../../system/context-budget");
 const provider_native_microcompact_capability_1 = require("../../system/provider-native-microcompact-capability");
 const provider_native_tools_1 = require("../../system/provider-native-tools");
@@ -152,6 +157,8 @@ function createLlmAbortContext(options, timeoutMs) {
     };
 }
 function normalizeLlmAbortError(error, options) {
+    if ((0, cache_validation_budget_1.isCacheValidationControlError)(error))
+        return error;
     if (!options.signal?.aborted)
         return error;
     const reason = options.signal.reason;
@@ -212,7 +219,7 @@ function providerContextCacheOptions(config, options, provider) {
     // the request. Such calls are still captured by provider-request-diagnostics
     // as `unattributed`, but they must not receive a cache key or be compared to
     // a guessed session based on prompt text or timing.
-    const binding = explicit || fallback;
+    const binding = explicit || fallback || options._modelCacheBinding;
     if (!binding?.sessionId)
         return null;
     const adapterCapabilityBase = (0, provider_context_cache_adapters_1.resolveProviderContextCacheAdapter)(config, provider);
@@ -222,6 +229,7 @@ function providerContextCacheOptions(config, options, provider) {
         })).digest("hex") };
     return {
         ...binding,
+        preserveWire: options._modelCachePreserveWire === true,
         enabled: binding.enabled ?? true,
         mode: binding.mode || "auto",
         provider,
@@ -272,19 +280,20 @@ async function prepareContextCache(config, options, provider) {
         messageOrderChecksum: transcript.messageOrderChecksum,
         movedDynamicBlockCount: transcript.movedDynamicBlockCount,
     });
-    const prepared = await (0, provider_neutral_context_cache_1.prepareProviderNeutralContextCacheRequestSingleflight)(sourceMessages, cacheOptions);
+    const prepared = await (0, model_cache_preparation_1.prepareModelCacheSafely)(options, () => (0, provider_neutral_context_cache_1.prepareProviderNeutralContextCacheRequestSingleflight)(sourceMessages, cacheOptions), { messages: sourceMessages, plan: null });
+    options._modelCacheEligibility = prepared.plan?.cacheEligibility;
     // The neutral cache layer adds the public workspace header and returns the
     // exact ordered transcript that will be encoded by every protocol adapter.
     // Diagnostics must hash that final wire-visible sequence, not the caller's
     // pre-header source array, otherwise the first segment is reported as
     // changed even when the Provider receives an unchanged prefix.
-    const wireTranscript = (0, provider_cache_transcript_1.buildAppendOnlyProviderTranscript)(prepared.messages || sourceMessages, { turnId: String(options.providerContextCache?.auditTurnKey || '') });
+    const wireTranscript = (0, provider_cache_transcript_1.buildAppendOnlyProviderTranscript)(options._modelCachePreserveWire ? sourceMessages : prepared.messages || sourceMessages, { turnId: String(options.providerContextCache?.auditTurnKey || '') });
     const wireMessages = wireTranscript.messages;
     Object.defineProperty(options, "_providerCacheTranscript", { value: wireTranscript, enumerable: false, configurable: true });
     Object.defineProperty(options, "_providerCacheWireMessages", { value: wireMessages, enumerable: false, configurable: true });
     (0, provider_microcompact_1.captureCcmProviderMicrocompactBaseline)(prepared.plan, getApiMicrocompactNativeApplyPlan(options));
     Object.defineProperty(options, "_providerContextPlan", { value: prepared.plan, enumerable: false, configurable: true });
-    const adapterPatch = (0, provider_context_cache_adapters_1.buildProviderContextCacheAdapterRequestPatch)(config, prepared.plan, cacheOptions.adapterCapability, wireMessages);
+    const adapterPatch = prepared.plan ? (0, model_cache_preparation_1.modelCacheAdapterPatch)(config, prepared.plan, cacheOptions.adapterCapability, wireMessages, options) : null;
     if (prepared.plan) {
         const breakpointApplied = Array.isArray(adapterPatch.breakpointChecksums) && adapterPatch.breakpointChecksums.length > 0;
         prepared.plan.breakpointEligibility = adapterPatch.strategy?.capabilityMatrix?.capabilities?.explicitBreakpoints === "confirmed"
@@ -368,7 +377,7 @@ function finishContextCache(options, plan, input) {
     const wireReuseEvidence = (0, provider_request_diagnostics_1.providerAttemptWireReuseEvidence)(options) || input?.wireReuseEvidence || {};
     const cacheMatchedTokens = Number(wireReuseEvidence?.matchingPrefixTokensEstimate || 0);
     const cacheReadTokens = Number(input?.usage?.cacheReadInputTokens || input?.usage?.cache_read_input_tokens || 0);
-    const usageReported = input?.usage?.reported === true;
+    const usageReported = (0, provider_usage_1.normalizeProviderUsage)(input?.usage || {}, String(plan?.provider || 'openai')).cacheUsageReported;
     const cacheReuse = (0, provider_cache_observation_1.providerCacheObservation)(plan, usageReported, cacheReadTokens, {
         candidateTokens: cacheCandidateTokens,
         matchedTokens: cacheMatchedTokens,
@@ -436,12 +445,13 @@ function finishContextCache(options, plan, input) {
         },
     };
     const workspaceModelAudit = options.providerContextCache?.workspaceModelAudit;
-    const receipt = (0, provider_neutral_context_cache_1.completeProviderNeutralContextCacheRequest)(plan, {
+    const receipt = (0, model_cache_preparation_1.completeModelCacheSafely)(() => (0, provider_neutral_context_cache_1.completeProviderNeutralContextCacheRequest)(plan, {
+        ...(0, model_request_context_1.modelCacheContextProjection)(options),
         ...input,
         ...(requestDiagnostic || {}),
         ...(workspaceModelAudit && typeof workspaceModelAudit === "object" ? { workspaceModelAudit } : {}),
         ...(options.providerContextCache?.auditTurnKey ? { auditTurnKey: options.providerContextCache.auditTurnKey } : {}),
-    });
+    }));
     if (receipt) {
         if (input?.ok === true && plan?._runtimeProviderConfig) {
             try {
@@ -450,7 +460,7 @@ function finishContextCache(options, plan, input) {
                     cacheCreationInputTokens: receipt.cacheCreationInputTokens,
                     providerInputTokens: receipt.providerInputTokens,
                     requestPatchApplied: receipt.adapterEvidence?.requestPatchApplied === true,
-                    usageReported: receipt.providerUsageReported === true,
+                    usageReported: receipt.cache_usage_reported === true,
                     missReason: receipt.cacheMissReason || "provider_usage_not_reported",
                     requestClass: receipt.requestClass || "auxiliary",
                     stablePrefixChecksum: receipt.stablePrefixChecksum,
@@ -468,7 +478,7 @@ function finishContextCache(options, plan, input) {
                 });
                 try {
                     const matrix = plan?._runtimeCacheStrategy?.capabilityMatrix;
-                    const usageReported = receipt.providerUsageReported === true;
+                    const usageReported = receipt.cache_usage_reported === true;
                     if (matrix && usageReported)
                         (0, automatic_provider_cache_optimization_1.observeAutomaticProviderCacheRouting)(plan._runtimeProviderConfig, plan, matrix, {
                             hit: Number(receipt.cacheReadInputTokens || 0) > 0,
@@ -571,24 +581,20 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
     // measurement can add each bucket exactly once.
     const inputTokens = directInputTokens;
     const reported = normalized.reported;
-    const costUsd = Math.max(0, Number(usage.cost_usd
-        ?? usage.costUsd
-        ?? usage.estimated_cost_usd
-        ?? usage.estimatedCostUsd
-        ?? usage.cost?.usd
-        ?? 0) || 0);
     return {
         inputTokens,
         outputTokens,
         totalTokens: normalized.directInputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
         reported,
+        cacheUsageReported: normalized.cacheUsageReported,
         directInputTokens,
         cacheCreationInputTokens: cacheCreationTokens,
         cacheReadInputTokens: cacheReadTokens,
         cacheDeletedInputTokens,
         cacheCreation5mInputTokens,
         cacheCreation1hInputTokens,
-        costUsd,
+        ...(0, model_cache_metrics_1.providerCostEvidence)(usage),
+        costUsd: (0, model_cache_metrics_1.providerCostEvidence)(usage).reportedCostUsd ?? 0,
     };
 }
 function reportTokenUsage(options, usage) {
@@ -737,6 +743,8 @@ function nativeToolDeclaredCallback(options) {
     };
 }
 function markStreamInterrupted(error, emitted) {
+    if ((0, cache_validation_budget_1.isCacheValidationControlError)(error))
+        return error;
     if (!emitted)
         return error;
     const normalized = error instanceof Error ? error : new Error(String(error || "模型流式响应中断"));
@@ -898,12 +906,18 @@ async function fetchWithNodeHttpFallback(endpoint, init = {}, meta) {
         return await (0, provider_request_diagnostics_1.auditedProviderFetch)(fetch, endpoint, init, meta);
     }
     catch (fetchError) {
+        if ((0, cache_validation_budget_1.isCacheValidationControlError)(fetchError) || (0, provider_transport_errors_1.isPermanentProviderTlsError)(fetchError))
+            throw fetchError;
+        if (meta)
+            meta.options.cacheValidationFallbackReason = 'fetch_transport_failed';
         if (init.signal?.aborted)
             throw fetchError;
         try {
             return await (0, provider_request_diagnostics_1.auditedProviderFetch)(nativeHttpRequest, endpoint, init, meta);
         }
         catch (nativeError) {
+            if ((0, cache_validation_budget_1.isCacheValidationControlError)(nativeError))
+                throw nativeError;
             const fetchCause = fetchError?.cause?.message || fetchError?.cause?.code || fetchError?.message || String(fetchError);
             const nativeCause = nativeError?.message || String(nativeError);
             throw new Error(`网络请求失败：${fetchCause}；原生 HTTP/HTTPS 重试失败：${nativeCause}`);
@@ -1584,7 +1598,7 @@ async function callOpenAiResponsesChatOnce(config, options) {
             let response;
             if (useResponsesWebSocket) {
                 try {
-                    response = await (0, provider_request_diagnostics_1.auditedProviderFetch)(openai_responses_websocket_transport_1.requestResponsesWebSocket, endpoint, {
+                    response = await (0, openai_responses_websocket_transport_1.requestResponsesWebSocket)(endpoint, {
                         ...requestInit,
                         timeoutMs: resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs),
                         responsesWebSocketUrl: websocketUrl,
@@ -1607,6 +1621,9 @@ async function callOpenAiResponsesChatOnce(config, options) {
                     catch { }
                 }
                 catch (websocketError) {
+                    if ((0, cache_validation_budget_1.isCacheValidationControlError)(websocketError))
+                        throw websocketError;
+                    options.cacheValidationFallbackReason = 'websocket_transport_failed';
                     if (abort.controller.signal.aborted)
                         throw websocketError;
                     if (cache.plan)
@@ -2252,6 +2269,8 @@ async function callOpenAiCompatibleChat(config, options) {
             return await (responses ? callOpenAiResponsesChatOnce : callOpenAiCompatibleChatOnce)(config, attemptOptions);
         }
         catch (error) {
+            if ((0, cache_validation_budget_1.isCacheValidationControlError)(error))
+                throw error;
             if (error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA"
                 && (0, provider_context_cache_adapters_1.isProviderContextCacheFieldRejection)(error)
                 && (0, provider_context_cache_adapters_1.resolveProviderContextCacheAdapter)(config, "openai").providerNative === true) {
@@ -2310,6 +2329,8 @@ async function callGeminiCompatibleChat(config, options) {
             return await callGeminiCompatibleChatOnce(config, attemptOptions);
         }
         catch (error) {
+            if ((0, cache_validation_budget_1.isCacheValidationControlError)(error))
+                throw error;
             if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|function)|(?:tools?|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error)))
                 throw error;
             try {
@@ -2335,6 +2356,8 @@ async function callAnthropicCompatibleChat(config, options) {
             return await callAnthropicCompatibleChatOnce(config, attemptOptions);
         }
         catch (error) {
+            if ((0, cache_validation_budget_1.isCacheValidationControlError)(error))
+                throw error;
             if (error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" && (0, provider_context_cache_adapters_1.isProviderContextCacheFieldRejection)(error)) {
                 const rejectedField = (0, provider_context_cache_adapters_1.classifyProviderCacheFieldRejection)(error, "anthropic_messages");
                 const nativeContextRejected = /context[_ -]?management|cache[_ -]?edit/i.test(String(error?.message || error || ""));

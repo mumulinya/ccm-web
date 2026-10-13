@@ -44,6 +44,7 @@ exports.shouldDecomposeRequirementIntent = shouldDecomposeRequirementIntent;
 exports.decomposeRequirementToTaskPlan = decomposeRequirementToTaskPlan;
 exports.ingestRequirementSources = ingestRequirementSources;
 exports.requirementToIntakeDraft = requirementToIntakeDraft;
+const model_request_context_1 = require("../../system/model-request-context");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const dns = __importStar(require("dns/promises"));
@@ -56,7 +57,7 @@ const group_orchestrator_1 = require("../collaboration/group-orchestrator");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const source_evidence_v2_1 = require("./source-evidence-v2");
 const provider_cache_protocol_1 = require("../../system/provider-cache-protocol");
-const pdfParse = require("pdf-parse");
+const readonly_performance_service_1 = require("../../system/readonly-performance-service");
 exports.REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v2";
 exports.REQUIREMENT_EXTRACTION_SCHEMA = "ccm-business-requirement-extraction-v1";
 exports.REQUIREMENT_DECOMPOSITION_SCHEMA = "ccm-requirement-decomposition-v1";
@@ -285,10 +286,12 @@ async function analyzeImageWithConfiguredModel(filePath, name, configOverride) {
     const mediaType = mimeForImage(name);
     if (mediaType === "application/octet-stream")
         throw new Error("视觉模型暂不支持这个图片格式");
-    const data = fs.readFileSync(filePath).toString("base64");
+    const preparedImage = await (0, readonly_performance_service_1.prepareVisionFileOffThread)(filePath);
+    const data = preparedImage.data;
     const prompt = "Read this business-requirement image. Return JSON only: {summary:string, visible_text:string, requirements:string[], acceptance:string[], risks:string[], uncertain:string[]}. Transcribe visible text accurately and describe the business meaning of interfaces, tables, flows, or annotations. Put anything unclear in uncertain; never guess.";
     const timeoutMs = Math.max(10_000, Number(config.timeoutMs) || 120_000);
     const options = {
+        modelRequestContext: (0, model_request_context_1.statelessModelRequestContext)(config, { purpose: 'requirement_vision', scope: 'workspace', scopeId: 'workspace' }),
         temperature: 0,
         maxTokens: 2200,
         defaultTimeoutMs: timeoutMs,
@@ -322,7 +325,7 @@ async function analyzeImageWithConfiguredModel(filePath, name, configOverride) {
     const receiptBase = {
         schema: "ccm-vision-extraction-receipt-v1",
         version: 1,
-        image_checksum: (0, source_evidence_v2_1.sourceHash)(fs.readFileSync(filePath)),
+        image_checksum: preparedImage.checksum,
         provider: (0, provider_cache_protocol_1.resolveProviderTransport)(config).protocol,
         model: String(config.model || ""),
         visible_text_present: !!String(result.visible_text || "").trim(),
@@ -380,7 +383,7 @@ async function parseUploadedFile(file, options = {}) {
         let content = "";
         let parser = "";
         if (kind === "pdf") {
-            const parsed = await pdfParse(fs.readFileSync(filePath));
+            const parsed = await (0, readonly_performance_service_1.parsePdfOffThread)(filePath);
             content = String(parsed?.text || "").trim();
             parser = "pdf-parse";
         }
@@ -592,7 +595,7 @@ async function parseOnlineDocument(urlValue, fetcher = fetchPublicDocument) {
         let content = "";
         let parser = "public-url-text";
         if (contentType.includes("application/pdf") || /\.pdf(?:$|[?#])/i.test(finalUrl)) {
-            content = String((await pdfParse(buffer))?.text || "").trim();
+            content = String((await (0, readonly_performance_service_1.parsePdfOffThread)(buffer))?.text || "").trim();
             parser = "public-url-pdf-parse";
         }
         else if (contentType.includes("text/html") || /^\s*</.test(buffer.toString("utf-8", 0, Math.min(buffer.length, 200)))) {
@@ -701,6 +704,7 @@ async function extractRequirementWithModel(userText, sources, configOverride) {
         const readable = rows.map(row => `【source_id=${row.source_id}; source_checksum=${row.source_checksum}; chunk_id=${row.id}; name=${row.source_name}】\n${row.content}`).join("\n\n");
         const prompt = `Extract an executable business requirement from the user's text and the provided source chunks. Return JSON only; do not output Markdown.\nFields: title(string, at most 48 characters), business_goal(string), scope(string[]), acceptance_criteria(string[]), dependencies(string[]), risks(string[]), clarification_questions(string[]), source_evidence_v2([{source_id:string,source_checksum:string,chunk_ids:string[]}]).\nRules: never infer from unread sources; every conclusion must cite actual chunk_id values; goal, scope, and acceptance criteria must be executable; put conflicts or missing information in clarification_questions. Write user-visible requirement content in the user's language.\n\nUser text:\n${userText || "(user submitted sources only)"}\n\nReadable source chunks:\n${readable || "(none)"}\n\nUnread sources:\n${failed || "(none)"}`;
         const options = {
+            modelRequestContext: (0, model_request_context_1.statelessModelRequestContext)(config, { purpose: 'requirement_extraction', scope: 'workspace', scopeId: 'workspace' }),
             messages: [{ role: "user", content: prompt }], temperature: 0, maxTokens: 2200,
             defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000), retryAttempts: 5,
             retryScope: `requirement-extraction:${index + 1}/${batches.length}`,
@@ -715,6 +719,7 @@ async function extractRequirementWithModel(userText, sources, configOverride) {
     if (partials.length > 1) {
         const mergePrompt = `Merge the following per-chunk requirement extraction results into one JSON object with the same schema. Do not lose constraints, acceptance criteria, risks, dependencies, clarification questions, or source_evidence_v2 from any chunk. Do not add conclusions without evidence. Preserve user-visible content in the user's language.\n${JSON.stringify(partials)}`;
         const options = {
+            modelRequestContext: (0, model_request_context_1.statelessModelRequestContext)(config, { purpose: 'requirement_extraction_merge', scope: 'workspace', scopeId: 'workspace' }),
             messages: [{ role: "user", content: mergePrompt }], temperature: 0, maxTokens: 4000,
             defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000), retryAttempts: 5,
             retryScope: "requirement-extraction:merge", httpErrorPrefix: "需求提取合并模型", invalidJsonMessage: "需求提取合并模型未返回有效 JSON",
@@ -805,6 +810,7 @@ ${JSON.stringify(availableTargets)}
 来源清单（具体事实已经进入结构化需求，计划必须引用这些真实来源）：
 ${JSON.stringify(sourceManifestSummary)}`;
     const options = {
+        modelRequestContext: (0, model_request_context_1.statelessModelRequestContext)(config, { purpose: 'requirement_decomposition', scope: 'workspace', scopeId: 'workspace' }),
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
         maxTokens: 5000,

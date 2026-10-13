@@ -8,6 +8,12 @@ export type CcmDelegatedInquiryProjectionV2 = {
     sourceScope: "global";
     sourceScopeId: "global";
     sourceSessionId: string;
+    sourceRunId?: string;
+    sourceMessageId?: string;
+    toolCallId?: string;
+    evidenceRefs?: any[];
+    evidenceRevisions?: any[];
+    requestedProjectIds?: string[];
     exactSessionId: string;
     generation: number;
     targetScope: "group" | "project";
@@ -34,7 +40,11 @@ export declare function delegatedInquiryId(input: {
     question: string;
 }): string;
 export declare function beginDelegatedInquiryProjection(input: {
+    requestedProjectIds?: string[];
     inquiryId?: string;
+    sourceRunId?: string;
+    sourceMessageId?: string;
+    toolCallId?: string;
     sourceSessionId: string;
     targetScope: "group" | "project";
     targetId: string;
@@ -46,12 +56,14 @@ export declare function finishDelegatedInquiryProjection(input: {
     status: "completed" | "partial" | "needs_input" | "failed";
     evidenceCount?: number;
     evidenceIds?: string[];
+    evidenceRefs?: any[];
     missingEvidenceSummaries?: string[];
     automaticSupplementAttempts?: number;
     conclusion?: string;
     repoStateChecksums?: Record<string, string>;
 }): CcmDelegatedInquiryProjectionV2;
 export declare function getDelegatedInquiryProjection(inquiryId: string): CcmDelegatedInquiryProjectionV2;
+export declare function delegatedInquiryActionWasHandled(inquiryId: string, key: string): boolean;
 export declare function updateDelegatedInquiryProjection(input: {
     inquiryId: string;
     expectedRevision: number;

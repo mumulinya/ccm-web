@@ -158,7 +158,7 @@ function resolveProviderContextCacheAdapter(config = {}, _hint = "", evidenceInp
         providerNative,
         providerManagedKvCache: providerNative,
         requestLayerOwned: capabilityMatrix.protocol !== "custom" || forceNative,
-        capabilitySource: probeInProgress ? "capability_probe" : explicitCapability ? "confirmed_capability_evidence" : implicitCapability ? "provider_usage" : "ccm_safe_default",
+        capabilitySource: probeInProgress ? "capability_probe" : capabilityState?.explicitFieldStatus === "confirmed" ? "confirmed_capability_evidence" : implicitCapability ? "provider_usage" : "ccm_safe_default",
         capabilityStatus: capabilityState?.status || "unproven",
         capabilityEvidenceId: evidence?.id || "",
         capabilityEvidenceExpiresAt: evidence?.expiresAt || "",

@@ -54,6 +54,8 @@ exports.upsertProjectSessionTaskMessage = upsertProjectSessionTaskMessage;
 exports.scheduleProjectSessionAutoTitle = scheduleProjectSessionAutoTitle;
 exports.handleSessionsApi = handleSessionsApi;
 const fs = __importStar(require("fs"));
+const project_feishu_legacy_read_1 = require("./project-feishu-legacy-read");
+const feishu_channel_1 = require("../collaboration/feishu-channel");
 const conversation_session_identity_1 = require("../../system/conversation-session-identity");
 const deleted_session_context_1 = require("../../system/deleted-session-context");
 const conversation_attempt_1 = require("../../agents/conversation-attempt");
@@ -155,7 +157,12 @@ function projectFeishuTargetsFromStore(store, projectName = "selftest-project") 
     });
 }
 function loadProjectCcSessionStore(projectName) {
-    return { file: "", store: null, targets: [] };
+    const bindings = (0, feishu_channel_1.getFeishuProjectSessionBindings)(projectName);
+    const targets = bindings.map((row) => ({ ...row,
+        label: row.label || row.chat_id || row.open_id || "飞书会话",
+        session_ids: [...new Set([...(row.session_ids || []), row.active_session_id].filter(Boolean))],
+    }));
+    return { file: "", store: { sessions: {}, active_session: {}, user_sessions: {} }, targets };
 }
 function projectSessionSource(sessionId, session, targets) {
     const explicit = String(session?.source || session?.channel || "").toLowerCase();
@@ -188,8 +195,18 @@ function resolveProjectFeishuTargetFromStore(store, targets, acpSessionId, conte
         .filter(([, session]) => String(session?.agent_session_id || "") === acpSessionId)
         .map(([sessionId]) => String(sessionId));
     const exact = targets.filter((target) => matchingSessionIds.includes(String(target.active_session_id || "")));
-    if (exact.length === 1)
+    if (exact.length === 1) {
+        const suppliedKey = String(context.platform_session_key || context.platformSessionKey || "");
+        const mismatchedField = [
+            [context.chat_id || context.chatId, exact[0].chat_id],
+            [context.open_id || context.openId || context.sender_open_id, exact[0].open_id],
+            [context.thread_id || context.threadId || context.root_id || context.rootId, exact[0].thread_id],
+        ].some(([provided, bound]) => provided && String(provided) !== String(bound || ""));
+        if ((suppliedKey && suppliedKey !== exact[0].platform_session_key) || mismatchedField) {
+            throw new Error("ACP 会话映射与飞书消息身份不一致，已拒绝跨会话路由");
+        }
         return { target: exact[0], resolution: "cc_connect_agent_session" };
+    }
     if (exact.length > 1)
         throw new Error("ACP 会话同时映射到多个飞书目标，已拒绝路由");
     // A project ACP process knows its project at launch time. When the first
@@ -221,12 +238,31 @@ function resolveProjectFeishuTargetForAcpSession(projectName, acpSessionId, cont
     const safeAcpSessionId = String(acpSessionId || "").trim();
     if (!safeAcpSessionId || safeAcpSessionId.length > 240)
         throw new Error("ACP 会话 ID 无效");
-    const { file, store, targets } = loadProjectCcSessionStore(project);
-    if (!store)
-        throw new Error("项目 cc-connect 会话存储不存在");
+    const { store, targets } = loadProjectCcSessionStore(project);
+    const dir = getProjectSessionDir(project);
+    if (fs.existsSync(dir))
+        for (const name of fs.readdirSync(dir).filter(name => name.endsWith(".json"))) {
+            const session = JSON.parse(fs.readFileSync((0, project_validation_1.resolveContainedPath)(dir, name), "utf-8"));
+            const legacy = (0, project_feishu_legacy_read_1.readBoundLegacyProjectSession)(project, name.slice(0, -5), targets);
+            if (!session.agent_session_id && legacy?.agent_session_id)
+                session.agent_session_id = legacy.agent_session_id;
+            if (session.agent_session_id === safeAcpSessionId && projectSessionSource(name.slice(0, -5), session, targets) === "feishu") {
+                store.sessions[name.slice(0, -5)] = session;
+            }
+        }
+    // Targets have opaque V2 IDs; the exact ACP mapping remains authoritative.
     const resolved = resolveProjectFeishuTargetFromStore(store, targets, safeAcpSessionId, context, project);
-    if (resolved.changed && file)
-        fs.writeFileSync(file, JSON.stringify(store, null, 2));
+    if (resolved.changed) {
+        const destination = { ...context, receive_id: context.chat_id || context.open_id,
+            receive_id_type: context.chat_id ? "chat_id" : "open_id", platform_session_key: resolved.target.platform_session_key,
+            chat_id: context.chat_id || "", open_id: context.open_id || "", user_id: context.user_id || "",
+            message_id: context.message_id || "", root_message_id: context.root_id || "", thread_id: context.thread_id || "",
+            conversation_key_v2: resolved.target.conversation_key_v2, target_type: "project_agent", project_id: project };
+        const binding = (0, feishu_channel_1.bindFeishuTaskContext)({ destination, sessionId: resolved.target.active_session_id, targetType: "project_agent", projectId: project });
+        if (!binding)
+            throw new Error("飞书身份缺少有效接收目标");
+        resolved.target = getProjectFeishuSessionTargets(project).find(target => target.id === binding.id);
+    }
     return resolved;
 }
 function runProjectFeishuSessionSourceSelfTest() {
@@ -277,7 +313,8 @@ function getSessions(projectName) {
     if (!fs.existsSync(dir))
         return [];
     const automatedSessionIds = new Set((0, db_1.loadTasks)()
-        .filter((task) => String(task?.target_project || "") === String(projectName || ""))
+        .filter((task) => String(task?.target_project || "") === String(projectName || "")
+        && !task.task_session_boundary_version && !!task.automation_session_binding_snapshot)
         .map((task) => String(task?.project_session_id || task?.exact_session_id || ""))
         .filter(Boolean));
     const files = fs.readdirSync(dir)
@@ -330,7 +367,7 @@ function getSessions(projectName) {
         source: projectSessionSource(row.id, { source: row.sourceHint }, targets),
         session_kind: row.session_kind === "recovery" || row.session_kind === "automation"
             ? row.session_kind
-            : automatedSessionIds.has(String(row.id)) ? "automation" : "conversation",
+            : row.session_kind === "conversation" ? "conversation" : automatedSessionIds.has(String(row.id)) ? "automation" : "conversation",
         feishu_bindings: targets.filter((target) => target.active_session_id === row.id),
     }))
         .filter(Boolean)
@@ -356,6 +393,9 @@ function getSessionDetail(projectName, sessionId) {
     if (fs.existsSync(filePath)) {
         try {
             const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            const legacy = (0, project_feishu_legacy_read_1.readBoundLegacyProjectSession)(projectName, sessionId, targets);
+            if (legacy)
+                data.history = (0, project_feishu_legacy_read_1.mergeBoundLegacyHistory)(data.history || [], legacy.history);
             const { execution_history, executionHistory, execution_history_version, ...publicData } = data;
             return {
                 ...publicData,
@@ -364,7 +404,10 @@ function getSessionDetail(projectName, sessionId) {
                 agent_binding: (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(projectName, sessionId),
             };
         }
-        catch { }
+        catch (error) {
+            if (error?.code === "legacy_context_conflict")
+                throw error;
+        }
     }
     return null;
 }
@@ -557,46 +600,17 @@ function bindProjectFeishuSession(projectName, sessionId, targetId, action = "bi
     const filePath = getSessionFilePath(project, safeSessionId);
     if (!fs.existsSync(filePath))
         throw new Error("项目会话不存在");
-    const { file, store, targets } = loadProjectCcSessionStore(project);
-    if (!file || !store)
-        throw new Error("项目尚未创建 cc-connect 会话存储，请先连接 Agent/飞书通道");
-    const target = targets.find((item) => item.id === String(targetId || ""));
+    const targets = getProjectFeishuSessionTargets(project);
+    const target = targets.find((item) => item.id === String(targetId || "") || item.platform_session_key === String(targetId || ""));
     if (!target)
         throw new Error("飞书目标不属于当前项目或尚未被发现");
     const session = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    const source = projectSessionSource(safeSessionId, session, targets);
-    if (action === "bind" && source !== "feishu")
+    if (action === "bind" && projectSessionSource(safeSessionId, session, targets) !== "feishu") {
         throw new Error("只能将飞书目标绑定到飞书会话");
-    store.active_session = store.active_session || {};
-    store.user_sessions = store.user_sessions || {};
-    if (action === "unbind") {
-        if (String(store.active_session[target.id] || "") === safeSessionId)
-            delete store.active_session[target.id];
     }
-    else {
-        store.active_session[target.id] = safeSessionId;
-        store.user_sessions[target.id] = [...new Set([...(Array.isArray(store.user_sessions[target.id]) ? store.user_sessions[target.id] : []), safeSessionId])];
-        session.source = "feishu";
-        session.feishu_platform_keys = [...new Set([...(session.feishu_platform_keys || []), target.id])];
-        session.updated_at = new Date().toISOString();
-        fs.writeFileSync(filePath, JSON.stringify(session, null, 2));
-        store.sessions = store.sessions || {};
-        store.sessions[safeSessionId] = session;
-    }
-    fs.writeFileSync(file, JSON.stringify(store, null, 2));
-    (0, runtime_events_1.publishRuntimeEvent)("project", "project.feishu_session_binding_changed", {
-        project,
-        sessionId: safeSessionId,
-        id: target.id,
-        status: action === "unbind" ? "unbound" : "bound",
-        source: "project-feishu-session-binding",
-    });
-    return {
-        project,
-        session_id: safeSessionId,
-        action,
-        target: getProjectFeishuSessionTargets(project).find((item) => item.id === target.id) || null,
-    };
+    const binding = (0, feishu_channel_1.updateFeishuProjectSessionBinding)({ project, sessionId: safeSessionId, bindingId: target.id, action });
+    return { project, session_id: safeSessionId, action,
+        target: getProjectFeishuSessionTargets(project).find((item) => item.id === binding.id) || null };
 }
 function ensureProjectAutomationSession(projectName, requestedSessionId = "", title = "自动开发任务") {
     const safeProject = requireActiveProject(projectName).project;
@@ -738,6 +752,7 @@ function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
             console.warn(`[项目会话] 自动命名失败 (${safeProject}/${safeSessionId})：${error?.message || error}`);
         });
     }
+    require("../collaboration/task-session-store").synchronizeTaskSessionSourceMessage("project", safeProject, safeSessionId, storedMessage);
     return storedMessage;
 }
 function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
@@ -1072,14 +1087,18 @@ function handleSessionsApi(pathname, req, res, parsed) {
             try {
                 const { project, sessionId } = JSON.parse(body);
                 const filePath = getSessionFilePath(project, sessionId);
-                if (!fs.existsSync(filePath))
-                    return (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
+                if (!fs.existsSync(filePath)) {
+                    requireActiveProject(project);
+                    (0, feishu_channel_1.purgeFeishuProjectSessionBindings)(project, sessionId);
+                    return (0, utils_1.sendJson)(res, { success: true, already_deleted: true });
+                }
                 (0, session_compaction_runs_1.cancelSessionCompactionRun)({ scope: "project", exactSessionId: `${project}:${sessionId}`, reason: "项目会话已删除" });
                 (0, session_start_hook_context_1.clearSessionStartHookContext)("project", `${project}:${sessionId}`);
                 (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "用户删除项目会话，取消未完成的项目主 Agent 任务");
                 const bindingCleanup = (0, project_session_agent_binding_1.purgeProjectSessionAgentBinding)(project, sessionId);
                 const runCleanup = (0, chat_runs_1.purgeProjectChatRunsForSession)(project, sessionId);
                 const contextCacheCleanup = (0, deleted_session_context_1.clearDeletedSessionContext)('project', project, sessionId);
+                (0, feishu_channel_1.purgeFeishuProjectSessionBindings)(project, sessionId);
                 fs.unlinkSync(filePath);
                 clearProjectMainDynamicContext(project, sessionId);
                 (0, utils_1.sendJson)(res, {

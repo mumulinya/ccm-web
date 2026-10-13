@@ -88,7 +88,22 @@ export declare function getParsedKnowledgeDocument(filename: string): {
     status: string;
     error: string;
 };
-export declare function searchKnowledgeBase(query: string, options?: KnowledgeSearchOptions): Promise<{
+export declare function searchKnowledgeBase(...args: Parameters<typeof searchKnowledgeBaseMeasured>): Promise<{
+    results: any[];
+    embeddingMode: string;
+    embeddingError: string;
+    fallbackReason: string;
+    indexGeneration: string;
+    staleServed: boolean;
+    scopeChecksum: string;
+    candidateCounts: {
+        eligible: number;
+        lexical: number;
+        semantic: number;
+        merged: number;
+    };
+}>;
+declare function searchKnowledgeBaseMeasured(query: string, options?: KnowledgeSearchOptions): Promise<{
     results: any[];
     embeddingMode: string;
     embeddingError: string;
@@ -114,3 +129,4 @@ export declare function runKnowledgeIndexSelfTest(): {
         charEnd: number;
     }[];
 };
+export {};

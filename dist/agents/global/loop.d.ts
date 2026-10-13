@@ -59,6 +59,8 @@ export interface GlobalAgentRunStep {
     decision?: any;
 }
 export interface GlobalAgentRun {
+    deferred_tool_schema_bindings?: Record<string, string>;
+    deferred_tool_binding_identity?: string;
     version: 1;
     id: string;
     trace_id: string;
@@ -73,6 +75,9 @@ export interface GlobalAgentRun {
     phase: GlobalAgentDecisionState;
     explicit_write_authorization: boolean;
     turn_id?: string;
+    source_access_principal?: any;
+    source_message_id?: string;
+    source_access_updates?: any[];
     queue_scope?: string;
     write_authorization_receipt?: GlobalWriteAuthorizationReceiptV2 | null;
     writeAuthorizationReceipt?: GlobalWriteAuthorizationReceiptV2 | null;

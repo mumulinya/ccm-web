@@ -39,6 +39,7 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         sourceIngestion?: RequirementIngestionResult | null;
         knowledgeContext?: string;
         principal?: any;
+        sourceMessageId?: string;
         readOnly?: boolean;
         turnId?: string;
         sessionId?: string;
@@ -61,16 +62,13 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         turnId?: string;
         queueScope?: string;
         principal?: any;
+        sourceMessageId?: string;
         requestedTargetRefs?: any[];
         routeGuard?: (workflowDecision: any) => void;
     }) => Promise<any>;
     resumeGlobalAgentLoopsForServer: (ctx: CollabCtx, port: number) => Promise<any>;
     startGlobalMissionSupervisionForServer: (ctx: CollabCtx) => any;
-    bootstrapGlobalAgentMemoryForServer: () => {
-        total: any;
-        migrated: number;
-        results: any[];
-    };
+    bootstrapGlobalAgentMemoryForServer: () => any;
     stopGlobalMissionSupervisionForServer: () => void;
 };
 export {};

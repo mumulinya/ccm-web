@@ -37,8 +37,11 @@ exports.taskSessionArchiveState = taskSessionArchiveState;
 exports.taskSessionCreationState = taskSessionCreationState;
 exports.taskSessionArchiveActions = taskSessionArchiveActions;
 exports.taskSessionOutputRevision = taskSessionOutputRevision;
+exports.synchronizeTaskSessionSourceMessage = synchronizeTaskSessionSourceMessage;
+exports.appendTaskSessionSourceMessage = appendTaskSessionSourceMessage;
 exports.taskSessionStorePath = taskSessionStorePath;
 exports.getTaskSession = getTaskSession;
+exports.listTaskSessionSummaries = listTaskSessionSummaries;
 exports.listTaskSessions = listTaskSessions;
 exports.isTaskSessionAvailable = isTaskSessionAvailable;
 exports.reconcileTaskSessions = reconcileTaskSessions;
@@ -47,6 +50,12 @@ exports.appendTaskSessionMessage = appendTaskSessionMessage;
 exports.setTaskSessionPendingFollowUp = setTaskSessionPendingFollowUp;
 exports.buildTaskSessionDiscussionReply = buildTaskSessionDiscussionReply;
 exports.taskSessionEvents = taskSessionEvents;
+const credential_store_1 = require("../../core/credential-store");
+const task_session_boundary_1 = require("./task-session-boundary");
+const task_session_runtime_bindings_1 = require("./task-session-runtime-bindings");
+const task_session_attachments_1 = require("./task-session-attachments");
+const task_session_source_attachments_1 = require("./task-session-source-attachments");
+const task_session_source_sync_1 = require("./task-session-source-sync");
 const crypto = __importStar(require("crypto"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
@@ -60,7 +69,7 @@ const FILE = path.join(utils_1.CCM_DIR, "task-sessions.json");
 const LOCK = path.join(utils_1.CCM_DIR, "task-sessions-v1");
 const REVIEWABLE = new Set(["done", "completed", "success", "failed", "blocked", "cancelled", "canceled", "interrupted", "waiting_user", "recovery_required"]);
 const UNFINISHED = new Set(["failed", "blocked", "cancelled", "canceled", "interrupted", "recovery_required"]);
-const text = (value, max = 4000) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+const text = (value, max = 4000) => (0, credential_store_1.redactSensitiveText)(String(value ?? "")).replace(/\s+/g, " ").trim().slice(0, max);
 const taskStatus = (task) => text(task?.status, 80).toLowerCase();
 const taskIdOf = (task) => text(task?.id || task?.task_id, 180);
 const activeRunIdOf = (task) => text(task?.active_run_id || task?.run_id || task?.task_run?.run_id, 180);
@@ -75,7 +84,8 @@ function taskSessionArchiveState(task) {
     if (policy === "auto_terminal")
         return { eligible: status !== "waiting_user", policy, reason: status === "waiting_user" ? "awaiting_confirmation" : "auto_terminal" };
     if (["done", "completed", "success"].includes(status) && task?.acceptance_state === "accepted") {
-        return { eligible: true, policy, reason: "user_accepted" };
+        const opening = (0, task_session_boundary_1.taskSessionOpeningState)(task);
+        return { eligible: opening.open, policy, reason: opening.open ? "user_accepted" : "awaiting_user_acceptance" };
     }
     if (UNFINISHED.has(status) && task?.task_session_archive?.decision === "close_unfinished") {
         return { eligible: true, policy, reason: "user_closed_unfinished" };
@@ -90,6 +100,12 @@ function taskSessionCreationState(task) {
     return { eligible: archive.eligible, policy, reason: archive.reason, archive_policy: archive.policy };
 }
 function taskSessionArchiveActions(task) {
+    if (task?.task_session_boundary_version === 1 && ["done", "completed"].includes(taskStatus(task))
+        && task.acceptance_state === "accepted" && !(0, task_session_boundary_1.taskSessionOpeningState)(task).open
+        && task.delivery_summary?.acceptance_gate_passed === true)
+        return ["accept"];
+    if (task?.pending_dispatch_delivery && taskStatus(task) === "waiting_user" && task?.acceptance_state === "awaiting_user_acceptance")
+        return ["accept", "revise"];
     if (task?.task_spec?.task_session_archive_policy !== "user_confirm" || task?.task_session_archive?.decision || task?.acceptance_state === "accepted")
         return [];
     if (taskStatus(task) === "waiting_user" && task?.acceptance_state === "awaiting_user_acceptance")
@@ -132,7 +148,7 @@ function publicRun(run) {
         automation_definition_revision: Number(run.automation_definition_revision || 0) || null,
     };
 }
-function buildDossier(task, runs) {
+function buildDossier(task, runs, sourceHistoryState) {
     const spec = task?.task_spec || {};
     const files = task?.file_changes?.files || task?.delivery_summary?.actual_file_changes || task?.receipt?.filesChanged || [];
     const verification = task?.verification || task?.delivery_summary?.verification || task?.receipt?.verification || [];
@@ -158,7 +174,7 @@ function buildDossier(task, runs) {
         acceptance: spec.acceptance_policy || task?.acceptance_policy || task?.acceptance_policy_snapshot || null,
         execution_policy: spec.execution_policy || task?.workflow_policy_snapshot || null,
         approval_policy: spec.approval_policy || task?.approval_policy || null,
-        attachments: Array.isArray(task?.attachments) ? task.attachments.slice(0, 100) : [],
+        attachments: (0, task_session_source_attachments_1.taskSourceAttachmentReferences)(task.id, task.source_attachments || task.attachments || []),
         task_spec: { revision: Number(spec.revision || task?.task_spec_revision || 1), checksum: text(spec.checksum || spec.plan_checksum, 160) },
         creation_policy: creationPolicy,
         archive_policy: archivePolicy,
@@ -179,6 +195,7 @@ function buildDossier(task, runs) {
         delivery: task?.delivery_summary || task?.delivery_result || null,
         runs: runs.map(publicRun),
         source_ref: task?.source_conversation_ref || null,
+        ...(sourceHistoryState ? { source_history_state: sourceHistoryState } : {}),
         last_updated_at: text(task?.updated_at || task?.updatedAt, 80),
     };
 }
@@ -196,26 +213,66 @@ function hasTerminalResult(task, run) {
     return ["done", "completed", "success", "failed", "blocked", "cancelled", "canceled", "interrupted", "waiting_user", "recovery_required"].includes(status)
         && !!(run?.run_id || task?.final_report || task?.final_reply || task?.result || task?.status_detail);
 }
-function buildInitialMessages(task, runs) {
+function buildInitialMessages(task, runs, dossier, related) {
     const taskId = taskIdOf(task);
     const created = text(task?.created_at || task?.createdAt, 80) || now();
-    const dossier = buildDossier(task, runs);
-    const related = collectRelatedMessages(task, taskId);
     const initial = [
         { message_id: `task-session:${taskId}:context`, task_id: taskId, role: "system_context", content: JSON.stringify(dossier), created_at: created, source_ref: { task_id: taskId, revision: Number(task?.revision || 0) } },
-        { message_id: `task-session:${taskId}:request`, task_id: taskId, role: "user", content: dossier.original_request || dossier.title, created_at: created, source_ref: { message_id: text(task?.message_id || task?.anchor_message_id, 180), task_id: taskId } },
+        { message_id: `task-session:${taskId}:request`, task_id: taskId, role: "user", content: (0, credential_store_1.redactSensitiveText)(String(task.user_message || task.request || task.message || task.description || task.business_goal || dossier.title)), created_at: created, source_ref: { message_id: text(task?.message_id || task?.anchor_message_id, 180), task_id: taskId } },
         ...related,
     ];
     const terminalRuns = runs.filter(run => hasTerminalResult(task, run));
     if (terminalRuns.length)
         initial.push(...terminalRuns.slice().reverse().map(run => resultMessage(task, run)));
-    return initial.filter((item, index, all) => all.findIndex(other => other.message_id === item.message_id) === index).slice(-500);
+    return initial.filter((item, index, all) => all.findIndex(other => other.message_id === item.message_id) === index);
 }
-function collectRelatedMessages(task, taskId) {
+function sourceMessageRecord(taskId, item) {
+    const attachments = (0, task_session_attachments_1.normalizeTaskSessionAttachments)(taskId, item.attachments || item.files || []);
+    return {
+        message_id: `source:${String(item.id || item.message_id || "anonymous")}:${crypto.createHash("sha256").update(JSON.stringify({ role: item.role, content: item.content || item.text, attachments })).digest("hex").slice(0, 20)}`,
+        task_id: taskId, role: item.role === "assistant" ? "assistant" : "user", content: (0, credential_store_1.redactSensitiveText)(String(item.content || item.text || "")),
+        ...(attachments.length ? { attachments } : {}),
+        created_at: text(item.timestamp || item.created_at, 80) || now(),
+        source_ref: { task_id: taskId, source_message_id: String(item.id || item.message_id || "") },
+    };
+}
+function synchronizeTaskSessionSourceMessage(scope, scopeId, sessionId, item) {
+    const taskId = String(item?.task_id || item?.taskExperience?.task_id || "");
+    if (!taskId)
+        return;
+    const task = (0, db_1.getTaskById)(taskId);
+    const source = task?.source_conversation_ref;
+    if (!task?.task_session_boundary_version || source?.scope !== scope || source?.scopeId !== scopeId || source?.exactSessionId !== sessionId || !getTaskSession(taskId))
+        return;
+    appendTaskSessionSourceMessage(taskId, item, { scope, scope_id: scopeId, exact_session_id: sessionId });
+}
+/** Only backend-confirmed source relations call this; use the same version identity as replay. */
+function appendTaskSessionSourceMessage(taskId, item, source = {}) {
+    const record = sourceMessageRecord(taskId, item);
+    if (!record.content && !record.attachments?.length)
+        return null;
+    const trusted = { ...record, source_ref: { ...record.source_ref, ...source } };
+    const pendingFile = (0, task_session_source_sync_1.retainPendingTaskSourceRecord)(taskId, trusted);
+    const saved = appendTaskSessionMessage(taskId, trusted, record.created_at);
+    (0, task_session_source_sync_1.completePendingTaskSourceRecord)(pendingFile);
+    return saved;
+}
+function collectRelatedMessages(task, taskId, sourceHistory) {
     const source = task?.source_conversation_ref || {};
     const rows = [];
     try {
-        if (task?.group_id && task?.group_session_id)
+        if (sourceHistory)
+            rows.push(...sourceHistory.messages);
+        else if (task.task_session_boundary_version && source.scope === "group")
+            rows.push(...((0, storage_1.getGroupMessages)(String(source.scopeId), String(source.exactSessionId)) || []));
+        else if (task.task_session_boundary_version && source.scope === "project")
+            rows.push(...((0, project_session_compaction_1.listProjectSessionHistoryMessages)(String(source.scopeId), String(source.exactSessionId)) || []));
+        else if (task.task_session_boundary_version && source.scope === "global") {
+            const file = path.join(utils_1.CCM_DIR, "global-agent-history.json");
+            const history = (0, atomic_json_file_1.readJsonWithBackup)(file, { sessions: [] });
+            rows.push(...(history.sessions?.find((row) => row.id === source.exactSessionId)?.messages || []));
+        }
+        else if (task?.group_id && task?.group_session_id)
             rows.push(...((0, storage_1.getGroupMessages)(String(task.group_id), String(task.group_session_id)) || []));
         else if (task?.target_project && task?.project_session_id)
             rows.push(...((0, project_session_compaction_1.listProjectSessionHistoryMessages)(String(task.target_project), String(task.project_session_id)) || []));
@@ -231,19 +288,16 @@ function collectRelatedMessages(task, taskId) {
     catch { }
     const anchor = text(source.messageId || task?.message_id || task?.anchor_message_id, 180);
     return rows.filter(item => String(item?.task_id || item?.taskId || "") === taskId || (anchor && String(item?.id || item?.message_id || "") === anchor))
-        .map(item => ({
-        message_id: `source:${String(item.id || item.message_id || crypto.createHash("sha256").update(JSON.stringify(item)).digest("hex"))}`,
-        task_id: taskId,
-        role: (item.role === "assistant" ? "assistant" : "user"),
-        content: text(item.content || item.text, 20_000),
-        created_at: text(item.timestamp || item.created_at, 80) || now(),
-        source_ref: { task_id: taskId, source_message_id: String(item.id || item.message_id || "") },
-    })).filter(item => item.content);
+        .map(item => sourceMessageRecord(taskId, item)).filter(item => item.content || item.attachments?.length);
 }
 function taskSessionStorePath() { return FILE; }
 function getTaskSession(taskId) { const id = text(taskId, 180); return readStore().find(row => row.task_id === id) || null; }
+function listTaskSessionSummaries() {
+    return readStore().map(row => ({ task_id: row.task_id, session_id: row.session_id, lifecycle: row.lifecycle,
+        creation_policy: row.creation_policy, materialized_at: row.materialized_at, updated_at: row.updated_at }));
+}
 function listTaskSessions() { return readStore(); }
-function isTaskSessionAvailable(task) { return !!getTaskSession(taskIdOf(task)); }
+function isTaskSessionAvailable(task) { return (0, task_session_boundary_1.taskSessionOpeningState)(task).open && !!getTaskSession(taskIdOf(task)); }
 function reconcileTaskSessions() {
     const results = [];
     for (const task of (0, db_1.loadTasks)()) {
@@ -251,6 +305,7 @@ function reconcileTaskSessions() {
             continue;
         try {
             results.push(materializeTaskSession(task));
+            (0, task_session_source_sync_1.reconcilePendingTaskSourceSync)(task.id);
         }
         catch (error) {
             results.push({ available: false, created: false, reason: String(error?.message || error) });
@@ -271,18 +326,26 @@ function materializeTaskSession(taskInput) {
         const sessions = readStore();
         const runs = (0, task_run_store_1.listTaskRuns)(taskId);
         const runIds = runs.map(run => text(run.run_id, 180)).filter(Boolean);
+        const openingState = (0, task_session_boundary_1.taskSessionOpeningState)(task);
+        const sourceHistory = require("./task-session-source-history").readTaskSessionSourceHistory(task);
+        const relatedMessages = collectRelatedMessages(task, taskId, sourceHistory);
+        let runtimeBindings = (0, task_session_runtime_bindings_1.taskSessionRuntimeBindings)(taskId);
         const existing = sessions.find(row => row.task_id === taskId);
         if (existing) {
+            const liveIds = new Set(runtimeBindings.map(row => row.task_agent_session_id));
+            runtimeBindings = [...(existing.runtime_bindings || []).filter(row => !liveIds.has(row.task_agent_session_id)), ...runtimeBindings];
             const known = new Set(existing.messages.map(item => item.message_id));
             const additions = [
-                ...collectRelatedMessages(task, taskId),
+                ...relatedMessages,
                 ...runs.filter(run => hasTerminalResult(task, run)).map(run => resultMessage(task, run)),
             ].filter(item => !known.has(item.message_id));
-            const dossier = buildDossier(task, runs);
+            const dossier = buildDossier(task, runs, sourceHistory?.state);
             const nextSpecRevision = Number(task?.task_spec?.revision || task?.task_spec_revision || existing.task_spec_revision || 1);
             const nextLifecycle = dossier.lifecycle;
             const nextActiveRunId = activeRunIdOf(task);
-            const unchanged = additions.length === 0
+            const unchanged = JSON.stringify(existing.runtime_bindings || []) === JSON.stringify(runtimeBindings)
+                && JSON.stringify(existing.opening_state || {}) === JSON.stringify(openingState)
+                && additions.length === 0
                 && existing.lifecycle === nextLifecycle
                 && existing.creation_policy === dossier.creation_policy
                 && existing.archive_policy === dossier.archive_policy
@@ -295,6 +358,7 @@ function materializeTaskSession(taskInput) {
                 return { available: true, created: false, session: existing };
             const next = {
                 ...existing,
+                opening_state: openingState, runtime_bindings: runtimeBindings,
                 updated_at: now(),
                 revision: existing.revision + 1,
                 lifecycle: nextLifecycle,
@@ -305,14 +369,14 @@ function materializeTaskSession(taskInput) {
                 active_run_id: nextActiveRunId,
                 run_ids: runIds,
                 dossier,
-                messages: [...existing.messages, ...additions].slice(-500),
+                messages: [...existing.messages, ...additions],
             };
             sessions[sessions.indexOf(existing)] = next;
             writeStore(sessions);
             return { available: true, created: false, session: next };
         }
         const timestamp = now();
-        const dossier = buildDossier(task, runs);
+        const dossier = buildDossier(task, runs, sourceHistory?.state);
         const session = {
             schema: "ccm-task-session-v1", task_id: taskId, session_id: `task_session_${crypto.randomUUID()}`,
             title: text(task?.title || task?.name || task?.task_spec?.goal || "任务会话", 240), origin: originOf(task), status: "available",
@@ -322,18 +386,21 @@ function materializeTaskSession(taskInput) {
             plan_revision: dossier.plan_revision,
             task_spec_revision: Number(task?.task_spec?.revision || task?.task_spec_revision || 1),
             created_at: timestamp, updated_at: timestamp, materialized_at: timestamp, revision: 1, active_run_id: activeRunIdOf(task), run_ids: runIds,
-            dossier, messages: buildInitialMessages(task, runs),
+            dossier, messages: buildInitialMessages(task, runs, dossier, relatedMessages),
+            opening_state: openingState, runtime_bindings: runtimeBindings,
             pending_follow_up: null,
         };
         sessions.push(session);
         writeStore(sessions);
+        require("./task-session-source-attachments").scheduleTaskSourceAttachmentRetention(taskId);
         return { available: true, created: true, session };
     }, { timeoutMs: 10_000, staleMs: 60_000 });
 }
-function appendTaskSessionMessage(taskId, input) {
+function appendTaskSessionMessage(taskId, input, trustedSourceTimestamp) {
     const id = text(taskId, 180);
-    const content = text(input?.content || input?.message, 20_000);
-    if (!id || !content)
+    const content = (0, credential_store_1.redactSensitiveText)(String(input?.content || input?.message || "").trim());
+    const attachments = (0, task_session_attachments_1.normalizeTaskSessionAttachments)(id, input?.attachments);
+    if (!id || (!content && !attachments.length))
         throw new Error("任务会话消息不能为空");
     return (0, atomic_json_file_1.withFileLock)(LOCK, () => {
         const sessions = readStore();
@@ -343,19 +410,15 @@ function appendTaskSessionMessage(taskId, input) {
         const current = sessions[index];
         const requestedMessageId = text(input?.message_id, 180);
         const existing = requestedMessageId ? current.messages.find(item => item.message_id === requestedMessageId) : null;
-        if (existing)
+        if (existing) {
+            if (existing.content !== content || existing.role !== (input?.role === "assistant" ? "assistant" : "user")
+                || JSON.stringify(existing.attachments || []) !== JSON.stringify(attachments)) {
+                throw Object.assign(new Error("同一任务消息身份不能提交不同内容或附件"), { code: "TASK_SESSION_MESSAGE_ID_CONFLICT", status: 409 });
+            }
             return existing;
-        const attachments = Array.isArray(input?.attachments)
-            ? input.attachments.slice(0, 20).map((item) => ({
-                name: text(item?.name || item?.filename, 240),
-                filename: text(item?.filename || item?.name, 240),
-                size: Math.max(0, Number(item?.size || 0)),
-                content_type: text(item?.content_type || item?.contentType, 120),
-                stored: item?.stored !== false,
-            })).filter((item) => item.name)
-            : [];
-        const message = { message_id: requestedMessageId || `task-session:${id}:message:${crypto.randomUUID()}`, task_id: id, role: input?.role === "assistant" ? "assistant" : "user", content, created_at: now(), ...(text(input?.run_id, 180) ? { run_id: text(input.run_id, 180) } : {}), source_ref: input?.source_ref || null, ...(attachments.length ? { attachments } : {}) };
-        const next = { ...current, revision: current.revision + 1, updated_at: now(), messages: [...current.messages, message].slice(-500) };
+        }
+        const message = { message_id: requestedMessageId || `task-session:${id}:message:${crypto.randomUUID()}`, task_id: id, role: input?.role === "assistant" ? "assistant" : "user", content, created_at: trustedSourceTimestamp || now(), ...(text(input?.run_id, 180) ? { run_id: text(input.run_id, 180) } : {}), source_ref: input?.source_ref || null, ...(attachments.length ? { attachments } : {}) };
+        const next = { ...current, revision: current.revision + 1, updated_at: now(), messages: [...current.messages, message] };
         sessions[index] = next;
         writeStore(sessions);
         return message;

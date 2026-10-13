@@ -54,6 +54,7 @@ exports.runTaskAgentSessionModelIdentitySelfTest = runTaskAgentSessionModelIdent
 // Behavior-freeze extraction from agent-sessions.ts.
 const crypto = __importStar(require("crypto"));
 const runtime_1 = require("../agents/runtime");
+const dispatch_native_session_evidence_1 = require("../agents/dispatch-native-session-evidence");
 const task_agent_continuation_soak_1 = require("./task-agent-continuation-soak");
 const agent_sessions_shared_1 = require("./agent-sessions-shared");
 function openTaskAgentSession(input) {
@@ -133,6 +134,7 @@ function recordTaskAgentSessionTurn(sessionId, result = {}) {
         const next = advanceTaskAgentSession(current, result);
         store.sessions[index] = next;
         (0, agent_sessions_shared_1.saveStore)(store);
+        require("./task-session-continuity-observation").observeTaskSessionContinuity(current, result, next);
         return next;
     });
 }
@@ -293,6 +295,7 @@ function advanceTaskAgentSession(current, result = {}) {
     const next = {
         ...current,
         nativeSessionId: permissionDrift ? (0, agent_sessions_shared_1.createNativeSessionId)(current.agentType) : invalidNativeSession || captureFailed ? "" : capturedNativeId,
+        nativeResumeEvidenceRef: permissionDrift || invalidNativeSession || captureFailed ? "" : continuationEvidence ? (0, dispatch_native_session_evidence_1.persistDispatchNativeSessionEvidence)(continuationEvidence) : current.nativeResumeEvidenceRef || "",
         resumeMode: permissionDrift ? "native" : captureFailed ? "scratchpad" : invalidNativeSession && (0, runtime_1.getAgentRuntime)(current.agentType).capabilities.sessionResume ? "native" : current.resumeMode,
         nativeCaptureFailures: Number(current.nativeCaptureFailures || 0) + (captureFailed ? 1 : 0),
         nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + (invalidNativeSession || permissionDrift ? 1 : 0),

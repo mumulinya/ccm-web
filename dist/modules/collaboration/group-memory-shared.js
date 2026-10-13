@@ -1295,7 +1295,7 @@ function appendWorkerLedger(memory, item) {
     };
 }
 function updateGroupMemory(groupId, patch = {}) {
-    const sessionId = String(patch.groupSessionId || patch.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const sessionId = String(require("./task-group-memory-write-binding").taskGroupMemoryWriteSession(groupId, patch) || (0, storage_1.getActiveGroupChatSessionId)(groupId));
     const memory = (0, group_memory_storage_1.loadGroupMemory)(groupId, sessionId);
     const next = { ...memory };
     if (patch.goal && !next.goal)

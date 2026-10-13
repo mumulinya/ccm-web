@@ -25,6 +25,12 @@ export declare function hasResourceAccess(userId: string, role: string, type: Re
  * used to read another project's task details.
  */
 export declare function hasTaskResourceAccess(task: any, principal: any, required?: ResourceLevel): boolean;
+/** One authoritative permission snapshot for a single list projection. Never
+ * reuse this predicate for a later action or another HTTP request. */
+export declare function taskReadAccessSnapshot(principal: any): {
+    policyRevision: number;
+    allows: (task: any) => boolean;
+};
 export declare function authorizeResource(req: any, res: any, type: ResourceType, id: any, required?: ResourceLevel): boolean;
 /** Remove grants with the account while preserving an auditable revocation. */
 export declare function removeUserAccess(userId: string, actorUserId: string): void;

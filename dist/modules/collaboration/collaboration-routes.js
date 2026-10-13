@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-routes.ts — merged from 6 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -41,12 +40,14 @@ exports.handleCollaborationApiIntakeRoutesPartA = handleCollaborationApiIntakeRo
 exports.handleCollaborationApiIntakeRoutesPartB = handleCollaborationApiIntakeRoutesPartB;
 exports.handleCollaborationApiTaskLifecycleRoutes = handleCollaborationApiTaskLifecycleRoutes;
 exports.handleCollaborationApi = handleCollaborationApi;
+const task_intake_session_binding_1 = require("./task-intake-session-binding");
+const dispatch_scope_routes_1 = require("./dispatch-scope-routes");
+// collaboration-routes.ts — merged from 6 part files (behavior-freeze merge).
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const secure_multipart_1 = require("../../system/secure-multipart");
-const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
@@ -68,7 +69,6 @@ const task_run_routes_1 = require("./task-run-routes");
 const agent_run_store_1 = require("../../agents/agent-run-store");
 const task_session_store_1 = require("./task-session-store");
 const task_run_store_1 = require("./task-run-store");
-const scope_expansion_1 = require("../../agents/scope-expansion");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
 const task_intake_preflight_1 = require("./task-intake-preflight");
 const source_ingestion_1 = require("../requirements/source-ingestion");
@@ -349,38 +349,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             return (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 409);
         }
     }
-    const scopeExpansionMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/work-items\/([^/]+)\/scope-expansion(?:\/(approve|reject))?$/);
-    if (scopeExpansionMatch && req.method === "POST") {
-        const taskId = decodeURIComponent(scopeExpansionMatch[1]);
-        const workItemId = decodeURIComponent(scopeExpansionMatch[2]);
-        const action = scopeExpansionMatch[3] || "request";
-        const task = (0, db_1.loadTasks)().find((row) => String(row?.id || "") === taskId);
-        if (!task)
-            return (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
-        if (!(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "manage"))
-            return (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该任务的管理权限" }, 403);
-        const item = (Array.isArray(task.work_items) ? task.work_items : []).find((row) => String(row?.id || row?.workItemId || "") === workItemId);
-        if (!item)
-            return (0, utils_1.sendJson)(res, { success: false, error: "工作项不存在" }, 404);
-        const requests = Array.isArray(task.scope_expansion_requests) ? task.scope_expansion_requests.slice() : [];
-        try {
-            if (action === "request") {
-                const request = (0, scope_expansion_1.createScopeExpansionRequest)({ path: parsed.query.path, reason: parsed.query.reason, allowedChanges: String(parsed.query.allowed_changes || parsed.query.allowedChanges || "").split(","), requestedBy: parsed.query.requestedBy || "project-agent" });
-                const next = (0, collaboration_1.updateTask)(taskId, { scope_expansion_requests: [...requests.filter((r) => r.id !== request.id), { ...request, workItemId }] });
-                return (0, utils_1.sendJson)(res, { success: true, request, taskId, workItemId, fileChangePolicy: (0, scope_expansion_1.scopeExpansionPolicy)(next || task) });
-            }
-            const requestId = String(parsed.query.request_id || parsed.query.requestId || "").trim();
-            const index = requests.findIndex((r) => r.id === requestId && String(r.workItemId || workItemId) === workItemId);
-            if (index < 0)
-                return (0, utils_1.sendJson)(res, { success: false, error: "范围扩展请求不存在" }, 404);
-            requests[index] = { ...requests[index], status: action === "approve" ? "approved" : "rejected", ...(action === "approve" ? { approvedAt: new Date().toISOString(), approvedBy: "ccm" } : {}) };
-            const next = (0, collaboration_1.updateTask)(taskId, { scope_expansion_requests: requests });
-            return (0, utils_1.sendJson)(res, { success: true, request: requests[index], approvedPaths: (0, scope_expansion_1.approvedScopePaths)(next || task), fileChangePolicy: (0, scope_expansion_1.scopeExpansionPolicy)(next || task) });
-        }
-        catch (error) {
-            return (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
-        }
-    }
+    if ((0, dispatch_scope_routes_1.handleDispatchScopeRoutes)(pathname, req, res, parsed.query, collaboration_1.updateTask))
+        return true;
     const taskResourceMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/(failures|evidence|lifecycle)$/);
     if (taskResourceMatch && req.method === "GET") {
         const taskId = decodeURIComponent(taskResourceMatch[1]);
@@ -1491,6 +1461,10 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                     return (0, utils_1.sendJson)(res, { success: true, task: queuedTask, queue_result: queueResult, projection: { source_task_id: child.id, content_stored: false } });
                 }
                 if (isRecoveryAction) {
+                    if ((!recoveryActionAlias || recoveryActionAlias[2] === "resume")
+                        && (task.acceptance_state === "awaiting_plan_confirmation" || task.intake_state === "awaiting_confirmation")) {
+                        return (0, utils_1.sendJson)(res, { error: "请先在任务会话中确认当前计划，恢复不能替代审批", code: "TASK_PLAN_CONFIRMATION_REQUIRED" }, 409);
+                    }
                     if (["done", "completed"].includes(String(task?.status || "").toLowerCase())
                         || ["accepted", "terminal_gate_passed"].includes(String(task?.acceptance_state || "").toLowerCase())) {
                         return (0, utils_1.sendJson)(res, { error: "任务已经正式完成，不能从历史中断记录继续执行；请创建新任务或发起明确返工", code: "TASK_ALREADY_COMPLETED" }, 409);
@@ -2066,7 +2040,7 @@ function bindRequirementPlanTargetSessions(plan, input) {
                 : input.defaultGroup;
             if (!group)
                 return item;
-            const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+            const resolution = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
                 scope: "group",
                 scopeId: group.id,
                 source: input.taskSource || "workbench",
@@ -2078,7 +2052,7 @@ function bindRequirementPlanTargetSessions(plan, input) {
         const projectName = targetType === "project" ? targetId : defaultProject;
         if (!projectName || !input.configs.some((config) => config.name === projectName))
             return item;
-        const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+        const resolution = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
             scope: "project",
             scopeId: projectName,
             source: input.taskSource || "workbench",
@@ -3292,7 +3266,9 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                         return (0, utils_1.sendJson)(res, { success: false, error: "任务记录整理失败，请重试", code: "TASK_SESSION_MATERIALIZATION_FAILED" }, 503);
                     return (0, utils_1.sendJson)(res, { success: true, task, decision: "archived_unfinished", available_actions: [], task_session: { available: true, session_id: session.session_id } });
                 }
-                if (current.status !== "waiting_user" || current.acceptance_state !== "awaiting_user_acceptance") {
+                const confirmExistingOutput = current.task_session_boundary_version === 1 && action === "accept"
+                    && availableActions.includes("accept") && ["done", "completed"].includes(current.status) && current.acceptance_state === "accepted";
+                if (!confirmExistingOutput && (current.status !== "waiting_user" || current.acceptance_state !== "awaiting_user_acceptance")) {
                     if (action === "accept" && current.acceptance_state === "accepted")
                         return (0, utils_1.sendJson)(res, { success: true, task: current, decision: "completed", available_actions: [] });
                     return (0, utils_1.sendJson)(res, { success: false, error: "任务当前不在待用户验收状态", code: "TASK_ACCEPTANCE_NOT_PENDING" }, 409);
@@ -3328,6 +3304,7 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 if (action !== "accept")
                     return (0, utils_1.sendJson)(res, { success: false, error: "不支持的验收动作" }, 400);
                 const updates = {
+                    ...require("./dispatch-task-delivery-confirmation").approveDispatchTaskDelivery(current, String(req.ccmAuth?.userId || req.ccmAuth?.clientId || req.ccmAuth?.id || "")),
                     status: "completed",
                     acceptance_state: "accepted",
                     status_detail: (0, collaboration_1.compactFormText)(payload.reason, "用户已核对现有结构化验收证据并批准交付"),
@@ -3345,6 +3322,7 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 if (validationError)
                     return (0, utils_1.sendJson)(res, { error: validationError }, 409);
                 const task = (0, collaboration_1.updateTask)(taskId, updates);
+                require("./dispatch-task-delivery-confirmation").finalizeApprovedDispatchDelivery(task);
                 (0, logs_1.appendTaskTimelineEvent)(taskId, {
                     type: "user_final_acceptance",
                     title: "用户已批准最终交付",
@@ -3493,6 +3471,8 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 const currentTask = (0, db_1.loadTasks)().find((task) => task.id === taskId);
                 if (!currentTask)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (!(0, access_policy_1.hasTaskResourceAccess)(currentTask, req.ccmAuth, "manage"))
+                    return (0, utils_1.sendJson)(res, { error: "没有该任务的操作权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
                 if (rejectTaskMutationConflict(res, currentTask, payload, true))
                     return;
                 const requestedKind = String(payload.continuation_kind || payload.continuationKind || "auto");
@@ -3508,6 +3488,7 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                     })).continuationKind
                     : requestedKind;
                 const result = (0, collaboration_1.continueTaskWithMessage)(taskId, message, ctx, {
+                    authorizationValid: true,
                     source: payload.source || "user",
                     auto_execute: payload.auto_execute,
                     autoExecute: payload.autoExecute,
@@ -3908,6 +3889,8 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     agent_type: agentType,
                     task_id: task.id,
                     trace_id: task.trace_id || "",
+                    dispatch_profile: task.dispatch_profile || task.dispatch_profile_snapshot?.profile || task.task_spec?.dispatch_profile_snapshot?.profile || "standard",
+                    dispatch_profile_snapshot: task.dispatch_profile_snapshot || task.task_spec?.dispatch_profile_snapshot || null,
                     task,
                     group,
                     worker_context_packet: task.mission_handoff?.worker_context_packet || null,

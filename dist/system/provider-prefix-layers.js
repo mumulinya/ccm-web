@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.summarizeProviderPrefixLayers = summarizeProviderPrefixLayers;
+exports.compareProviderPrefixLayers = compareProviderPrefixLayers;
 const crypto_1 = require("crypto");
 const hash = (value) => (0, crypto_1.createHash)('sha256').update(JSON.stringify(value ?? null)).digest('hex');
 const bytes = (value) => Buffer.byteLength(JSON.stringify(value ?? null));
@@ -29,12 +30,27 @@ function summarizeProviderPrefixLayers(messages = [], previous) {
             firstChangedSegment = 'workspace_public';
         }
         else if (previous.scopePrivateChecksum !== scopePrivateChecksum) {
-            reuseClassification = 'tool_schema_changed';
+            reuseClassification = 'scope_private_context_changed';
             firstChangedSegment = 'scope_private';
         }
         else
             reuseClassification = 'public_prefix_same';
     }
     return { workspacePublicChecksum, scopePrivateChecksum, workspacePublicBytes: bytes(publicValue), scopePrivateBytes: bytes(privateValue), firstChangedSegment, reuseClassification, contentStored: false };
+}
+/** Layer checksums include appended runtime controls. Only encoded tools can
+ * prove a tool contract change; private checksum changes alone cannot. */
+function compareProviderPrefixLayers(previous, current, evidence) {
+    if (!previous)
+        return { ...current, firstChangedSegment: null, reuseClassification: 'no_comparable_request' };
+    if (evidence.toolDefinitionChanged)
+        return { ...current, firstChangedSegment: 'tools', reuseClassification: 'tool_schema_changed' };
+    if (previous.workspacePublicChecksum !== current.workspacePublicChecksum) {
+        return { ...current, firstChangedSegment: 'workspace_public', reuseClassification: 'stable_prefix_changed' };
+    }
+    if (previous.scopePrivateChecksum !== current.scopePrivateChecksum) {
+        return { ...current, firstChangedSegment: 'scope_private', reuseClassification: evidence.fullPrefixPreserved ? 'scope_private_context_appended' : 'scope_private_context_changed' };
+    }
+    return { ...current, firstChangedSegment: null, reuseClassification: 'public_prefix_same' };
 }
 //# sourceMappingURL=provider-prefix-layers.js.map

@@ -79,6 +79,7 @@ const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const agent_qa_service_1 = require("./agent-qa-service");
 const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
+const agent_receipts_1 = require("./agent-receipts");
 const agent_notifications_1 = require("./agent-notifications");
 const storage_1 = require("./storage");
 const execution_kernel_1 = require("../../agents/execution-kernel");
@@ -624,6 +625,7 @@ function parseFormattedReceiptsFromText(text) {
         const rawReceipt = parseCoordinatorReceiptJsonObject(receiptArea);
         receipts.push({
             ...(rawReceipt || {}),
+            verificationResults: (0, agent_receipts_1.extractAgentReceipt)(receiptArea, agent)?.verificationResults || rawReceipt?.verificationResults || [],
             agent,
             status,
             summary: getLine("摘要"),
@@ -963,6 +965,11 @@ function changeLooksHighRiskForIndependentReview(change) {
         || /\.(sql|prisma|graphql|proto)$/i.test(pathText);
 }
 function explainIndependentReviewTriggerDecision(task, actualFileChanges = []) {
+    const dispatch = task?.dispatch_profile_snapshot || task?.task_spec?.dispatch_profile_snapshot;
+    if (dispatch?.profile === "light" || dispatch?.profile === "strict") {
+        const required = dispatch.profile === "strict";
+        return { required, triggerReasons: required ? ["冻结严格档位要求独立验收"] : [], skipReasons: required ? [] : ["冻结轻量档位使用快速检查"], highRiskFiles: [], fileChangeCount: actualFileChanges.length, decisionDetail: required ? "严格档位需要独立验收" : "轻量档位使用快速检查" };
+    }
     const changes = Array.isArray(actualFileChanges) ? actualFileChanges : [];
     const highRiskFiles = changes.filter(changeLooksHighRiskForIndependentReview);
     const workflowDecision = task?.workflowDecision || task?.workflow_decision || task?.intake_draft?.workflowDecision || task?.intake_draft?.workflow_decision || null;

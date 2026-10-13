@@ -45,6 +45,7 @@ exports.mainAgentToolRequestFingerprint = mainAgentToolRequestFingerprint;
 exports.buildMainAgentLoadedContextItems = buildMainAgentLoadedContextItems;
 exports.executeMainAgentToolRequests = executeMainAgentToolRequests;
 const workspace_read_guidance_1 = require("./workspace-read-guidance");
+const deferred_tool_invocation_1 = require("../agents/deferred-tool-invocation");
 const main_agent_tool_prompt_1 = require("./main-agent-tool-prompt");
 const workspace_execution_audit_1 = require("./workspace-execution-audit");
 const crypto = __importStar(require("crypto"));
@@ -107,7 +108,7 @@ function renderWorkspaceToolPrompt(label, tools, deferred = false, schemaSurface
             ? `- ${mainAgentCallableToolName(tool)}${tool.discoveryDescription ? `: ${tool.discoveryDescription}` : ''}`
             : renderMainAgentToolCatalogLine(tool, schemaSurface)),
         deferred
-            ? "These are CCM safe workspace capabilities. Load their schema with tool_search before calling them, then use the short names above."
+            ? "These are CCM safe workspace capabilities. Load their schema with tool_search, then call invoke_deferred_tool with the returned name and input."
             : "Use the current tool definitions for descriptions and arguments.",
     ].join("\n");
 }
@@ -255,7 +256,7 @@ function buildMainAgentToolRuntimeContext(input) {
     const toolAudit = tool_manager_1.toolManager.buildScopeAudit(scope);
     const label = String(input.label || "主 Agent");
     const nativePrompt = schemaSurface === 'native'
-        ? "Use the native control and discovery tools with their supplied schemas. Only call tools exposed in this request; load deferred tools through tool_search. Tool availability does not grant write permission or bypass confirmation."
+        ? "Use the supplied native control and discovery schemas. Load deferred tools through tool_search and use its callVia entry with the returned name and input. Tool availability does not grant write permission or bypass confirmation."
         : [
             `${label} native control tools:`,
             ...exports.MAIN_AGENT_NATIVE_TOOLS_V2.filter(tool => tool.loadPolicy === "base").map(tool => `- ${tool.name}: ${tool.description}`),
@@ -603,6 +604,16 @@ async function executeMainAgentToolRequests(input) {
         return { ...request, arguments: args };
     };
     const executeOne = async (requestInput) => {
+        if (requestInput.name === 'invoke_deferred_tool') {
+            try {
+                const resolved = (0, deferred_tool_invocation_1.resolveDeferredToolCall)(requestInput.name, requestInput.arguments, input.toolContext.catalog.loadedMcp || input.toolContext.catalog.mcp);
+                requestInput = { ...requestInput, name: resolved.name, arguments: resolved.arguments };
+            }
+            catch (error) {
+                return { name: requestInput.name, itemName: String(requestInput.arguments?.name || ''), ok: false,
+                    error: String(error.message), resultChecksum: contextItemChecksum(error.message) };
+            }
+        }
         const wrappedMcpName = requestInput.name === "invoke_mcp"
             ? String(requestInput.arguments?.name || requestInput.arguments?.tool_name || "").trim()
             : "";
@@ -656,6 +667,7 @@ async function executeMainAgentToolRequests(input) {
                 query: rawQuery,
                 tools: ranked.map((item) => ({
                     name: mainAgentCallableToolName(item.tool),
+                    callVia: (0, deferred_tool_invocation_1.deferredToolCallVia)(item.tool),
                     ...(isWorkspaceReadonlyDefinition(item.tool) ? {} : { canonicalName: item.tool.canonicalName }),
                     description: item.tool.description,
                     inputSchema: item.tool.inputSchema,

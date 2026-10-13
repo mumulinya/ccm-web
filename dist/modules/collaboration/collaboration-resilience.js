@@ -55,7 +55,7 @@ const RUNTIME_COMMANDS = {
     claudecode: ["claude"],
     codex: ["codex"],
     cursor: ["cursor-agent", "agent"],
-    gemini: [(0, agent_provider_settings_1.resolveAntigravityCliCommand)(), "agy"],
+    gemini: ["agy"],
     qoder: ["qodercli"],
 };
 const DEFAULT_FALLBACK_ORDER = {
@@ -94,7 +94,7 @@ function commandExistsOnPath(command) {
 }
 function isRuntimeCommandAvailable(agentType) {
     const runtime = (0, runtime_1.normalizeAgentRuntimeId)(agentType);
-    const commands = RUNTIME_COMMANDS[runtime] || [];
+    const commands = runtime === 'gemini' ? [(0, agent_provider_settings_1.resolveAntigravityCliCommand)(), 'agy'] : RUNTIME_COMMANDS[runtime] || [];
     return commands.some(commandExistsOnPath);
 }
 function buildRuntimeRecoveryCandidates(primary, configured = [], availability = isRuntimeCommandAvailable) {

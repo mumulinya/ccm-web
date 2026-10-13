@@ -149,8 +149,12 @@ function taskAgentMemorySemanticChecksum(memory) {
 function buildTaskAgentMemoryEntryManifest(memoryInput) {
     const memory = stripTaskAgentMemoryEntrySync(memoryInput);
     const root = memoryRoot(memory);
-    const groupId = String(root?.group_id || root?.groupId || "");
-    const groupSessionId = String(root?.group_session_id || root?.groupSessionId || "");
+    const referenceBinding = root?.schema === "ccm-third-party-memory-mcp-reference-v1"
+        ? require("./agent-sessions-shared").extractGroupSessionMemoryBinding(root) : null;
+    if (referenceBinding && referenceBinding.checksumValid !== true)
+        throw Object.assign(new Error("MCP 记忆引用的群会话绑定 checksum 无效"), { code: "TASK_AGENT_MEMORY_REFERENCE_BINDING_INVALID" });
+    const groupId = String(root?.group_id || root?.groupId || referenceBinding?.groupId || "");
+    const groupSessionId = String(root?.group_session_id || root?.groupSessionId || referenceBinding?.groupSessionId || "");
     const entries = {};
     const entryContents = {};
     if (root) {

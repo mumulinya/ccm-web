@@ -69,7 +69,7 @@ function enqueueTask(taskId, ctx, requestedRunId = "") {
     if (task?.task_spec?.schema === "ccm-task-spec-v1" && requestedRunId && requestedRunId !== taskRunId) {
         return { queued: false, blocked: true, reason: "task_run_mismatch", message: "指定运行实例不是当前任务的活动运行" };
     }
-    if (task.status === "done") {
+    if (["done", "completed"].includes(String(task.status || ""))) {
         (0, logs_1.addTaskLog)(taskId, "info", "任务已完成，跳过入队");
         return { queued: false, message: "任务已完成，跳过入队" };
     }
@@ -220,8 +220,8 @@ function resumeTaskQueues(ctx, options = {}) {
     }
     const communicationRecovery = (0, agent_communication_v2_1.reconcileAgentCommunications)();
     const testAgentRunnerRecovery = (0, test_agent_runner_1.reconcileTestAgentRunnerRecords)();
-    const traceBackfilled = (0, collaboration_1.backfillTaskTraceIds)();
-    let tasks = (0, db_1.loadTasks)();
+    const traceBackfilled = require('./task-startup-candidates').backfillStartupTaskTraces();
+    let tasks = require('./task-startup-candidates').startupTaskCandidates();
     // Backfill only records that already carry a complete new-model identity.
     // Ambiguous legacy activity is handled below as recovery_required.
     for (const task of tasks) {
@@ -252,7 +252,7 @@ function resumeTaskQueues(ctx, options = {}) {
         if (marked)
             (0, logs_1.addTaskLog)(task.id, "warning", "历史任务缺少 TaskSpec，已暂停自动恢复并等待人工核验");
     }
-    tasks = (0, db_1.loadTasks)();
+    tasks = require('./task-startup-candidates').startupTaskCandidates();
     // A service restart can leave a task in the transient TestAgent phase after
     // its child process has already exited. Requeue only that orphaned review;
     // a still-live TestAgent remains untouched and will finish normally.
@@ -377,7 +377,7 @@ function resumeTaskQueues(ctx, options = {}) {
             });
         }
     }
-    tasks = (0, db_1.loadTasks)();
+    tasks = require('./task-startup-candidates').startupTaskCandidates();
     const forceAuto = options.force === true
         || options.manual === true
         || /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_STARTUP_TASK_RECOVERY || ""));
@@ -389,7 +389,7 @@ function resumeTaskQueues(ctx, options = {}) {
         const recoveryDecision = entry.decision;
         const dependencyIds = Array.isArray(task?.mission_dependencies) ? task.mission_dependencies.map(String).filter(Boolean) : [];
         const blockedDependencies = dependencyIds.filter((dependencyId) => {
-            const dependency = tasks.find((candidate) => String(candidate.id) === dependencyId);
+            const dependency = require('../../core/db').getTaskById(dependencyId);
             if (!dependency || dependency.status !== "done")
                 return true;
             const summary = dependency.delivery_summary || {};
@@ -625,7 +625,7 @@ function resumeTaskQueues(ctx, options = {}) {
 }
 function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS, gapCooldownMs = collaboration_1.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = collaboration_1.TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot, recoveryMaxCount = collaboration_1.TASK_WATCHDOG_RECOVERY_MAX) {
     const now = Date.now();
-    const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : (0, db_1.loadTasks)();
+    const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : require('../../core/task-query').listUnfinishedTasks();
     const stalePending = [];
     const stalledInProgress = [];
     const runningLong = [];
@@ -773,7 +773,7 @@ function runTaskWatchdog(ctx, options = {}) {
     }
     for (const item of recoverable) {
         const task = taskSnapshot.find(t => t.id === item.id);
-        if (!task || task.status === "done" || (0, collaboration_1.isTaskPaused)(task) || (0, collaboration_1.isTaskRunningInMemory)(task))
+        if (!task || ["done", "completed"].includes(String(task.status || "")) || (0, collaboration_1.isTaskPaused)(task) || (0, collaboration_1.isTaskRunningInMemory)(task))
             continue;
         const patch = {
             status: "pending",
@@ -796,7 +796,7 @@ function runTaskWatchdog(ctx, options = {}) {
     }
     for (const [taskId, items] of stalledByTask.entries()) {
         const task = (0, db_1.loadTasks)().find((entry) => entry.id === taskId);
-        if (!task || task.status === "done" || (0, collaboration_1.isTaskPaused)(task))
+        if (!task || ["done", "completed"].includes(String(task.status || "")) || (0, collaboration_1.isTaskPaused)(task))
             continue;
         const reason = `任务看门狗检测到 ${items.length} 个子 Agent 工作项长时间无进展`;
         const requeue = (0, collaboration_1.requeueTaskWorkItemsForWatchdog)(task, staleMs, reason);

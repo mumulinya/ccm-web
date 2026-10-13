@@ -49,6 +49,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
+const task_group_memory_identity_1 = require("./task-group-memory-identity");
 exports.GROUP_POST_TURN_SUMMARY_SCHEMA = "ccm-group-post-turn-summary-v1";
 exports.GROUP_POST_TURN_SUMMARY_DELIVERY_CAPSULE_SCHEMA = "ccm-group-post-turn-summary-delivery-capsule-v1";
 exports.GROUP_POST_TURN_SUMMARY_LEDGER_DIR = path.join(utils_1.CCM_DIR, "group-post-turn-summaries");
@@ -88,8 +89,8 @@ function processAlive(pid) {
     }
 }
 function ledgerFile(groupId, sessionId) {
-    if (!groupId || !String(sessionId || "").startsWith("gcs_"))
-        throw new Error("post-turn summary requires groupId--gcs_* identity");
+    if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(groupId, sessionId))
+        throw new Error("post-turn summary requires groupId--gcs_* identity or an authoritative TaskSession binding");
     return path.join(exports.GROUP_POST_TURN_SUMMARY_LEDGER_DIR, `${cleanPart(groupId)}--${cleanPart(sessionId)}.jsonl`);
 }
 function getGroupPostTurnSummaryLedgerFile(groupId, sessionId) {
@@ -169,7 +170,7 @@ function buildGroupPostTurnSummaryDeliveryCapsule(input = {}) {
     const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
     const taskAgentSessionId = String(input.taskAgentSessionId || input.task_agent_session_id || "").trim();
     const ledger = input.ledger || readGroupPostTurnSummaries(groupId, groupSessionId, { limit: 10_000 });
-    if (!groupId || !groupSessionId.startsWith("gcs_") || !taskAgentSessionId.startsWith("tas_") || ledger?.valid !== true)
+    if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(groupId, groupSessionId) || !taskAgentSessionId.startsWith("tas_") || ledger?.valid !== true)
         return null;
     const selected = selectDeliverySummaries(Array.isArray(ledger.latest) ? ledger.latest : [], input.limit || 6);
     if (!selected.length)
@@ -223,7 +224,7 @@ function validateGroupPostTurnSummaryDeliveryCapsule(input = null, options = {})
     const checksumValid = verifyGroupPostTurnSummaryDeliveryCapsuleChecksum(input);
     if (!checksumValid)
         issues.push("capsule_checksum_invalid");
-    if (!String(input.group_session_id || "").startsWith("gcs_"))
+    if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(String(input.group_id || ""), String(input.group_session_id || "")))
         issues.push("group_session_identity_invalid");
     if (!String(input.task_agent_session_id || "").startsWith("tas_"))
         issues.push("task_agent_session_identity_invalid");
@@ -475,7 +476,7 @@ function artifactUrls(message, content) {
     return Array.from(new Set([...urls, ...values.filter(value => /^(https?:\/\/|[a-zA-Z]:\\|\/|\.\/)/.test(value))])).slice(0, 12);
 }
 function buildGroupPostTurnSummary(groupId, sessionId, message, options = {}) {
-    if (!groupId || !String(sessionId || "").startsWith("gcs_"))
+    if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(groupId, sessionId))
         return null;
     if (String(message?.role || "").toLowerCase() !== "assistant")
         return null;
@@ -594,7 +595,7 @@ function recordGroupPostTurnSummary(groupId, sessionId, message, options = {}) {
     }
 }
 function backfillGroupPostTurnSummaries(groupId, sessionId, messages = [], options = {}) {
-    if (!groupId || !String(sessionId || "").startsWith("gcs_"))
+    if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(groupId, sessionId))
         return { recorded: 0, skipped: messages.length, reason: "gcs_session_required", ledger: null };
     let recorded = 0;
     let skipped = 0;
@@ -613,7 +614,7 @@ function backfillGroupPostTurnSummaries(groupId, sessionId, messages = [], optio
     return { recorded, skipped, ledger: readGroupPostTurnSummaries(groupId, sessionId, options) };
 }
 function deleteGroupPostTurnSummaryArtifacts(groupId, sessionId) {
-    if (!groupId || !String(sessionId || "").startsWith("gcs_"))
+    if (!(0, task_group_memory_identity_1.isAuthoritativeGroupMemorySession)(groupId, sessionId))
         return { deleted: [], deletedCount: 0 };
     const file = ledgerFile(groupId, sessionId);
     const deleted = [];

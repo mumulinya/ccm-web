@@ -41,10 +41,12 @@ exports.listAgentComments = listAgentComments;
 exports.createAgentApproval = createAgentApproval;
 exports.decideAgentApproval = decideAgentApproval;
 exports.listAgentApprovals = listAgentApprovals;
+exports.listTaskAgentApprovals = listTaskAgentApprovals;
 exports.acquireAgentTaskCheckout = acquireAgentTaskCheckout;
 exports.acquireAgentTaskCheckoutInTransaction = acquireAgentTaskCheckoutInTransaction;
 exports.releaseAgentTaskCheckout = releaseAgentTaskCheckout;
 exports.getAgentTaskCheckout = getAgentTaskCheckout;
+exports.reconcileAgentTaskCheckouts = reconcileAgentTaskCheckouts;
 exports.saveAgentHeartbeatContext = saveAgentHeartbeatContext;
 exports.getAgentHeartbeatContext = getAgentHeartbeatContext;
 exports.getLatestAgentHeartbeatContext = getLatestAgentHeartbeatContext;
@@ -69,6 +71,7 @@ const task_store_1 = require("../core/task-store");
 const agent_run_store_1 = require("./agent-run-store");
 const agent_run_store_2 = require("./agent-run-store");
 const agent_heartbeat_coordinator_1 = require("./agent-heartbeat-coordinator");
+const credential_store_1 = require("../core/credential-store");
 const SECRET_KEY = /(?:secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|prompt|stdout|stderr|raw)/i;
 function id(prefix) { return `${prefix}_${crypto.randomUUID()}`; }
 function now() { return new Date().toISOString(); }
@@ -92,8 +95,10 @@ function checksum(value) { return crypto.createHash("sha256").update(stable(valu
 function redact(value, depth = 0) {
     if (depth > 5)
         return "[truncated]";
-    if (typeof value === "string")
-        return value.length > 1000 ? `${value.slice(0, 1000)}...[truncated]` : value;
+    if (typeof value === "string") {
+        const redacted = (0, credential_store_1.redactSensitiveText)(value);
+        return redacted.length > 1000 ? `${redacted.slice(0, 1000)}...[truncated]` : redacted;
+    }
     if (Array.isArray(value))
         return value.slice(0, 100).map(item => redact(item, depth + 1));
     if (!value || typeof value !== "object")
@@ -183,7 +188,7 @@ function createAgentComment(input) {
     if (!result.duplicate && input.triggerHeartbeat !== false) {
         try {
             const run = text(input.runId) ? (0, agent_run_store_1.getAgentRun)(text(input.runId)) : null;
-            const wake = (0, agent_heartbeat_coordinator_1.requestAgentHeartbeat)({ agentId: text(run?.agentId) || "comment-agent", scope: run?.scope || "project", scopeId: text(run?.scopeId), taskId: text(input.taskId), traceId: text(input.traceId) || text(run?.traceId), reason: "comment", idempotencyKey: `comment-wake:${text(input.idempotencyKey)}`, runId: text(input.runId), runtimeId: text(run?.runtimeId), attemptId: text(run?.attemptId), nativeSessionId: text(run?.nativeSessionId), taskAgentSessionId: text(run?.taskAgentSessionId), workspacePath: text(run?.workspacePath), worktreeId: text(run?.worktreeId), source: "comment" });
+            const wake = require("./agent-execution-coordinator").requestPersistentAgentWake({ agentId: text(run?.agentId) || "comment-agent", scope: run?.scope || "project", scopeId: text(run?.scopeId), taskId: text(input.taskId), traceId: text(input.traceId) || text(run?.traceId), reason: "comment", idempotencyKey: `comment-wake:${text(input.idempotencyKey)}`, runId: text(input.runId), runtimeId: text(run?.runtimeId), attemptId: text(run?.attemptId), nativeSessionId: text(run?.nativeSessionId), taskAgentSessionId: text(run?.taskAgentSessionId), workspacePath: text(run?.workspacePath), worktreeId: text(run?.worktreeId), source: "comment" });
             (0, task_store_1.withImmediateTaskStoreTransaction)(db => { db.prepare("UPDATE agent_comments SET heartbeat_wake_id = ? WHERE comment_id = ?").run(text(wake.wake?.wakeId), result.comment.commentId); recordAgentActivityInTransaction(db, { taskId: text(input.taskId), runId: text(input.runId), traceId: text(input.traceId) || text(run?.traceId), eventType: wake.coalesced ? "heartbeat.coalesced" : "heartbeat.requested", summary: wake.coalesced ? "评论唤醒已合并" : "评论已请求 Heartbeat", payload: { wakeId: wake.wake?.wakeId, commentId: result.comment.commentId }, idempotencyKey: `comment-wake-activity:${text(input.idempotencyKey)}` }); });
             result.comment.heartbeatWakeId = text(wake.wake?.wakeId);
         }
@@ -225,6 +230,12 @@ function decideAgentApproval(approvalId, input) {
         const row = db.prepare("SELECT * FROM agent_approvals WHERE approval_id = ?").get(text(approvalId));
         if (!row)
             throw Object.assign(new Error("审批不存在"), { code: "CCM_APPROVAL_NOT_FOUND" });
+        if (!["approved", "rejected", "cancelled"].includes(input.status) || !text(input.decisionBy))
+            throw new Error("审批决定或操作者无效");
+        if (row.status === "pending" && row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
+            db.prepare("UPDATE agent_approvals SET status = 'expired', decided_at = ?, reason = 'approval_expired' WHERE approval_id = ?").run(now(), approvalId);
+            return rowApproval(db.prepare("SELECT * FROM agent_approvals WHERE approval_id = ?").get(approvalId));
+        }
         if (row.status !== "pending")
             return rowApproval(row);
         if (text(input.actionFingerprint) && text(input.actionFingerprint) !== text(row.action_fingerprint))
@@ -233,14 +244,40 @@ function decideAgentApproval(approvalId, input) {
         db.prepare("UPDATE agent_approvals SET status = ?, decision_by = ?, reason = ?, decided_at = ? WHERE approval_id = ?").run(input.status, text(input.decisionBy), text(input.reason), decidedAt, text(approvalId));
         const next = rowApproval(db.prepare("SELECT * FROM agent_approvals WHERE approval_id = ?").get(text(approvalId)));
         recordAgentActivityInTransaction(db, { taskId: next.taskId, runId: next.runId, traceId: next.traceId, actorType: "user", actorId: text(input.decisionBy), eventType: `approval.${input.status}`, summary: `人工审批${input.status === "approved" ? "已通过" : input.status === "rejected" ? "已拒绝" : "已取消"}`, payload: { approvalId, reason: text(input.reason) }, idempotencyKey: `approval-decision:${approvalId}:${input.status}` });
-        try {
-            if (input.status === "approved")
+        let wake = null;
+        {
+            const run = (0, agent_run_store_1.getAgentRun)(next.runId);
+            if (["project_worktree_merge", "task_delivery_confirmation"].includes(next.actionType)) {
+                // The delivery coordinator owns this exact Git action. Do not turn a
+                // merge decision into a second Provider execution or a generic wake.
+                if (input.status !== "approved" && run?.status === "waiting_confirmation")
+                    (0, agent_run_store_2.transitionAgentRunInTransaction)(db, next.runId, "paused", "隔离分支交付未获批准", { eventType: `approval.${input.status}`, idempotencyKey: `approval-decision-run:${approvalId}:${input.status}` });
+            }
+            else if (input.status === "approved" && (db.prepare("SELECT 1 FROM agent_approvals WHERE run_id = ? AND status <> 'approved' LIMIT 1").get(next.runId)
+                || (require("../core/db").getTaskById(next.taskId)?.scope_expansion_requests || []).some((r) => r.runId === next.runId && (r.status !== "approved" || r.applicationState !== "applied")))) {
+                // One successful decision cannot release other necessary approvals.
+            }
+            else if (input.status === "approved" && !["succeeded", "failed", "cancelled"].includes(run?.status)) {
                 (0, agent_run_store_2.transitionAgentRunInTransaction)(db, next.runId, "queued", "人工审批已通过，等待继续执行", { eventType: "approval.approved", idempotencyKey: `approval-approved-run:${approvalId}` });
-            else
+                if (run) {
+                    const wakeResult = (0, agent_heartbeat_coordinator_1.requestAgentHeartbeatInTransaction)(db, {
+                        agentId: run.agentId, scope: run.scope, scopeId: run.scopeId, taskId: run.taskId,
+                        traceId: run.traceId, reason: "approval", idempotencyKey: `approval-wake:${approvalId}`,
+                        runId: run.runId, runtimeId: run.runtimeId, attemptId: run.attemptId,
+                        executionId: run.executionId, taskAgentSessionId: run.taskAgentSessionId,
+                        nativeSessionId: run.nativeSessionId, workspacePath: run.workspacePath,
+                        worktreeId: run.worktreeId, runtimeVersionSnapshot: run.runtimeVersionSnapshot,
+                        source: "approval",
+                    });
+                    wake = wakeResult.wake;
+                    recordAgentActivityInTransaction(db, { taskId: run.taskId, runId: run.runId, traceId: run.traceId, wakeId: wake?.wakeId, actorType: "system", actorId: "approval-coordinator", eventType: wakeResult.coalesced ? "heartbeat.coalesced" : "heartbeat.requested", summary: wakeResult.coalesced ? "审批通过后的唤醒已合并" : "审批通过后已请求 Heartbeat", payload: { approvalId, wakeId: wake?.wakeId || "" }, idempotencyKey: `approval-wake-activity:${approvalId}` });
+                }
+            }
+            else if (input.status !== "approved" && !["succeeded", "failed", "cancelled"].includes(run?.status)) {
                 (0, agent_run_store_2.transitionAgentRunInTransaction)(db, next.runId, input.status === "rejected" ? "paused" : "cancelled", `人工审批${input.status === "rejected" ? "已拒绝" : "已取消"}`, { eventType: `approval.${input.status}`, idempotencyKey: `approval-decision-run:${approvalId}:${input.status}` });
+            }
         }
-        catch { }
-        return next;
+        return { ...next, heartbeatWakeId: wake?.wakeId || "" };
     });
 }
 function listAgentApprovals(runId) {
@@ -250,15 +287,53 @@ function listAgentApprovals(runId) {
         return db.prepare("SELECT * FROM agent_approvals WHERE run_id = ? ORDER BY requested_at ASC").all(text(runId)).map(rowApproval);
     });
 }
+/** Read-only task projection: one indexed query, without per-Run write transactions. */
+function listTaskAgentApprovals(taskId, attemptId) {
+    return (0, task_store_1.withSqliteTaskStore)(db => db.prepare(`SELECT a.* FROM agent_approvals a
+    JOIN agent_runs r ON r.run_id = a.run_id WHERE r.task_id = ?
+    ${attemptId ? "AND r.attempt_id = ?" : ""} ORDER BY a.requested_at ASC`)
+        .all(...(attemptId ? [text(taskId), text(attemptId)] : [text(taskId)])).map(row => {
+        const approval = rowApproval(row);
+        return approval.status === "pending" && approval.expiresAt && Date.parse(approval.expiresAt) <= Date.now()
+            ? { ...approval, status: "expired" } : approval;
+    }));
+}
 function rowCheckout(row) { return { checkoutId: text(row.checkout_id), taskId: text(row.task_id), runId: text(row.run_id), traceId: text(row.trace_id), workspacePath: text(row.workspace_path), worktreeId: text(row.worktree_id), ownerId: text(row.owner_id), leaseId: text(row.lease_id), status: (text(row.status) || "active"), acquiredAt: text(row.acquired_at), expiresAt: text(row.expires_at), releasedAt: text(row.released_at) }; }
 function acquireAgentTaskCheckout(input) {
     return (0, task_store_1.withImmediateTaskStoreTransaction)(db => acquireAgentTaskCheckoutInTransaction(db, input));
 }
 function acquireAgentTaskCheckoutInTransaction(db, input) {
+    if (text(input.workspacePath))
+        input = { ...input, workspacePath: require("./dispatch-workspace-policy").canonicalDispatchWorkspace(input.workspacePath) };
     const duplicate = db.prepare("SELECT * FROM agent_task_checkouts WHERE idempotency_key = ?").get(text(input.idempotencyKey));
     if (duplicate)
         return { checkout: rowCheckout(duplicate), acquired: duplicate.status === "active", reason: "idempotency_replay" };
-    const active = db.prepare("SELECT * FROM agent_task_checkouts WHERE task_id = ? AND workspace_path = ? AND worktree_id = ? AND status = 'active'").get(text(input.taskId), text(input.workspacePath), text(input.worktreeId));
+    // Earlier versions attached a physical lane to planning-only parents.
+    // Release that obsolete claim atomically before assigning the child lane;
+    // keep the parent's Run lease and immutable checkout history intact.
+    if (input.exclusiveWorkspace && text(input.workspacePath)) {
+        const obsolete = db.prepare(`SELECT c.* FROM agent_task_checkouts c JOIN agent_runs r ON r.run_id = c.run_id
+        WHERE c.task_id = ? AND c.workspace_path = ? AND c.status = 'active'
+        AND ((r.agent_id = 'project-main-agent' AND r.source = 'project-main-agent')
+          OR (r.agent_id = 'group-main-agent' AND r.source = 'group-main-agent')
+          OR (r.agent_id = 'global-agent' AND r.source = 'global-agent-loop'))`).all(text(input.taskId), text(input.workspacePath));
+        for (const row of obsolete) {
+            db.prepare("UPDATE agent_task_checkouts SET status = 'released', released_at = ? WHERE checkout_id = ? AND status = 'active'").run(now(), row.checkout_id);
+            recordAgentActivityInTransaction(db, { taskId: row.task_id, runId: row.run_id, traceId: row.trace_id,
+                actorType: "system", actorId: "execution-coordinator", eventType: "task.checkout_released",
+                summary: "规划父 Run 的旧工作区锁已交给执行子 Run", payload: { checkoutId: row.checkout_id, childRunId: input.runId },
+                idempotencyKey: `planning-checkout-delegated:${row.checkout_id}` });
+        }
+    }
+    const active = (input.exclusiveWorkspace && text(input.workspacePath)
+        ? db.prepare(`SELECT c.* FROM agent_task_checkouts c JOIN agent_runs r ON r.run_id = c.run_id
+          WHERE c.workspace_path = ? AND r.run_id <> ? AND c.status IN ('active', 'blocked', 'expired') AND r.status NOT IN ('succeeded', 'failed', 'cancelled')
+          AND r.scope <> 'test_agent' AND NOT ((r.agent_id = 'project-main-agent' AND r.source = 'project-main-agent')
+            OR (r.agent_id = 'group-main-agent' AND r.source = 'group-main-agent') OR (r.agent_id = 'global-agent' AND r.source = 'global-agent-loop'))
+          ORDER BY c.acquired_at DESC LIMIT 1`).get(text(input.workspacePath), text(input.runId))
+        : db.prepare("SELECT * FROM agent_task_checkouts WHERE task_id = ? AND workspace_path = ? AND worktree_id = ? AND status = 'active'").get(text(input.taskId), text(input.workspacePath), text(input.worktreeId)));
+    if (active && input.exclusiveWorkspace && active.run_id !== input.runId)
+        return { checkout: rowCheckout(active), acquired: false, reason: "workspace_lane_held" };
     if (active && Date.parse(text(active.expires_at)) > Date.now())
         return { checkout: rowCheckout(active), acquired: false, reason: "checkout_held" };
     if (active)
@@ -284,6 +359,37 @@ function releaseAgentTaskCheckout(checkoutId, ownerId, status = "released") {
     });
 }
 function getAgentTaskCheckout(taskId, runId) { return (0, task_store_1.withSqliteTaskStore)(db => { const row = db.prepare(`SELECT * FROM agent_task_checkouts WHERE task_id = ? ${text(runId) ? "AND run_id = ?" : ""} ORDER BY acquired_at DESC LIMIT 1`).get(...[text(taskId), ...(text(runId) ? [text(runId)] : [])]); return row ? rowCheckout(row) : null; }); }
+/** Reconcile expired Checkout leases during startup and supervisor passes. */
+function reconcileAgentTaskCheckouts() {
+    return (0, task_store_1.withImmediateTaskStoreTransaction)(db => {
+        const timestamp = now();
+        const rows = db.prepare("SELECT * FROM agent_task_checkouts WHERE status = 'active' AND expires_at <> '' AND expires_at <= ? ORDER BY expires_at ASC").all(timestamp);
+        let recovered = 0;
+        for (const row of rows) {
+            const changed = db.prepare("UPDATE agent_task_checkouts SET status = 'expired', released_at = ? WHERE checkout_id = ? AND status = 'active'").run(timestamp, text(row.checkout_id));
+            if (!changed.changes)
+                continue;
+            recovered += 1;
+            recordAgentActivityInTransaction(db, {
+                taskId: text(row.task_id), runId: text(row.run_id), traceId: text(row.trace_id),
+                actorType: "system", actorId: "checkout-reconciler", eventType: "task.checkout_expired",
+                summary: "任务 Checkout 租约已过期并回收", payload: { checkoutId: text(row.checkout_id), expiresAt: text(row.expires_at) },
+                idempotencyKey: `checkout-expired:${text(row.checkout_id)}:${text(row.expires_at)}`,
+            });
+            const run = row.run_id ? db.prepare("SELECT status FROM agent_runs WHERE run_id = ?").get(text(row.run_id)) : null;
+            if (run && ["leased", "starting", "running", "recovering"].includes(text(run.status))) {
+                try {
+                    (0, agent_run_store_2.transitionAgentRunInTransaction)(db, text(row.run_id), "recovery_required", "Checkout 过期，等待安全恢复检查", {
+                        eventType: "run.checkout_expired", error: { code: "checkout_expired", checkoutId: text(row.checkout_id) },
+                        idempotencyKey: `checkout-run-recovery:${text(row.checkout_id)}:${text(row.expires_at)}`,
+                    });
+                }
+                catch { }
+            }
+        }
+        return { checked: rows.length, recovered };
+    });
+}
 function rowContext(row) { return { wakeId: text(row.wake_id), runId: text(row.run_id), nativeSessionId: text(row.native_session_id), baseContextChecksum: text(row.base_context_checksum), contextCursor: text(row.context_cursor), contextDeltaChecksum: text(row.context_delta_checksum), promptFingerprint: text(row.prompt_fingerprint), promptInputTokens: Number(row.prompt_input_tokens || 0), promptOutputTokens: Number(row.prompt_output_tokens || 0), reuseMode: (text(row.reuse_mode) || "fresh_session"), capturedAt: text(row.captured_at) }; }
 function saveAgentHeartbeatContext(context) { return (0, task_store_1.withImmediateTaskStoreTransaction)(db => { db.prepare(`INSERT INTO agent_heartbeat_context(wake_id, run_id, native_session_id, base_context_checksum, context_cursor, context_delta_checksum, prompt_fingerprint, prompt_input_tokens, prompt_output_tokens, reuse_mode, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(wake_id) DO UPDATE SET run_id=excluded.run_id, native_session_id=excluded.native_session_id, base_context_checksum=excluded.base_context_checksum, context_cursor=excluded.context_cursor, context_delta_checksum=excluded.context_delta_checksum, prompt_fingerprint=excluded.prompt_fingerprint, prompt_input_tokens=excluded.prompt_input_tokens, prompt_output_tokens=excluded.prompt_output_tokens, reuse_mode=excluded.reuse_mode, captured_at=excluded.captured_at`).run(context.wakeId, context.runId, context.nativeSessionId, context.baseContextChecksum, context.contextCursor, context.contextDeltaChecksum, context.promptFingerprint, context.promptInputTokens, context.promptOutputTokens, context.reuseMode, context.capturedAt); return context; }); }
 function getAgentHeartbeatContext(wakeId) { return (0, task_store_1.withSqliteTaskStore)(db => { const row = db.prepare("SELECT * FROM agent_heartbeat_context WHERE wake_id = ?").get(text(wakeId)); return row ? rowContext(row) : null; }); }
@@ -315,7 +421,7 @@ function evaluateAgentRunBudget(runId, additional = {}) {
         const hardStop = ratio >= policy.hardStopRatio;
         const warning = ratio >= policy.warningRatio;
         const level = hardStop ? "hard_stop" : warning ? "warning" : "";
-        if (level) {
+        if (level && additional.record !== false) {
             const incidentId = id("budget_incident");
             const inserted = db.prepare(`INSERT INTO agent_budget_incidents(
         incident_id, policy_id, run_id, task_id, level, token_used, cost_used_usd, token_limit, cost_limit_usd, reason, created_at
@@ -420,7 +526,7 @@ function releaseAgentTaskDependency(dependencyId, failed = false) {
     if (result?.shouldWake) {
         try {
             const target = result.task;
-            const wake = (0, agent_heartbeat_coordinator_1.requestAgentHeartbeat)({
+            const wake = require("./agent-execution-coordinator").requestPersistentAgentWake({
                 agentId: target.agentId,
                 scope: target.scope,
                 scopeId: target.scopeId,

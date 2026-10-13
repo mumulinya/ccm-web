@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runNativeTestAgentDispatchBranch = runNativeTestAgentDispatchBranch;
 // Behavior-freeze helper extracted from collaboration-cross-agents-part-02-part-02.ts.
 const crypto = __importStar(require("crypto"));
+const dispatch_native_verifier_ack_1 = require("./dispatch-native-verifier-ack");
+const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const evidence_projection_1 = require("../../test-agent/evidence-projection");
 const completion_gate_1 = require("../../test-agent/completion-gate");
 const hardening_policy_1 = require("../../test-agent/hardening-policy");
@@ -50,6 +52,34 @@ function outputReference(value) {
     };
 }
 async function runNativeTestAgentDispatchBranch(input) {
+    (0, dispatch_native_verifier_ack_1.acknowledgeNativeVerifierAssignment)({ envelope: input.communicationEnvelope, taskId: input.taskId, groupId: input.groupId, targetName: input.targetName, handoff: input.testAgentHandoffPayload });
+    const envelope = input.communicationEnvelope;
+    const policy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)(input.sourceTask?.contextPolicy?.effective || input.sourceTask?.context_policy?.effective || {});
+    const heartbeat = envelope?.messageId ? setInterval(() => {
+        try {
+            (0, agent_communication_v2_1.heartbeatAgentCommunication)(envelope.messageId, {
+                ...envelope, senderAgentId: envelope.receiverAgentId, receiverAgentId: envelope.senderAgentId,
+            }, { phase: "executing", policy });
+        }
+        catch { /* Supervisor retains authority over an interrupted verifier. */ }
+    }, policy.agentHeartbeatIntervalMs) : null;
+    heartbeat?.unref();
+    try {
+        await executeNativeTestAgentDispatch(input);
+        if (envelope?.messageId)
+            (0, agent_communication_v2_1.submitAgentCommunicationResult)(envelope.messageId, {
+                ...(input.state.targetReceipt || {}),
+                status: input.state.targetReceipt?.status || (input.state.targetSessionSucceeded ? "submitted" : "failed"),
+                summary: input.state.targetReceipt?.summary || "原生 TestAgent 已返回独立验收证据",
+                sideEffectState: "none",
+            });
+    }
+    finally {
+        if (heartbeat)
+            clearInterval(heartbeat);
+    }
+}
+async function executeNativeTestAgentDispatch(input) {
     const { mention, deps, ctx, targetName, groupId, taskId, streamRes, testAgentHandoffPayload, testAgentWorkDirPolicy, runtimeAttemptTimeoutMs, laneExecutionId, sourceTask, executionOrder, activeTaskSession, testAgentProjectWorkDir, tWorkDir, state, } = input;
     const { addTaskLog, appendTaskTimelineEvent, writeSse, runTestAgentCliJob, compactMemoryText, summarizeNativeTestAgentExecutionPlan, buildNativeTestAgentPlanBlockedReceipt, formatNativeTestAgentPlanBlockedOutput, transitionExecution, buildNativeTestAgentReceipt, uniqueStrings, runMainAgentPostReviewSpotCheck, buildPostReviewSpotCheckSummary, buildNativeTestAgentReviewSummary, formatNativeTestAgentOutput, getTestAgentHandoffReviewSubject, } = deps;
     const persistedHandoffPayload = (0, evidence_projection_1.projectTestAgentHandoffForPersistence)(testAgentHandoffPayload);
@@ -61,7 +91,8 @@ async function runNativeTestAgentDispatchBranch(input) {
     const testAgentRuntimeProgressContext = {
         scope: "group",
         scopeId: groupId,
-        exactSessionId: String(activeTaskSession?.exactSessionId || activeTaskSession?.exact_session_id
+        exactSessionId: String(sourceTask?.group_session_id || sourceTask?.groupSessionId
+            || activeTaskSession?.exactSessionId || activeTaskSession?.exact_session_id
             || activeTaskSession?.id || activeTaskSession?.session_id
             || sourceTask?.active_execution_session_id || sourceTask?.execution_session_id
             || sourceTask?.group_session_id || sourceTask?.groupSessionId || ""),
@@ -381,6 +412,13 @@ async function runNativeTestAgentDispatchBranch(input) {
             source: "test-agent",
         });
         const persistedNativeReport = (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(testAgentNativeReport);
+        if (taskId)
+            require("./collaboration-task-service").updateTask(taskId, { test_agent_review: {
+                    canAccept: targetReceipt.status === "done" && testAgentInvocationResult?.canAccept === true,
+                    invocation: (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(testAgentInvocationResult),
+                    report: persistedNativeReport,
+                    completionGate,
+                } });
         const persistedTargetReceipt = (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(targetReceipt);
         tOutput = formatNativeTestAgentOutput(targetName, persistedNativeReport, persistedTargetReceipt, persistedHandoffPayload);
         targetSessionSucceeded = targetReceipt.status === "done";

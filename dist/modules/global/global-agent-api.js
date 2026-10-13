@@ -53,6 +53,7 @@ const feishu_channel_1 = require("../collaboration/feishu-channel");
 const api_access_control_1 = require("../system/api-access-control");
 const session_compaction_command_hooks_1 = require("../../system/session-compaction-command-hooks");
 const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
+const global_source_summary_1 = require("../../system/global-source-summary");
 const global_terminal_delivery_1 = require("../../agents/global/global-terminal-delivery");
 const conversation_message_routing_1 = require("../../agents/conversation-message-routing");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
@@ -311,7 +312,8 @@ function createGlobalAgentApi(deps) {
                                     }, resolvedCandidate, "explicit_user_choice");
                                     return;
                                 }
-                                const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
+                                const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ messageId: turn.request_id, message: turn.message, workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
+                                require("../collaboration/task-session-source-discussion").saveTaskSourceDiscussion({ route, scope: "global", scopeId: "global", sessionId, messageId: turn.request_id, message: turn.message });
                                 if (route.decision === "needs_user")
                                     throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
                                 if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
@@ -320,6 +322,7 @@ function createGlobalAgentApi(deps) {
                             },
                         }));
                     (0, conversation_event_journal_1.appendConversationEvent)(turn.id, (0, conversation_attempt_1.conversationAttemptId)(turn), { type: "result", run: publicGlobalAgentRun(run) });
+                    require("../collaboration/task-session-source-discussion").saveTaskSourceDiscussionResult({ scope: "global", scopeId: "global", sessionId, messageId: turn.request_id, message: turn.message, reply: run.final_reply, replyId: run.id });
                     if (run.status === "paused")
                         break;
                     conversationTurnControl.settle({
@@ -385,6 +388,10 @@ function createGlobalAgentApi(deps) {
         globalWebTurnRecoveryTimer = null;
     };
     function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
+        if ((0, global_source_summary_1.handleGlobalSourceAccessApi)(pathname, req, res, parsed))
+            return true;
+        if (require('../../system/global-source-actions').handleGlobalSourceActionApi(pathname, req, res))
+            return true;
         if (pathname === "/api/global-agent/dispatch-targets" && req.method === "GET") {
             const principal = (0, api_access_control_1.requestAccessPrincipal)(req);
             const targets = (0, automation_session_bindings_1.listGlobalDispatchTargets)().filter((item) => {
@@ -413,8 +420,20 @@ function createGlobalAgentApi(deps) {
             return true;
         }
         if (pathname === "/api/global-agent/history" && req.method === "GET") {
+            if (parsed.query?.history_page === '1') {
+                void require('./global-agent').loadGlobalAgentHistoryPage(parsed.query)
+                    .then((store) => sendJson(res, { success: true, ...store }))
+                    .catch((error) => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.status || 409)));
+                return true;
+            }
             const store = loadGlobalAgentHistoryStore();
-            sendJson(res, { success: true, ...store });
+            try {
+                const result = parsed.query?.history_page === '1' ? require('../../system/conversation-history-page').projectGlobalHistoryPage(store, parsed.query) : store;
+                sendJson(res, { success: true, ...result });
+            }
+            catch (error) {
+                sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.status || 409));
+            }
             return true;
         }
         if (pathname === "/api/global-agent/sessions/delete" && req.method === "POST") {
@@ -1762,7 +1781,8 @@ function createGlobalAgentApi(deps) {
                                 }, explicitCandidate, "explicit_user_choice");
                                 return;
                             }
-                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
+                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ messageId: activeTurn.request_id, message, workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
+                            require("../collaboration/task-session-source-discussion").saveTaskSourceDiscussion({ route, scope: "global", scopeId: "global", sessionId, messageId: activeTurn.request_id, message });
                             if (route.decision === "needs_user") {
                                 throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
                             }
@@ -1780,6 +1800,7 @@ function createGlobalAgentApi(deps) {
                             }
                         },
                     });
+                    require("../collaboration/task-session-source-discussion").saveTaskSourceDiscussionResult({ scope: "global", scopeId: "global", sessionId, messageId: activeTurn.request_id, message, reply: run.final_reply, replyId: run.id });
                     if (isStream && !visibleTextEmitted && String(run.final_reply || "").trim()) {
                         emitCompleteGlobalReply(run.final_reply);
                     }

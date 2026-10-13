@@ -8,6 +8,7 @@ exports.refreshToolCatalogMessages = refreshToolCatalogMessages;
 exports.withoutPromptMetadata = withoutPromptMetadata;
 exports.composeToolPolicy = composeToolPolicy;
 const declared_answer_stream_1 = require("../system/declared-answer-stream");
+const deferred_tool_invocation_1 = require("../agents/deferred-tool-invocation");
 exports.CCM_TOOL_USAGE_POLICY_VERSION = 'ccm-agent-tool-usage-v3';
 // Tools encoded directly in the protocol already carry their full description
 // and schema. Extensions invoked through invoke_mcp still need their own text.
@@ -15,6 +16,9 @@ const DIRECT_SCHEMA_SERVERS = new Set([
     'ccm__workspace_readonly', 'ccm-group-readonly', 'ccm-project-readonly', 'ccm__global_native',
 ]);
 function renderToolCatalogLine(tool, name, surface) {
+    if (surface === 'native' && tool?.loadPolicy === 'search' && tool?.alwaysLoad !== true) {
+        return `- ${name}: ${String(tool.description || '')}; callVia=${(0, deferred_tool_invocation_1.deferredToolCallVia)(tool)}; parameter schema=${JSON.stringify(tool.inputSchema || {})}`;
+    }
     if (surface === 'native' && DIRECT_SCHEMA_SERVERS.has(String(tool?.server || '')))
         return `- ${name}`;
     const description = String(tool?.description || tool?.name || '');

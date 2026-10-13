@@ -16,6 +16,7 @@ export type ProviderContextCacheBinding = {
     cacheAffinity?: CcmAgentCacheAffinityV1 | null;
 };
 export type ProviderContextCacheOptions = ProviderContextCacheBinding & {
+    preserveWire?: boolean;
     /** Audit-only correlation key; never participates in cache identity. */
     auditTurnKey?: string;
     workspaceModelAudit?: any;
@@ -65,6 +66,7 @@ export type ProviderContextCacheOptions = ProviderContextCacheBinding & {
     publicProfileVersion?: string;
 };
 export type ContextPlanV2 = {
+    cacheEligibility?: import('./model-cache-eligibility').ModelCacheEligibility;
     schema: "ccm-context-plan-v2";
     version: 2;
     requestId: string;

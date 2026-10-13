@@ -68,7 +68,8 @@ export declare function selectRollingSessionMemoryForCompaction(value: any, snap
     memory: CcmRollingSessionMemoryV1;
     cursorIndex: number;
 };
-export declare function runRollingSessionMemoryExtraction(input: {
+export declare function runRollingSessionMemoryExtraction(...args: Parameters<typeof runRollingSessionMemoryExtractionMeasured>): Promise<CcmRollingSessionMemoryV1>;
+declare function runRollingSessionMemoryExtractionMeasured(input: {
     scope: SessionCompactionScope;
     exactSessionId: string;
     generation?: number;

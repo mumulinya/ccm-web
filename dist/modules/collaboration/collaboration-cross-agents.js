@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-cross-agents.ts — merged from 5 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -39,6 +38,10 @@ exports.executeMentionJob = executeMentionJob;
 exports.executeMentionJobTryA = executeMentionJobTryA;
 exports.handleExecuteMentionJobCatch = handleExecuteMentionJobCatch;
 exports.executeMentionJobTryB = executeMentionJobTryB;
+const dispatch_receipt_template_1 = require("../../agents/dispatch-receipt-template");
+const dispatch_communication_policy_1 = require("../../agents/dispatch-communication-policy");
+const dispatch_memory_transport_policy_1 = require("../../agents/dispatch-memory-transport-policy");
+// collaboration-cross-agents.ts — merged from 5 part files (behavior-freeze merge).
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const collaboration_cross_agents_helpers_1 = require("./collaboration-cross-agents-helpers");
@@ -349,6 +352,8 @@ async function executeMentionJob(mention, env) {
     }
     const implementationMessage = atMessage;
     const requiresAckPreflight = !!sourceTask
+        && (0, dispatch_receipt_template_1.dispatchRequiresAck)(sourceTask)
+        && (0, agent_communication_v2_1.readAgentCommunicationPolicy)(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {}).strictPreExecutionAckEnabled !== true
         && sourceTask.workflow_type === "daily_dev"
         && (taskRequiresCodeChanges(sourceTask) || taskRequiresVerification(sourceTask))
         && sourceTask.delivery_summary?.ack_gate_passed !== true
@@ -397,7 +402,7 @@ async function executeMentionJob(mention, env) {
             data: { targetName, ack_only: true },
         });
     }
-    const taskKey = `${sourceProject}->${targetName}:${normalizeMentionTask(atMessage)}`;
+    const taskKey = require("../../agents/dispatch-rework-execution-key").dispatchReworkMentionKey(sourceTask, `${sourceProject}->${targetName}:${normalizeMentionTask(atMessage)}`);
     if (seenMentions.has(taskKey)) {
         addGroupLog(groupId, "info", "collaboration", `跳过重复协作: ${sourceProject} -> ${targetName}`, { task: atMessage.substring(0, 160) });
         return outputs;
@@ -516,21 +521,6 @@ async function executeMentionJob(mention, env) {
         mention.provider_switch_session_binding = providerSwitchSessionBinding;
         mention.providerSwitchSessionBinding = providerSwitchSessionBinding;
     }
-    if (activeTaskSession) {
-        addTaskLog(taskId, "info", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复" : "创建"}任务级原生会话（${activeTaskSession.agentType}，第 ${activeTaskSession.turnCount + 1} 轮）`);
-        appendTaskTimelineEvent(taskId, {
-            type: activeTaskSession.turnCount > 0 ? "native_session_resume" : "native_session_open",
-            title: `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复原生会话" : "创建原生会话"}`,
-            detail: `${activeTaskSession.agentType} / ${activeTaskSession.resumeMode}`,
-            status: "active",
-            phase: "executing",
-            agent: targetName,
-            data: { sessionRecordId: activeTaskSession.id, nativeSessionId: activeTaskSession.nativeSessionId, turn: activeTaskSession.turnCount + 1 },
-        });
-        writeSse(streamRes, { type: "native_session", taskId, agent: targetName, session: { project: targetName, agentType: activeTaskSession.agentType, mode: activeTaskSession.resumeMode, turn: activeTaskSession.turnCount + 1, resumed: activeTaskSession.turnCount > 0 } });
-        if (sourceTask)
-            updateGroupTaskInlineStatus(sourceTask, "in_progress", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复原生会话" : "创建原生会话"}`);
-    }
     if (!nativeTestAgentDispatch && sourceTask && taskRequiresCodeChanges(sourceTask)) {
         const permission = await (0, conversation_permission_policy_1.authorizeProjectChildAgentStart)({ task: sourceTask, project: targetName, workDir: tWorkDir, agentType: tAgentType });
         if (!permission.allowed) {
@@ -566,6 +556,12 @@ async function executeMentionJob(mention, env) {
             failClosed: true,
         });
     tWorkDir = preparedWorkDir.workDir;
+    if (!nativeTestAgentDispatch)
+        activeTaskSession = await require("./task-session-continuation-launch").prepareTaskSessionContinuationLaunch(sourceTask, activeTaskSession, tWorkDir);
+    require("./task-session-launch-presentation").publishTaskSessionLaunch({ task: sourceTask, session: activeTaskSession, taskId, targetName, streamRes,
+        addTaskLog, appendTaskTimelineEvent, writeSse, updateInline: updateGroupTaskInlineStatus });
+    if (taskId && !nativeTestAgentDispatch)
+        require("../../agents/dispatch-acceptance-workspace").startDispatchAcceptanceAtWorkspace(taskId, targetName, tWorkDir);
     const laneExecutionId = taskId ? `${taskId}--${targetName}` : "";
     if (laneExecutionId) {
         ensureExecution({ task: sourceTask || { id: taskId, title: atMessage, target_project: targetName }, project: targetName, agent: targetName, workDir: tWorkDir, executionId: laneExecutionId });
@@ -658,7 +654,7 @@ async function executeMentionJob(mention, env) {
     ctx.setAgentActivity(targetName, "working", `被 ${sourceProject} @ 协作`, { tab: "groups", groupId }, 330000);
     ctx.broadcastPetSpeech(targetName, { role: "status", text: `${sourceProject} @ 我协作，正在处理...`, source: "group" });
     const requestedGroupSessionId = String(sourceTask?.group_session_id || sourceTask?.groupSessionId || "");
-    let parentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: requestedGroupSessionId });
+    let parentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: requestedGroupSessionId, taskId });
     let tContext = parentSessionContext.rendered;
     const childTaskText = buildChildAgentTaskText(atMessage, sourceTask);
     const memoryDeliveryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : 0;
@@ -836,7 +832,7 @@ async function executeMentionJob(mention, env) {
             verificationOnly: nativeTestAgentDispatch,
             anchorMessageId: targetAnchorMessageId,
             originMessageId,
-            strictPreExecutionAck: communicationPolicy.strictPreExecutionAckEnabled === true,
+            strictPreExecutionAck: (0, dispatch_receipt_template_1.dispatchRequiresAck)(sourceTask) && communicationPolicy.strictPreExecutionAckEnabled === true,
         },
         policy: sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {},
     };
@@ -910,7 +906,7 @@ async function executeMentionJob(mention, env) {
         });
     };
     let thirdPartyMemorySnapshot = buildGroupThirdPartyMemorySnapshot();
-    let memoryConsumptionChallenge = activeTaskSession && workerMemoryContext && !advisoryOnly && !nativeTestAgentDispatch
+    let memoryConsumptionChallenge = (0, dispatch_receipt_template_1.dispatchRequiresMemoryReceipt)(sourceTask) && activeTaskSession && workerMemoryContext && !advisoryOnly && !nativeTestAgentDispatch
         ? createMemoryContextConsumptionChallenge({
             groupId,
             groupSessionId: activeGroupSessionId,
@@ -960,6 +956,11 @@ async function executeMentionJob(mention, env) {
         && (runtimeToolContext.audit?.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
     const buildMemoryMcpReference = () => ({
         schema: "ccm-third-party-memory-mcp-reference-v1",
+        group_id: groupId,
+        group_session_id: activeGroupSessionId,
+        task_id: taskId,
+        target_project: targetName,
+        task_agent_session_id: activeTaskSession?.id || "",
         snapshot_id: thirdPartyMemorySnapshot?.id || "",
         snapshot_checksum: thirdPartyMemorySnapshot?.checksum || "",
         mode: thirdPartyMemorySnapshot?.mode || "",
@@ -1061,6 +1062,8 @@ async function executeMentionJob(mention, env) {
         agent_type: tAgentType,
         task_id: taskId,
         trace_id: sourceTask?.trace_id || "",
+        dispatch_profile: sourceTask?.dispatch_profile || sourceTask?.dispatch_profile_snapshot?.profile || sourceTask?.task_spec?.dispatch_profile_snapshot?.profile || "standard",
+        dispatch_profile_snapshot: sourceTask?.dispatch_profile_snapshot || sourceTask?.task_spec?.dispatch_profile_snapshot || null,
         task: sourceTask,
         group,
         dependsOn: typeof mention === "string" ? "" : String(mention.dependsOn || "").trim(),
@@ -1186,7 +1189,7 @@ ${childTaskText}
             if (compactResult?.success !== true || compactResult?.compacted !== true) {
                 throw new Error(compactResult?.error || compactResult?.reason || "formal_parent_compaction_not_committed");
             }
-            parentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: activeGroupSessionId });
+            parentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: activeGroupSessionId, taskId });
             if (parentSessionContext.canonicalSummary !== true || parentSessionContext.mode !== "canonical_summary_recent_raw") {
                 throw new Error("formal_parent_compaction_missing_canonical_summary");
             }
@@ -1213,7 +1216,7 @@ ${childTaskText}
             workerMemoryPacket = renderMemoryContextForWorker(workerHandoff?.worker_context_packet?.memory || workerMemoryContext);
             authoritativeWorkerMemoryPacket = workerMemoryPacket;
             thirdPartyMemorySnapshot = buildGroupThirdPartyMemorySnapshot();
-            memoryConsumptionChallenge = thirdPartyMemorySnapshot ? createMemoryContextConsumptionChallenge({
+            memoryConsumptionChallenge = (0, dispatch_receipt_template_1.dispatchRequiresMemoryReceipt)(sourceTask) && thirdPartyMemorySnapshot ? createMemoryContextConsumptionChallenge({
                 groupId,
                 groupSessionId: activeGroupSessionId,
                 taskId,
@@ -1228,6 +1231,7 @@ ${childTaskText}
                 workerMemoryPacket = renderMemoryContextForWorker(workerHandoff?.worker_context_packet?.memory || workerMemoryContext);
             }
             runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, {
+                ...(0, dispatch_communication_policy_1.dispatchCommunicationMcpIdentity)(communicationEnvelope),
                 taskId,
                 task: sourceTask,
                 toolAudit: toolContext.toolAudit,
@@ -1324,6 +1328,7 @@ ${childTaskText}
         const memoryReadBudgetTokens = Number(thirdPartyMemorySnapshot.requiredHydrationTokens || 0)
             + Math.max(0, Number(parentSessionCapacityGate.remaining_tokens_before_auto_compact || 0));
         runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, {
+            ...(0, dispatch_communication_policy_1.dispatchCommunicationMcpIdentity)(communicationEnvelope),
             taskId,
             task: sourceTask,
             toolAudit: toolContext.toolAudit,
@@ -1433,6 +1438,7 @@ ${childTaskText}
         }
     }
     let activeMemoryContextSnapshot = null;
+    let activeMemoryRuntimeContext = null;
     let activeMemoryContextDelivery = null;
     if (activeTaskSession) {
         const boundMemorySnapshot = bindTaskAgentMemoryContextSnapshot(activeTaskSession.id, {
@@ -1450,10 +1456,7 @@ ${childTaskText}
             memoryContext: workerMemoryContext,
             renderedHandoff: developmentContract,
             renderedPrompt: tPrompt,
-            renderedMemoryContext: String(groupMemoryBundle?.rendered_text || ""),
-            requireMemoryPromptInjectionProof: true,
-            requireTrustedMemoryPromptEnvelope: true,
-            requireProviderMemoryChannelAcknowledgement: true,
+            ...(0, dispatch_memory_transport_policy_1.dispatchMemoryTransportPolicy)(workerMemoryContext, groupMemoryBundle?.rendered_text),
             requireMemoryContextConsumptionReceipt: !!memoryConsumptionChallenge,
             memoryContextConsumptionChallenge: memoryConsumptionChallenge,
             runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
@@ -1479,6 +1482,7 @@ ${childTaskText}
             }
             activeTaskSession = boundMemorySnapshot.session || activeTaskSession;
             activeMemoryContextSnapshot = summarizeTaskAgentMemoryContextSnapshot(boundMemorySnapshot.snapshot);
+            activeMemoryRuntimeContext = boundMemorySnapshot.snapshot.context;
             if (typeof mention !== "string") {
                 mention.task_agent_memory_context_snapshot = activeMemoryContextSnapshot;
             }
@@ -1532,7 +1536,7 @@ ${childTaskText}
         dependencyOutputPacket, continuationNotice, testAgentHandoffPacket, projectExecutionBrief, worktreeNotice,
         atMessage, implementationMessage, requiresAckPreflight, testAgentWorkDirPolicy, memoryDeliveryAttemptSequence,
         globalMissionHandoff, globalMissionMemory, workerContinuation, capacityRevalidationPreparation,
-        capacityRevalidationCommitted, workerHandoffSummary, activeMemoryContextSnapshot, activeMemoryContextDelivery,
+        capacityRevalidationCommitted, workerHandoffSummary, activeMemoryContextSnapshot, activeMemoryRuntimeContext, activeMemoryContextDelivery,
         memoryConsumptionChallenge, projectResourcesConfig, collaborationInstructions, memberList, isContinuation,
         continuationUserLabel, isVerifierContinuation, isFreshVerifierContinuation, continuationOf, reworkRoute,
         routeStopResult, providerSwitchDecisionReceipt, tContext, preparedWorkDir, testAgentHandoffWarnings, continuationStrategy,
@@ -1593,6 +1597,7 @@ async function executeMentionJobTryA(mention, env) {
     let capacityRevalidationCommitted = L.capacityRevalidationCommitted !== false;
     let workerHandoffSummary = L.workerHandoffSummary || null;
     let activeMemoryContextSnapshot = L.activeMemoryContextSnapshot || null;
+    let activeMemoryRuntimeContext = L.activeMemoryRuntimeContext || null;
     let activeMemoryContextDelivery = L.activeMemoryContextDelivery || null;
     let memoryConsumptionChallenge = L.memoryConsumptionChallenge || null;
     const projectResourcesConfig = L.projectResourcesConfig || {};
@@ -1710,7 +1715,7 @@ async function executeMentionJobTryA(mention, env) {
             await (0, collaboration_cross_agents_part_02_part_02_native_test_1.runNativeTestAgentDispatchBranch)({
                 mention, deps, ctx, targetName, groupId, taskId, streamRes,
                 testAgentHandoffPayload, testAgentWorkDirPolicy, runtimeAttemptTimeoutMs,
-                laneExecutionId, sourceTask, executionOrder, activeTaskSession,
+                laneExecutionId, sourceTask, communicationEnvelope, executionOrder, activeTaskSession,
                 testAgentProjectWorkDir, tWorkDir, state: nativeState,
             });
             testAgentPlanDispatch = nativeState.testAgentPlanDispatch;
@@ -1746,7 +1751,7 @@ async function executeMentionJobTryA(mention, env) {
                         }) : null;
                     }
                     const retryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : memoryDeliveryAttemptSequence;
-                    memoryConsumptionChallenge = activeTaskSession && !advisoryOnly
+                    memoryConsumptionChallenge = (0, dispatch_receipt_template_1.dispatchRequiresMemoryReceipt)(sourceTask) && activeTaskSession && !advisoryOnly
                         ? createMemoryContextConsumptionChallenge({
                             groupId,
                             groupSessionId: activeGroupSessionId,
@@ -1758,6 +1763,7 @@ async function executeMentionJobTryA(mention, env) {
                         })
                         : null;
                     runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, activeRuntime, toolContext.allowedTools, streamRes, {
+                        ...(0, dispatch_communication_policy_1.dispatchCommunicationMcpIdentity)(communicationEnvelope),
                         taskId,
                         task: sourceTask,
                         toolAudit: toolContext.toolAudit,
@@ -1865,6 +1871,8 @@ async function executeMentionJobTryA(mention, env) {
                             agent_type: activeRuntime,
                             task_id: taskId,
                             trace_id: sourceTask?.trace_id || "",
+                            dispatch_profile: sourceTask?.dispatch_profile || sourceTask?.dispatch_profile_snapshot?.profile || sourceTask?.task_spec?.dispatch_profile_snapshot?.profile || "standard",
+                            dispatch_profile_snapshot: sourceTask?.dispatch_profile_snapshot || sourceTask?.task_spec?.dispatch_profile_snapshot || null,
                             task: sourceTask,
                             group,
                             dependsOn: typeof mention === "string" ? "" : String(mention.dependsOn || "").trim(),
@@ -1955,7 +1963,7 @@ async function executeMentionJobTryA(mention, env) {
                                 fallbackCompactResult?.error || fallbackCompactResult?.reason || "formal_parent_compaction_not_committed",
                             ]);
                         }
-                        const fallbackParentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: activeGroupSessionId });
+                        const fallbackParentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: activeGroupSessionId, taskId });
                         if (fallbackParentSessionContext.canonicalSummary !== true) {
                             return failChildDispatch("切换项目子 Agent 后未生成可信正式摘要，已阻止 Provider 调用", [
                                 `scope=${groupId}::${activeGroupSessionId}`,
@@ -1996,6 +2004,7 @@ async function executeMentionJobTryA(mention, env) {
                     }
                     activeMemoryContextDelivery = null;
                     activeMemoryContextSnapshot = null;
+                    activeMemoryRuntimeContext = null;
                     if (activeTaskSession) {
                         const reboundMemorySnapshot = bindTaskAgentMemoryContextSnapshot(activeTaskSession.id, {
                             taskId,
@@ -2012,10 +2021,7 @@ async function executeMentionJobTryA(mention, env) {
                             memoryContext: workerMemoryContext,
                             renderedHandoff: developmentContract,
                             renderedPrompt: tPrompt,
-                            renderedMemoryContext: String(groupMemoryBundle?.rendered_text || ""),
-                            requireMemoryPromptInjectionProof: true,
-                            requireTrustedMemoryPromptEnvelope: true,
-                            requireProviderMemoryChannelAcknowledgement: true,
+                            ...(0, dispatch_memory_transport_policy_1.dispatchMemoryTransportPolicy)(workerMemoryContext, groupMemoryBundle?.rendered_text),
                             requireMemoryContextConsumptionReceipt: !!memoryConsumptionChallenge,
                             memoryContextConsumptionChallenge: memoryConsumptionChallenge,
                             runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
@@ -2041,6 +2047,7 @@ async function executeMentionJobTryA(mention, env) {
                             }
                             activeTaskSession = reboundMemorySnapshot.session || activeTaskSession;
                             activeMemoryContextSnapshot = summarizeTaskAgentMemoryContextSnapshot(reboundMemorySnapshot.snapshot);
+                            activeMemoryRuntimeContext = reboundMemorySnapshot.snapshot.context;
                             if (taskId) {
                                 const fallbackSnapshotReplayRepairBindings = summarizeReplayRepairTimelineBindingsForEvent(mention, {
                                     targetName,
@@ -2149,7 +2156,7 @@ async function executeMentionJobTryA(mention, env) {
                 const activeProviderModel = String(activeTaskSession?.modelId || "").trim();
                 const activeProviderContractId = String(activeTaskSession?.providerContractId || "").trim();
                 const activeProviderRuntimeVersion = String(activeTaskSession?.providerRuntimeVersion || "").trim();
-                const activeMemoryBinding = activeMemoryContextSnapshot?.context?.group_session_memory_binding || {};
+                const activeMemoryBinding = activeMemoryRuntimeContext?.group_session_memory_binding || {};
                 const providerContextUsageBaseline = activeTaskSession?.providerContextUsageBaseline
                     && activeProviderModel
                     && normalizeAgentRuntimeId(activeTaskSession.providerContextUsageBaseline.provider || "") === normalizeAgentRuntimeId(activeRuntime)
@@ -2274,6 +2281,7 @@ async function executeMentionJobTryA(mention, env) {
                     }
                     activeTaskSession = finalGateBinding.session || activeTaskSession;
                     activeMemoryContextSnapshot = summarizeTaskAgentMemoryContextSnapshot(finalGateBinding.snapshot);
+                    activeMemoryRuntimeContext = finalGateBinding.snapshot.context;
                     if (typeof mention !== "string")
                         mention.task_agent_memory_context_snapshot = activeMemoryContextSnapshot;
                 }
@@ -2311,11 +2319,12 @@ async function executeMentionJobTryA(mention, env) {
                     error.finalDispatchPayloadGate = finalDispatchPayloadGate;
                     throw error;
                 }
-                const typedMemoryDispatchAdmission = admitChildTypedMemoryDelivery(groupMemoryBundle, {
+                const typedMemoryDispatchAdmission = (0, dispatch_memory_transport_policy_1.admitDispatchMemoryTransport)(groupMemoryBundle, {
+                    expectedIdentity: { groupId, groupSessionId: activeGroupSessionId, project: targetName, taskId, taskAgentSessionId: activeTaskSession?.id },
                     workerContextPacket: workerHandoff.worker_context_packet,
                     renderedPrompt: attemptPrompt,
                     attemptSequence: currentMemoryAttemptSequence,
-                });
+                }, admitChildTypedMemoryDelivery);
                 lastTypedMemoryDispatchAdmission = typedMemoryDispatchAdmission;
                 if (typedMemoryDispatchAdmission.admitted !== true) {
                     throw new Error(`类型化记忆 dispatch-time consume 门禁未通过：${typedMemoryDispatchAdmission.reason || "unknown"}`);
@@ -2365,7 +2374,7 @@ async function executeMentionJobTryA(mention, env) {
                         workerContextPacketId: workerHandoff.worker_context_packet?.packet_id || "",
                         memoryContextSnapshotId: activeMemoryContextSnapshot?.snapshot_id || "",
                         memoryContextSnapshotChecksum: activeMemoryContextSnapshot?.checksum || "",
-                        groupSessionMemoryBinding: activeMemoryContextSnapshot?.context?.group_session_memory_binding || null,
+                        groupSessionMemoryBinding: activeMemoryRuntimeContext?.group_session_memory_binding || null,
                         summaryCapsuleChecksum: workerHandoff.worker_context_packet?.post_turn_summary_delivery_capsule?.capsule_checksum || "",
                         typedMemoryDeliveryCapsule: workerHandoff.worker_context_packet?.typed_memory_delivery_capsule || null,
                         finalDispatchPayloadGate,
@@ -2401,7 +2410,7 @@ async function executeMentionJobTryA(mention, env) {
                 const communicationPolicy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {});
                 const targetAnchorMessageId = String(currentCommunication?.payload?.anchorMessageId || currentCommunication?.payload?.anchor_message_id || responseMessageId || `task-message:${taskId}:${targetName}`);
                 const originMessageId = String(currentCommunication?.payload?.originMessageId || currentCommunication?.payload?.origin_message_id || "");
-                if (communicationEnvelope?.messageId && communicationPolicy.strictPreExecutionAckEnabled === true) {
+                if (communicationEnvelope?.messageId && (0, dispatch_receipt_template_1.dispatchRequiresAck)(sourceTask) && communicationPolicy.strictPreExecutionAckEnabled === true) {
                     (0, agent_communication_v2_1.markAgentCommunicationRunnerStarted)(communicationEnvelope.messageId, { runtime: activeRuntime, runnerKind: "ack_preflight", summary: "正在进行执行前ACK预检" });
                     const preflightSnapshot = tWorkDir ? ctx.createFileChangeSnapshot(tWorkDir) : null;
                     await ctx.callAgent(targetName, [
@@ -2416,6 +2425,10 @@ async function executeMentionJobTryA(mention, env) {
                         mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
                         taskId,
                         executionId: `${laneExecutionId}:ack-preflight`,
+                        communicationMessageId: communicationEnvelope.messageId,
+                        communicationGeneration: communicationEnvelope.generation,
+                        communicationAttempt: communicationEnvelope.attempt,
+                        communicationLeaseId: communicationEnvelope.leaseId,
                         taskAgentSessionId: activeTaskSession?.id || "",
                         skipIndependentVerification: true,
                         background: true,
@@ -2443,6 +2456,10 @@ async function executeMentionJobTryA(mention, env) {
                     taskId,
                     executionId: laneExecutionId,
                     model: activeTaskSession?.modelId || "",
+                    communicationMessageId: communicationEnvelope?.messageId || "",
+                    communicationGeneration: communicationEnvelope?.generation || 0,
+                    communicationAttempt: communicationEnvelope?.attempt || 0,
+                    communicationLeaseId: communicationEnvelope?.leaseId || "",
                     taskAgentSessionId: activeTaskSession?.id || "",
                     runtimeProgressContext: communicationEnvelope ? {
                         taskId: communicationEnvelope.taskId,
@@ -2460,19 +2477,19 @@ async function executeMentionJobTryA(mention, env) {
                     } : null,
                     agentRuntimeStructuredProgressEnabled: communicationPolicy.agentRuntimeStructuredProgressEnabled,
                     agentProgressFallbackTimeoutMs: communicationPolicy.agentProgressFallbackTimeoutMs,
-                    trustedMemoryProviderChannelRequired: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
-                    trustedMemoryProviderAcknowledgementRequired: activeMemoryContextSnapshot?.context?.provider_memory_channel_acknowledgement_required === true,
-                    memoryContextConsumptionReceiptRequired: activeMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,
-                    memoryContextConsumptionChallenge: activeMemoryContextSnapshot?.context?.memory_context_consumption_challenge || null,
-                    trustedMemoryEnvelopeChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
-                    trustedMemoryEnvelopeSourceChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
+                    trustedMemoryProviderChannelRequired: activeMemoryRuntimeContext?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
+                    trustedMemoryProviderAcknowledgementRequired: activeMemoryRuntimeContext?.provider_memory_channel_acknowledgement_required === true,
+                    memoryContextConsumptionReceiptRequired: activeMemoryRuntimeContext?.memory_context_consumption_receipt_required === true,
+                    memoryContextConsumptionChallenge: activeMemoryRuntimeContext?.memory_context_consumption_challenge || null,
+                    trustedMemoryEnvelopeChecksum: activeMemoryRuntimeContext?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
+                    trustedMemoryEnvelopeSourceChecksum: activeMemoryRuntimeContext?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
                     ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
                     agentSession: activeTaskSession
                         ? { ...getTaskAgentSessionOptions(activeTaskSession), conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" }
                         : { conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" },
                     durableDispatch: typedMemoryDispatchAdmission.required === true
                         || capacityRevalidationPreparation?.required === true
-                        || activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
+                        || activeMemoryRuntimeContext?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
                     initialWorkEvents: [runtimeToolContext.workEvent],
                     onRunnerRequestCreated: (requestId) => {
                         targetRunnerRequestId = String(requestId || "");

@@ -37,6 +37,7 @@ exports.markConversationSearchIndexDirty = exports.CONVERSATION_SEARCH_SCHEMA = 
 exports.collapseGeneratedGlobalWelcomeSessions = collapseGeneratedGlobalWelcomeSessions;
 exports.collectConversationSearchSources = collectConversationSearchSources;
 exports.buildConversationSearchIndexSync = buildConversationSearchIndexSync;
+exports.buildConversationSearchIndexAsync = buildConversationSearchIndexAsync;
 exports.getConversationSearchIndexStatus = getConversationSearchIndexStatus;
 exports.startConversationSearchIndexBuild = startConversationSearchIndexBuild;
 exports.startConversationSearchIndexScheduler = startConversationSearchIndexScheduler;
@@ -244,70 +245,16 @@ function collectConversationSearchSources() {
     sources.push(sourceRow({ conversationType: "music", sessionId: memory_1.MUSIC_AGENT_SINGLETON_ID, sessionName: "音乐助手", sourceIdentity: `music:${memory_1.MUSIC_AGENT_SINGLETON_ID}` }, music.transcript || [], tasks));
     return sources;
 }
-function shortTerms(content) {
-    const chars = Array.from(String(content || "").toLowerCase().normalize("NFKC"));
-    const terms = new Set();
-    for (let index = 0; index < chars.length; index += 1) {
-        if (!/\s/u.test(chars[index]))
-            terms.add(chars[index]);
-        if (index + 1 < chars.length && !/\s/u.test(chars[index]) && !/\s/u.test(chars[index + 1]))
-            terms.add(`${chars[index]}${chars[index + 1]}`);
-        if (terms.size >= 12_000)
-            break;
-    }
-    return [...terms];
-}
 function buildConversationSearchIndexSync() {
-    const sources = collectConversationSearchSources();
-    const manifestChecksum = sha(sources.map(source => ({ identity: source.sourceIdentity, checksum: source.sourceChecksum, status: source.status })));
-    const db = (0, observability_database_1.getObservabilityDatabase)();
-    const active = db.prepare("SELECT * FROM conversation_search_generations_v3 WHERE active=1 ORDER BY completed_at DESC LIMIT 1").get();
-    if (active?.source_manifest_checksum === manifestChecksum && Number(active.message_count || 0) === sources.reduce((sum, source) => sum + source.records.length, 0)) {
-        (0, conversation_search_dirty_1.clearConversationSearchIndexDirty)({ checkedAt: new Date().toISOString(), reason: "unchanged" });
-        return { success: true, unchanged: true, generation: active.generation, message_count: active.message_count, source_count: active.source_count };
+    const steps = require('./conversation-search-builder').buildSearchGeneration(collectConversationSearchSources());
+    for (;;) {
+        const result = steps.next();
+        if (result.done)
+            return result.value;
     }
-    const generation = `csi_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`;
-    const now = new Date().toISOString();
-    db.prepare("INSERT INTO conversation_search_generations_v3(generation,status,active,created_at,updated_at,source_manifest_checksum) VALUES(?,?,?,?,?,?)")
-        .run(generation, "building", 0, now, now, manifestChecksum);
-    try {
-        (0, observability_database_1.withImmediateObservabilityTransaction)((tx) => {
-            const insertMessage = tx.prepare(`INSERT INTO conversation_search_messages_v3(
-        generation,row_id,conversation_type,source,source_label,project_id,group_id,group_name,session_id,session_name,message_id,message_index,role,agent,content,content_checksum,timestamp,task_id,task_title,attachments_json,source_identity,source_checksum,indexed_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-            const insertFts = tx.prepare("INSERT INTO conversation_search_fts_v3(row_id,generation,content) VALUES(?,?,?)");
-            const insertTerm = tx.prepare("INSERT OR IGNORE INTO conversation_search_short_terms_v3(generation,row_id,term) VALUES(?,?,?)");
-            const insertSource = tx.prepare("INSERT INTO conversation_search_sources_v3(generation,source_identity,scope_type,scope_id,session_id,source_checksum,message_count,status,error_summary,indexed_at) VALUES(?,?,?,?,?,?,?,?,?,?)");
-            let messageCount = 0;
-            for (const source of sources) {
-                insertSource.run(generation, source.sourceIdentity, source.scopeType, source.scopeId, source.sessionId, source.sourceChecksum, source.records.length, source.status, source.errorSummary, now);
-                for (const record of source.records) {
-                    insertMessage.run(generation, record.rowId, record.conversationType, record.source, record.sourceLabel, record.project, record.groupId, record.groupName, record.sessionId, record.sessionName, record.messageId, record.messageIndex, record.role, record.agent, record.content, sha(record.content), record.timestamp, record.taskId, record.taskTitle, JSON.stringify(record.attachments), record.sourceIdentity, record.sourceChecksum, now);
-                    insertFts.run(record.rowId, generation, record.content.normalize("NFKC").toLowerCase());
-                    for (const term of shortTerms(record.content))
-                        insertTerm.run(generation, record.rowId, term);
-                    messageCount += 1;
-                }
-            }
-            tx.prepare("UPDATE conversation_search_generations_v3 SET active=0 WHERE active=1").run();
-            tx.prepare("UPDATE conversation_search_generations_v3 SET status='ready',active=1,completed_at=?,updated_at=?,source_count=?,message_count=?,degraded_source_count=? WHERE generation=?")
-                .run(now, now, sources.length, messageCount, sources.filter(source => source.status === "degraded").length, generation);
-            const old = tx.prepare("SELECT generation FROM conversation_search_generations_v3 WHERE active=0 AND status='ready' ORDER BY completed_at DESC LIMIT -1 OFFSET 2").all();
-            for (const row of old) {
-                tx.prepare("DELETE FROM conversation_search_messages_v3 WHERE generation=?").run(row.generation);
-                tx.prepare("DELETE FROM conversation_search_fts_v3 WHERE generation=?").run(row.generation);
-                tx.prepare("DELETE FROM conversation_search_short_terms_v3 WHERE generation=?").run(row.generation);
-                tx.prepare("DELETE FROM conversation_search_sources_v3 WHERE generation=?").run(row.generation);
-                tx.prepare("DELETE FROM conversation_search_generations_v3 WHERE generation=?").run(row.generation);
-            }
-        });
-        (0, conversation_search_dirty_1.clearConversationSearchIndexDirty)({ indexedAt: now, generation });
-        return { success: true, generation, source_count: sources.length, message_count: sources.reduce((sum, source) => sum + source.records.length, 0), degraded_source_count: sources.filter(source => source.status === "degraded").length };
-    }
-    catch (error) {
-        db.prepare("UPDATE conversation_search_generations_v3 SET status='failed',updated_at=?,error_summary=? WHERE generation=?").run(new Date().toISOString(), String(error?.message || error).slice(0, 800), generation);
-        throw error;
-    }
+}
+async function buildConversationSearchIndexAsync() {
+    return require('./conversation-search-builder').buildSearchGenerationAsync(collectConversationSearchSources());
 }
 function getConversationSearchIndexStatus() {
     const db = (0, observability_database_1.getObservabilityDatabase)();
@@ -425,15 +372,13 @@ function conversationMessageWindow(input) {
     };
 }
 if (process.env.CCM_CONVERSATION_SEARCH_WORKER === "1" && process.argv.includes("--conversation-search-worker")) {
-    try {
-        const result = buildConversationSearchIndexSync();
+    void buildConversationSearchIndexAsync().then(result => {
         process.send?.({ success: true, result });
         process.exit(0);
-    }
-    catch (error) {
+    }).catch(error => {
         process.send?.({ success: false, error: error?.message || String(error) });
         console.error(error?.stack || error);
         process.exit(1);
-    }
+    });
 }
 //# sourceMappingURL=conversation-search-index.js.map

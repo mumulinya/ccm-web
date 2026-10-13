@@ -1,5 +1,4 @@
 "use strict";
-// Extracted functional module. The original entry remains a compatibility facade.
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -51,6 +50,11 @@ exports.reconcileTaskCollaborationState = reconcileTaskCollaborationState;
 exports.continueDailyDevTasksFromGaps = continueDailyDevTasksFromGaps;
 exports.retryTask = retryTask;
 exports.purgeArchivedTask = purgeArchivedTask;
+const task_intake_session_binding_1 = require("./task-intake-session-binding");
+const task_intake_session_binding_2 = require("./task-intake-session-binding");
+const task_session_boundary_1 = require("./task-session-boundary");
+const dispatch_profile_1 = require("../../agents/dispatch-profile");
+const dispatch_policy_upgrade_1 = require("./dispatch-policy-upgrade");
 const task_acceptance_service_1 = require("../../agents/task-acceptance-service");
 const acceptance_contract_1 = require("../../agents/acceptance-contract");
 const acceptance_ledger_1 = require("../../agents/acceptance-ledger");
@@ -76,6 +80,7 @@ const task_context_1 = require("../../tasks/task-context");
 const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 const task_conversation_projection_1 = require("../../system/task-conversation-projection");
 const task_workflow_model_1 = require("./task-workflow-model");
+const dispatch_profile_2 = require("../../agents/dispatch-profile");
 const task_run_store_1 = require("./task-run-store");
 const task_session_store_1 = require("./task-session-store");
 const group_orchestrator_1 = require("./group-orchestrator");
@@ -84,7 +89,6 @@ const logs_1 = require("./logs");
 const test_agent_runner_1 = require("./test-agent-runner");
 const artifact_retention_1 = require("../../test-agent/artifact-retention");
 const storage_1 = require("./storage");
-const sessions_1 = require("../projects/sessions");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const execution_kernel_1 = require("../../agents/execution-kernel");
@@ -155,63 +159,13 @@ function createTaskWithScopedIdentity(task) {
         ? authoritativeRequirement.acceptanceCriteria.map((item) => String(item?.description || "").trim()).filter(Boolean)
         : [];
     const explicitIdempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
-    const taskGroupId = String(task.group_id || task.groupId || "").trim();
-    const requestedProject = String(task.target_project || task.targetProject || "").trim();
-    const projectTask = !taskGroupId
-        && String(task.assign_type || task.assignType || "project").trim().toLowerCase() === "project"
-        && (0, db_1.getConfigs)().some((config) => String(config?.name || "") === requestedProject);
     const automationTaskSource = (0, automation_session_bindings_1.inferAutomationTaskSource)(task);
-    const bindingResolution = automationTaskSource && (taskGroupId || projectTask)
-        ? (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
-            scope: taskGroupId ? "group" : "project",
-            scopeId: taskGroupId || requestedProject,
-            source: automationTaskSource,
-            title: (0, memory_1.compactMemoryText)(task.title || "自动化任务", 80),
-            actor: String(task.request_origin || task.requestOrigin || "task-service"),
-        })
-        : null;
-    const taskGroupSession = taskGroupId
-        ? bindingResolution
-            ? { id: bindingResolution.snapshot.exactSessionId }
-            : (0, storage_1.resolveWritableGroupChatSession)(taskGroupId, task.group_session_id || task.groupSessionId || "", {
-                title: (0, memory_1.compactMemoryText)(task.title || "任务会话", 80),
-                createDedicated: !String(task.group_session_id || task.groupSessionId || "").trim(),
-                sessionKind: "automation",
-            })
-        : null;
-    const taskGroupSessionId = String(taskGroupSession?.id || "");
-    const requestedProjectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
-    const projectSession = projectTask && bindingResolution
-        ? { sessionId: bindingResolution.snapshot.exactSessionId }
-        : projectTask && !requestedProjectSessionId
-            ? (0, sessions_1.ensureProjectAutomationSession)(requestedProject, "", (0, memory_1.compactMemoryText)(task.title || "自动开发任务", 80))
-            : null;
-    // Public production routes validate supplied session ids before task creation. Preserve
-    // existing persisted/internal ids here so historical tasks can still be recovered.
-    const taskProjectSessionId = String(projectSession?.sessionId || requestedProjectSessionId || "");
-    const sourceConversationRef = task.source_conversation_ref || task.sourceConversationRef || null;
-    const targetConversationRef = task.target_conversation_ref || task.targetConversationRef || (taskGroupSessionId
-        ? {
-            scope: "group",
-            scopeId: taskGroupId,
-            exactSessionId: taskGroupSessionId,
-            messageId: task.target_message_id || task.targetMessageId || "",
-            title: (0, memory_1.compactMemoryText)(task.title || "群聊任务", 80),
-        }
-        : taskProjectSessionId && requestedProject
-            ? {
-                scope: "project",
-                scopeId: requestedProject,
-                exactSessionId: taskProjectSessionId,
-                messageId: task.target_message_id || task.targetMessageId || "",
-                title: (0, memory_1.compactMemoryText)(task.title || "项目任务", 80),
-            }
-            : null);
     const suppliedClientMessageId = (0, collaboration_1.compactFormText)(task.client_message_id || task.clientMessageId || task.workflow_meta?.intake?.client_message_id, "");
     const clientMessageId = suppliedClientMessageId
         || (explicitIdempotencyKey
             ? `legacy_${crypto.createHash("sha256").update(explicitIdempotencyKey).digest("hex").slice(0, 24)}`
             : `server_${crypto.randomUUID()}`);
+    const { taskGroupId, requestedProject, taskGroupSessionId, taskProjectSessionId, sourceConversationRef, targetConversationRef, exactSessionId } = (0, task_intake_session_binding_2.prepareTaskIntakeSessionBinding)({ ...task, client_message_id: clientMessageId });
     const suppliedContentChecksum = (0, collaboration_1.compactFormText)(task.requirement_content_hash || task.requirementContentHash || task.content_checksum || task.contentChecksum, "");
     const contentChecksum = suppliedContentChecksum || crypto.createHash("sha256").update(JSON.stringify({
         title: task.title || "",
@@ -226,8 +180,12 @@ function createTaskWithScopedIdentity(task) {
         project_session_id: taskProjectSessionId || null,
         client_message_id: clientMessageId,
         content_checksum: contentChecksum,
+        exact_session_id: exactSessionId,
     };
     const intakeIdentity = buildTaskIntakeIdentityV2(identityInput);
+    const legacyReplay = require("./task-intake-legacy-replay").findLegacyAutomaticIntakeReplay(tasks, task, intakeIdentity);
+    if (legacyReplay)
+        return { ...legacyReplay, deduplicated: true, duplicate_reason: "同一历史提交沿用原任务及执行身份" };
     const idempotencyKey = intakeIdentity ? `task-intake-v2:${intakeIdentity.checksum}` : explicitIdempotencyKey;
     if (idempotencyKey) {
         const existing = tasks.find((item) => String(item.idempotency_key || "") === idempotencyKey
@@ -237,6 +195,8 @@ function createTaskWithScopedIdentity(task) {
     }
     const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id || task.traceId, "task");
     const newTask = {
+        ...(0, dispatch_profile_1.captureDispatchIntakeSignals)(task),
+        task_session_boundary_version: 1,
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         title: task.title,
         description: task.description || "",
@@ -274,8 +234,8 @@ function createTaskWithScopedIdentity(task) {
         requirement_version: Math.max(1, Number(task.requirement_version || task.requirementVersion || 1)),
         requirement_item_key: task.requirement_item_key || task.requirementItemKey || "",
         source_ingestion: task.source_ingestion || task.sourceIngestion || null,
-        requires_code_changes: task.requires_code_changes ?? task.requiresCodeChanges ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
-        requires_verification: task.requires_verification ?? task.requiresVerification ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
+        requires_code_changes: task.requires_code_changes ?? task.requiresCodeChanges ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev" ? true : undefined),
+        requires_verification: task.requires_verification ?? task.requiresVerification ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev" ? true : undefined),
         requires_independent_review: task.requires_independent_review ?? task.requiresIndependentReview ?? false,
         requires_agent_qa: task.requires_agent_qa ?? task.requiresAgentQa ?? false,
         workflow_decision: task.workflow_decision || task.workflowDecision || task.intake_draft?.workflow_decision || task.intakeDraft?.workflowDecision || null,
@@ -283,13 +243,16 @@ function createTaskWithScopedIdentity(task) {
         orchestration_scope: task.orchestration_scope || task.orchestrationScope || "",
         project_session_id: taskProjectSessionId || null,
         automation_task_source: automationTaskSource || null,
-        automation_session_binding_snapshot: bindingResolution?.snapshot || null,
+        automation_session_binding_snapshot: null,
+        execution_session_binding_snapshot: { schema: "ccm-task-execution-session-v1", exactSessionId,
+            scope: taskGroupId ? "group" : requestedProject === "global-agent" ? "global" : "project",
+            scopeId: taskGroupId || requestedProject || "global-agent", resolution: sourceConversationRef ? "source_bound" : "task_owned" },
         source_conversation_ref: sourceConversationRef,
         target_conversation_ref: targetConversationRef,
         target_message_id: task.target_message_id || task.targetMessageId || null,
         project_main_run_id: task.project_main_run_id || task.projectMainRunId || null,
         request_origin: task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source || "task-dispatch",
-        task_session_creation_policy: (0, task_workflow_model_1.defaultTaskSessionCreationPolicy)(task),
+        task_session_creation_policy: "on_create",
         task_session_archive_policy: (0, task_workflow_model_1.resolveTaskSessionArchivePolicy)(task),
         origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
         parent_work_item_id: task.parent_work_item_id || task.parentWorkItemId || null,
@@ -309,6 +272,10 @@ function createTaskWithScopedIdentity(task) {
         acceptance_escalation: task.acceptance_escalation || task.acceptanceEscalation || null,
         acceptance_review_round: Math.max(0, Number(task.review_round_total || task.reviewRoundTotal || task.review_round || task.reviewRound || 0)),
         acceptance_policy_snapshot: task.acceptance_policy_snapshot || task.acceptancePolicySnapshot || null,
+        dispatch_profile: task.dispatch_profile || task.dispatchProfile || task.dispatch_profile_snapshot?.profile || null,
+        dispatch_profile_snapshot: task.dispatch_profile_snapshot || task.dispatchProfileSnapshot || task.task_spec?.dispatch_profile_snapshot || null,
+        dispatch_scope: (0, dispatch_profile_2.resolveDispatchScope)(task),
+        rework_max_rounds: Number(task.rework_max_rounds || task.reworkMaxRounds || 0) || null,
         parent_task_id: task.parent_task_id || task.parentTaskId || null,
         root_task_id: task.root_task_id || task.rootTaskId || null,
         retry_of_task_id: task.retry_of_task_id || task.retryOfTaskId || null,
@@ -337,6 +304,7 @@ function createTaskWithScopedIdentity(task) {
         automation_definition_id: task.automation_definition_id || task.automationDefinitionId || null,
         automation_definition_revision: task.automation_definition_revision || task.automationDefinitionRevision || null,
         automation_occurrence_id: task.automation_occurrence_id || task.automationOccurrenceId || null,
+        automation_routine_run_id: task.automation_routine_run_id || task.automationRoutineRunId || null,
         automation_scheduled_for: task.automation_scheduled_for || task.automationScheduledFor || null,
         dispatch_policy: task.dispatch_policy || task.dispatchPolicy || null,
         verification_policy: task.verification_policy || task.verificationPolicy || null,
@@ -349,12 +317,17 @@ function createTaskWithScopedIdentity(task) {
         source_channel: intakeIdentity?.source_channel || task.source_channel || task.sourceChannel || null,
         target_scope: intakeIdentity?.target_scope || task.target_scope || task.targetScope || null,
         target_id: intakeIdentity?.target_id || task.target_id || task.targetId || null,
-        exact_session_id: intakeIdentity?.exact_session_id || task.exact_session_id || task.exactSessionId || null,
+        exact_session_id: intakeIdentity?.exact_session_id || exactSessionId,
         intake_identity_checksum: intakeIdentity?.checksum || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
-    const executionPolicy = (0, task_workflow_model_1.resolveTaskExecutionPolicy)(newTask);
+    const dispatchProfile = (0, dispatch_profile_2.resolveDispatchProfileSnapshot)(newTask);
+    newTask.dispatch_profile = dispatchProfile.profile;
+    newTask.dispatch_profile_snapshot = dispatchProfile;
+    newTask.rework_max_rounds = (0, dispatch_profile_2.reworkLimitForDispatchProfile)(dispatchProfile.profile);
+    newTask.dispatch_scope = (0, dispatch_profile_2.resolveDispatchScope)(newTask);
+    const executionPolicy = (0, task_workflow_model_1.resolveTaskExecutionPolicy)({ ...newTask, workflow_policy_snapshot: null, task_spec: null, automation_definition: null });
     if ((0, task_workflow_model_1.normalizeTaskOrigin)(newTask) === "automation" && !newTask.automation_definition) {
         newTask.automation_definition = (0, task_workflow_model_1.buildAutomationDefinitionV1)({
             ...newTask,
@@ -457,7 +430,7 @@ function resolveRequirementEpicTarget(item, input, groups, configs) {
     if (requestedType === "project" && requestedId && !directProject)
         throw new Error(`子任务 ${item.item_key} 指定的项目不存在：${requestedId}`);
     if (directProject) {
-        const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+        const resolution = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
             scope: "project",
             scopeId: directProject.name,
             source: taskSource,
@@ -491,7 +464,7 @@ function resolveRequirementEpicTarget(item, input, groups, configs) {
     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
     if (!coordinator?.project)
         throw new Error(`群聊 ${group.name || group.id} 没有可执行的主 Agent`);
-    const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+    const resolution = (0, task_intake_session_binding_1.prepareTaskExecutionSession)({
         scope: "group",
         scopeId: group.id,
         source: taskSource,
@@ -1102,10 +1075,10 @@ function hasStructuredTaskAcceptanceEvidence(task, updates = {}) {
         || task?.global_mission_gate_passed === true
         || updates.terminal_decision?.gate_passed === true;
 }
-function validateTaskTerminalTransition(task, updates = {}) {
+function validateTaskTerminalTransition(task, updates = {}, options = {}) {
     if ((0, acceptance_contract_2.isAcceptanceProjectionTask)(task))
         return (0, acceptance_projection_service_1.validateProjectionTerminal)(task, updates, (0, db_1.loadTasks)());
-    const acceptanceError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(task, updates);
+    const acceptanceError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(task, updates, options);
     if (acceptanceError)
         return acceptanceError;
     const requestedStatus = String(updates.status || "").trim().toLowerCase();
@@ -1238,12 +1211,12 @@ function collectTerminalEvidence(task, updates = {}) {
 function buildTaskTerminalDecisionV2(task, updates = {}) {
     const projection = (0, acceptance_projection_service_1.projectionTerminalDecision)(task, updates, (0, db_1.loadTasks)());
     if (projection)
-        return projection;
+        return require("./task-blocked-acceptance").projectBlockedTaskDecision(projection, task, updates);
     const unified = (0, task_acceptance_service_1.unifiedTaskTerminalDecision)(task, updates);
     if (unified)
-        return unified;
+        return require("./task-blocked-acceptance").projectBlockedTaskDecision(unified, task, updates);
     const status = String(updates.status || "").trim().toLowerCase();
-    const acceptanceState = { done: "accepted", failed: "rejected", blocked: "blocked", cancelled: "cancelled" };
+    const acceptanceState = { done: "accepted", failed: "rejected", blocked: require("./task-blocked-acceptance").taskBlockedAcceptanceState(task, updates), cancelled: "cancelled" };
     const evidenceRecords = collectTerminalEvidence(task, updates);
     const acceptanceCriteria = updates.acceptanceCriteria || updates.acceptance_criteria || task?.acceptanceCriteria || task?.acceptance_criteria || task?.acceptance_evidence_plan || [];
     const acceptanceEvaluation = (0, unified_evidence_registry_1.buildAcceptanceEvaluation)(acceptanceCriteria, evidenceRecords);
@@ -1292,7 +1265,9 @@ function updateTask(id, updates, options = {}) {
     if (updates.status != null) {
         const requestedRaw = String(updates.status).trim().toLowerCase();
         const normalized = (0, task_lifecycle_1.normalizeTaskStatus)(requestedRaw);
-        const transition = options.allowCancelledRecovery && String(previousStatus || "").toLowerCase() === "cancelled" && normalized === "pending"
+        const newCycle = normalized === "pending" && options.developmentCycleSource
+            && require("./task-session-development-cycle").validateTaskDevelopmentCycleTransition(tasks[idx], updates, options.developmentCycleSource);
+        const transition = newCycle || options.allowCancelledRecovery && String(previousStatus || "").toLowerCase() === "cancelled" && normalized === "pending"
             ? { valid: true, issues: [] }
             : (0, task_lifecycle_1.validateTaskLifecycleTransition)(previousStatus, normalized, "任务");
         if (!transition.valid)
@@ -1303,7 +1278,7 @@ function updateTask(id, updates, options = {}) {
         }
         updates.status = normalized;
     }
-    const acceptanceUpdateError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(tasks[idx], updates);
+    const acceptanceUpdateError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(tasks[idx], updates, { developmentCycleSource: options.developmentCycleSource });
     if (acceptanceUpdateError)
         throw new Error(acceptanceUpdateError);
     const workItemId = String(updates.workItemId || updates.work_item_id || tasks[idx].work_item_id || tasks[idx].workItemId || "").trim();
@@ -1334,7 +1309,11 @@ function updateTask(id, updates, options = {}) {
     const previousCollaborationState = tasks[idx].collaboration_state || {};
     let pendingTimelineMutation = null;
     const policyValidation = (0, task_acceptance_policy_1.validateTaskAcceptancePolicySnapshot)(tasks[idx]);
-    if (policyValidation.valid && policyValidation.snapshot) {
+    const frozenDispatchProfile = tasks[idx]?.dispatch_profile_snapshot || tasks[idx]?.task_spec?.dispatch_profile_snapshot;
+    const dispatchUpgrade = frozenDispatchProfile ? (0, dispatch_policy_upgrade_1.prepareDispatchPolicyUpgrade)(tasks[idx], updates) : null;
+    if (dispatchUpgrade)
+        updates = { ...updates, ...dispatchUpgrade };
+    if (!dispatchUpgrade && policyValidation.valid && policyValidation.snapshot) {
         const policy = policyValidation.snapshot;
         const requestedMode = updates.acceptance_mode || updates.acceptanceMode;
         const requestedEnabled = updates.test_agent_enabled ?? updates.testAgentEnabled;
@@ -1356,14 +1335,14 @@ function updateTask(id, updates, options = {}) {
     }
     tasks[idx].trace_id = (0, reliability_ledger_1.ensureTraceId)(tasks[idx].trace_id || updates.trace_id || updates.traceId, "task");
     const requestedStatus = String(updates.status || "").toLowerCase();
-    const terminalValidationError = validateTaskTerminalTransition(tasks[idx], updates);
+    const terminalValidationError = validateTaskTerminalTransition(tasks[idx], updates, { developmentCycleSource: options.developmentCycleSource });
     if (terminalValidationError)
         throw new Error(terminalValidationError);
     const terminalAcceptance = {
         done: "accepted",
         completed: "accepted",
         failed: "rejected",
-        blocked: "blocked",
+        blocked: require("./task-blocked-acceptance").taskBlockedAcceptanceState(tasks[idx], updates),
         cancelled: "cancelled",
     };
     if (terminalAcceptance[requestedStatus]) {
@@ -1558,6 +1537,7 @@ function updateTask(id, updates, options = {}) {
             task: tasks[idx],
             position: idx,
             expectedTaskRevision: currentRevision,
+            repairProjectionOnReplay: options.repairProjectionOnReplay === true,
             ...pendingTimelineMutation,
             buildContext: (taskForContext, previousContext) => (0, task_context_1.refreshTaskContext)({ ...taskForContext, task_context: previousContext }, pendingTimelineMutation.contextReason),
         });
@@ -1578,6 +1558,8 @@ function updateTask(id, updates, options = {}) {
         tasks[idx].task_context = (0, task_context_1.refreshTaskContext)(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
     }
     (0, db_1.saveTasks)(tasks);
+    if (dispatchUpgrade)
+        (0, dispatch_policy_upgrade_1.auditDispatchPolicyUpgrade)(tasks[idx], previousTaskSnapshot);
     if (tasks[idx].task_run?.run_id) {
         try {
             (0, task_run_store_1.recordTaskRunFromTask)(tasks[idx]);
@@ -1592,10 +1574,12 @@ function updateTask(id, updates, options = {}) {
         const materialized = (0, task_session_store_1.materializeTaskSession)(tasks[idx]);
         if (materialized.created || materialized.available) {
             tasks[idx].task_session = {
-                available: true,
+                available: (0, task_session_boundary_1.taskSessionOpeningState)(tasks[idx]).open,
                 session_id: materialized.session?.session_id || tasks[idx].task_session?.session_id || "",
                 materialized_at: materialized.session?.materialized_at || tasks[idx].task_session?.materialized_at || "",
             };
+            if ((0, task_session_boundary_1.taskSessionOpeningState)(tasks[idx]).open && tasks[idx].task_session_boundary_version)
+                tasks[idx].task_session_opened_at ||= new Date().toISOString();
             (0, db_1.saveTasks)(tasks);
         }
     }
@@ -1647,6 +1631,14 @@ function updateTask(id, updates, options = {}) {
         }
         catch (error) {
             console.warn(`[Epic 依赖解锁] 调度失败 ${tasks[idx].parent_task_id}:`, error?.message || error);
+        }
+    }
+    if (tasks[idx].automation_routine_run_id) {
+        try {
+            require("../../agents/dispatch-routine-consistency").syncDispatchRoutineTask(tasks[idx]);
+        }
+        catch (error) {
+            console.warn(`[Routine 对账] ${id}: ${error?.code || "projection_deferred"}`);
         }
     }
     return tasks[idx];
@@ -1753,7 +1745,7 @@ function continueDailyDevTasksFromGaps(ctx, options = {}) {
         results,
     };
 }
-function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "") {
+function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "", options = {}) {
     const activeTask = (0, db_1.loadTasks)().find((task) => task.id === id);
     if (activeTask && (0, collaboration_1.isTaskRunningInMemory)(activeTask)) {
         return { success: false, status: 409, error: "任务正在执行中，请等待本轮结束后再重试" };
@@ -1761,6 +1753,14 @@ function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "") {
     const current = (0, db_1.loadTasks)().find(t => t.id === id);
     if (!current)
         return { success: false, status: 404, error: "任务不存在" };
+    if (options.automaticRecovery) {
+        const recovery = require("./dispatch-automatic-recovery").requestAutomaticDispatchRecovery(id, reason);
+        if (recovery)
+            return recovery;
+    }
+    const retryIdentityBlock = require("../../agents/dispatch-task-retry-identity").inspectExplicitTaskDispatchRetry(current, parentRunId);
+    if (retryIdentityBlock)
+        return retryIdentityBlock;
     if (current.status === "done")
         return { success: false, status: 409, error: "已完成任务不能重试" };
     if (String(current.acceptance_state || current.status || "").toLowerCase() === "recovery_required") {
@@ -1824,6 +1824,7 @@ function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "") {
             ? [...(Array.isArray(current.delivery_history) ? current.delivery_history : []), previousDelivery].slice(-20)
             : (Array.isArray(current.delivery_history) ? current.delivery_history : []),
         retry_count: retryCount,
+        ...require("../../agents/dispatch-task-retry-identity").buildExplicitTaskDispatchRetryIdentity(current, nextRun, retryCount),
         ...(nextRun ? { task_run: nextRun, run_id: nextRun.run_id, execution_attempt: nextRun.attempt } : {}),
         ...(nextRun ? { active_run_id: nextRun.run_id, parent_run_id: nextRun.parent_run_id } : {}),
         last_retry_at: new Date().toISOString(),

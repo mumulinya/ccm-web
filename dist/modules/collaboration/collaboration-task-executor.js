@@ -1,15 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeTask = executeTask;
+const dispatch_rework_evidence_1 = require("./dispatch-rework-evidence");
+const dispatch_rework_reservation_1 = require("./dispatch-rework-reservation");
+const dispatch_receipt_template_1 = require("../../agents/dispatch-receipt-template");
 const acceptance_contract_1 = require("../../agents/acceptance-contract");
 const acceptance_projection_service_1 = require("../../agents/acceptance-projection-service");
 // Mechanically extracted from collaboration.ts; keep orchestration behavior unchanged.
 const group_session_model_context_1 = require("./group-session-model-context");
 const project_test_agent_gate_1 = require("../projects/project-test-agent-gate");
+const dispatch_review_gap_1 = require("./dispatch-review-gap");
 const rework_policy_1 = require("./rework-policy");
 const test_agent_review_policy_1 = require("./test-agent-review-policy");
 const provider_task_circuit_breaker_1 = require("./provider-task-circuit-breaker");
 const main_agent_self_verification_1 = require("./main-agent-self-verification");
+const dispatch_receipt_workspace_1 = require("../../agents/dispatch-receipt-workspace");
 const task_acceptance_policy_1 = require("./task-acceptance-policy");
 const db_1 = require("../../core/db");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
@@ -22,6 +27,7 @@ const task_conversation_links_1 = require("../../system/task-conversation-links"
 const development_source_grounding_1 = require("../../agents/development-source-grounding");
 const project_analysis_index_1 = require("../../system/project-analysis-index");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const dispatch_profile_1 = require("../../agents/dispatch-profile");
 function groupPlanningProjectRefs(task) {
     return Array.from(new Set([
         ...(Array.isArray(task?.workflow_decision?.targetRefs) ? task.workflow_decision.targetRefs : []),
@@ -43,6 +49,11 @@ function usesFrozenWorkflow(task) {
     return !!frozenVerification(task);
 }
 function shouldUseIndependentTestAgent(task, acceptancePolicy) {
+    const dispatchProfile = (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task);
+    if (dispatchProfile.profile === "light")
+        return false;
+    if (dispatchProfile.profile === "strict")
+        return true;
     const verification = frozenVerification(task);
     if (verification)
         return verification === "test_agent";
@@ -262,7 +273,7 @@ async function executeTask(task, ctx, deps) {
     const configs = getConfigs();
     // New tasks carry a frozen workflow policy. Historical records without it
     // intentionally keep the legacy execution and acceptance behavior.
-    const workflowPolicy = task?.workflow_policy_snapshot || null;
+    let workflowPolicy = task?.workflow_policy_snapshot || null;
     const acceptancePolicyResult = (0, task_acceptance_policy_1.resolveTaskAcceptancePolicy)(task);
     const acceptancePolicy = acceptancePolicyResult.snapshot;
     if ((0, acceptance_contract_1.isAcceptanceProjectionTask)(task)) {
@@ -381,7 +392,7 @@ async function executeTask(task, ctx, deps) {
             reason: task.title,
             nextAction: "主 Agent 拆分任务并协调子 Agent",
         });
-        const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(task.group_id, { groupSessionId: groupSessionIdForTask(task) }).rendered;
+        const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(task.group_id, { groupSessionId: groupSessionIdForTask(task), taskId: task.id }).rendered;
         let planningSource = await buildGroupMainPlanningSourceContext(group, message, configs, {
             targetProjects: groupPlanningProjectRefs(task),
             maxRounds: 3,
@@ -467,6 +478,7 @@ async function executeTask(task, ctx, deps) {
             projectSourceEvidence: planningSourceSummary,
             extraInstructions: [
                 requirementEpicExecutionBoundary(task),
+                task.dispatch_profile_snapshot?.profile === "strict" ? "严格任务还必须返回 implementationPlan（ccm-implementation-plan-v2）：包含 goal/context/approach、files[{project,path}]、steps[{id,title,objective,projects,dependsOn,files,acceptance,verification}] 和 verification[{project,command,expected,acceptanceCriteria}]。只引用本轮实际读取的路径；每个验收标准需绑定可观察的检查，不得发明验证命令或证据。缺少可编译计划时服务器不会启动开发 Agent。" : "",
                 "本轮是源码驱动规划。必须引用注入的当前源码证据，生成明确的目标、边界、跨项目数据关系、依赖顺序和可验收工作项；不得把需求分析或跨项目架构设计转交给开发 Agent。开发 Agent只负责本项目内的当前源码复查、实现、验证和结果说明。",
             ].filter(Boolean).join("\n\n"),
         });
@@ -767,6 +779,13 @@ async function executeTask(task, ctx, deps) {
             validMentions = validMentions.filter((item) => !isTestAgentAssignment(item));
             planAssignments = planAssignments.filter((item) => !isTestAgentAssignment(item));
         }
+        if (task.dispatch_profile_snapshot?.profile === "strict") {
+            const prepared = require("../../agents/dispatch-preparation").compilePreparedDispatch({ task,
+                plan: coordinatorResult.analysis?.implementationPlan, source: planningSource,
+                agentType: task.agent_type || "codex" });
+            task = updateTask(task.id, { generation: prepared.contract.acceptanceContract.generation, plan_dispatch_contract: prepared.contract,
+                workflow_meta: { ...(task.workflow_meta || {}), plan_dispatch_contract: prepared.contract } }) || task;
+        }
         const sandboxRehearsal = buildTaskSandboxRehearsal(task, group, coordinatorResult, planAssignments, validMentions, dispatchPolicy);
         const tasksForRehearsal = loadTasks();
         const rehearsalTaskIndex = tasksForRehearsal.findIndex((item) => item.id === task.id);
@@ -884,6 +903,8 @@ async function executeTask(task, ctx, deps) {
         const info = getConfigInfo(config.path);
         let workDir = info[0]?.workDir;
         const agentType = info[0]?.agent || "claudecode";
+        task = await require("../../agents/dispatch-preparation").prepareDirectDispatchTask(task, workDir, agentType);
+        workflowPolicy = task?.workflow_policy_snapshot || null;
         if (taskRequiresCodeChanges(task)) {
             pauseBoundary("dispatching");
             const permission = await (0, conversation_permission_policy_1.authorizeProjectChildAgentStart)({ task, project: task.target_project, workDir, agentType });
@@ -930,6 +951,7 @@ async function executeTask(task, ctx, deps) {
             failClosed: true,
         });
         workDir = preparedWorkDir.workDir;
+        require("../../agents/dispatch-acceptance-workspace").startDispatchAcceptanceAtWorkspace(task.id, task.target_project, workDir);
         const executionVerificationCommands = resolveExecutionVerificationCommands(task, task.target_project);
         const executionPacket = (0, execution_kernel_1.buildDevelopmentTaskPacket)(task, {
             project: task.target_project,
@@ -998,7 +1020,7 @@ async function executeTask(task, ctx, deps) {
             `${task.title}\n${task.description || ""}`,
             reworkInstruction ? `[${coordinationReworkInstruction ? "群聊主 Agent 验收返工要求" : "TestAgent 返工要求"}]\n${reworkInstruction}` : "",
         ].filter(Boolean).join("\n\n"), task);
-        const directGroupSessionId = groupSessionIdForTask(task);
+        const directGroupSessionId = task.group_id ? groupSessionIdForTask(task) : "";
         const directProjectSessionId = String(task.project_session_id || task.projectSessionId || "");
         const directContinuity = directGroupSessionId
             ? (0, agent_sessions_1.buildTaskAgentContinuityBinding)({ scope: "group", scopeId: String(task.group_id || ""), exactSessionId: directGroupSessionId, project: task.target_project, agentType })
@@ -1013,6 +1035,7 @@ async function executeTask(task, ctx, deps) {
             agentType,
             continuity: directContinuity,
         });
+        directTaskSession = await require("./task-session-continuation-launch").prepareTaskSessionContinuationLaunch(task, directTaskSession, preparedWorkDir.workDir);
         markGroupCoordinationDependencyStarted(task, preparedWorkDir, directTaskSession);
         const directMemoryDeliveryAttemptSequence = directTaskSession ? directTaskSession.turnCount + 1 : 0;
         const communicationScope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
@@ -1058,8 +1081,7 @@ async function executeTask(task, ctx, deps) {
                     verificationRequired: task.requires_verification !== false,
                     anchorMessageId: targetAnchorMessageId,
                     originMessageId,
-                    strictPreExecutionAck: communicationPolicy.strictPreExecutionAckEnabled === true
-                        && workflowPolicy?.dispatch !== "direct_worker",
+                    strictPreExecutionAck: (0, dispatch_receipt_template_1.dispatchRequiresAck)(task) && communicationPolicy.strictPreExecutionAckEnabled === true,
                 },
                 policy: task.contextPolicy?.effective || task.context_policy?.effective || task.context_policy_effective || {},
             });
@@ -1146,6 +1168,7 @@ async function executeTask(task, ctx, deps) {
         const directMemoryReceiptCoordinatorProject = directMemoryReceiptGroup ? String(getCoordinatorMember(directMemoryReceiptGroup)?.project || "") : "";
         const directMemoryConsumptionChallenge = directGroupMemoryContext
             && directTaskSession
+            && task.dispatch_profile_snapshot?.profile !== "light"
             && task.target_project !== directMemoryReceiptCoordinatorProject
             ? createMemoryContextConsumptionChallenge({
                 groupId: task.group_id || "",
@@ -1243,6 +1266,8 @@ async function executeTask(task, ctx, deps) {
             agent_type: agentType,
             task_id: task.id,
             trace_id: task.trace_id || "",
+            dispatch_profile: task.dispatch_profile || task.dispatch_profile_snapshot?.profile || task.task_spec?.dispatch_profile_snapshot?.profile || "standard",
+            dispatch_profile_snapshot: task.dispatch_profile_snapshot || task.task_spec?.dispatch_profile_snapshot || null,
             task,
             group: task.group_id ? loadGroups().find((item) => item.id === task.group_id) || null : null,
             worker_context_packet: task.mission_handoff?.worker_context_packet || null,
@@ -1253,12 +1278,13 @@ async function executeTask(task, ctx, deps) {
             continuation: directContinuation,
             handoff: directWorkerHandoff,
         });
-        const message = `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${developmentContract}\n\n${worktreeNotice}\n\n📋 执行任务：${task.title}\n${directTaskText}
+        const directDispatchProfile = String(task.dispatch_profile || task.dispatch_profile_snapshot?.profile || task.task_spec?.dispatch_profile_snapshot?.profile || "standard").toLowerCase();
+        let message = `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${developmentContract}\n\n${worktreeNotice}\n\n📋 执行任务：${task.title}\n${directTaskText}
 
 ${requirementEpicExecutionBoundary(task)}
 
 请直接完成开发工作。${directMemoryConsumptionChallenge ? "\n开始任何源码修改或命令前，必须先调用内部 MCP `ccm__knowledge_context` 的 `acknowledge_memory_context`，使用当前上下文中提供的 challenge_id、snapshot_id、snapshot_checksum、context_plan_checksum 和 confirmation_cursor；调用成功后再继续执行。" : ""}
-完成后必须追加 CCM_AGENT_RECEIPT 结构化回执，格式如下：
+${(0, dispatch_receipt_template_1.renderDispatchReceiptTemplate)(directDispatchProfile, `完成后必须追加 CCM_AGENT_RECEIPT 结构化回执，格式如下：
 \`\`\`json
 {
   "ccm_receipt": true,
@@ -1280,7 +1306,7 @@ ${requirementEpicExecutionBoundary(task)}
   "needs": ["会阻塞任务、需要用户或其他 Agent 补充的内容；没有填空数组"],
   "advisoryNeeds": ["不阻塞交付的可选建议；没有填空数组"]
 }
-\`\`\``;
+\`\`\``)}`;
         let directMemoryContextSnapshot = null;
         if (directTaskSession) {
             const bound = bindTaskAgentMemoryContextSnapshot(directTaskSession.id, {
@@ -1334,11 +1360,13 @@ ${requirementEpicExecutionBoundary(task)}
         let directSessionSucceeded = true;
         let directSessionError = "";
         if (directTaskSession?.turnCount > 0) {
-            const detail = `${task.target_project} 正在恢复任务级原生会话，从上一轮失败点继续返工`;
+            const nativeResume = getTaskAgentSessionOptions(directTaskSession).resumeSession;
+            const detail = nativeResume ? `${task.target_project} 已通过续接检查，继续任务级原生会话`
+                : `${task.target_project} 使用新原生会话和已保存任务上下文；${directTaskSession.taskSessionContinuation?.reason || "当前 Runtime 无可验证续接会话"}`;
             addTaskLog(task.id, "info", detail);
             appendTaskTimelineEvent(task.id, {
                 type: "direct_project_native_session_resume",
-                title: `${task.target_project} 继续同一会话返工`,
+                title: nativeResume ? `${task.target_project} 继续原生会话` : `${task.target_project} 重新建立原生会话`,
                 detail,
                 status: "active",
                 phase: "reworking",
@@ -1445,7 +1473,7 @@ ${requirementEpicExecutionBoundary(task)}
             communicationHeartbeat.unref?.();
         };
         try {
-            if (communicationEnvelope?.messageId && communicationPolicy.strictPreExecutionAckEnabled === true) {
+            if (communicationEnvelope?.messageId && (0, dispatch_receipt_template_1.dispatchRequiresAck)(task) && communicationPolicy.strictPreExecutionAckEnabled === true) {
                 (0, agent_communication_v2_1.markAgentCommunicationRunnerStarted)(communicationEnvelope.messageId, {
                     runtime: agentType,
                     runnerKind: "ack_preflight",
@@ -1612,7 +1640,7 @@ ${requirementEpicExecutionBoundary(task)}
                 agentProgressFallbackTimeoutMs: communicationPolicy.agentProgressFallbackTimeoutMs,
                 trustedMemoryProviderChannelRequired: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
                 trustedMemoryProviderAcknowledgementRequired: directMemoryContextSnapshot?.context?.provider_memory_channel_acknowledgement_required === true,
-                memoryContextConsumptionReceiptRequired: directMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,
+                memoryContextConsumptionReceiptRequired: task.dispatch_profile_snapshot?.profile !== "light" && directMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,
                 memoryContextConsumptionChallenge: directMemoryContextSnapshot?.context?.memory_context_consumption_challenge || null,
                 trustedMemoryEnvelopeChecksum: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
                 trustedMemoryEnvelopeSourceChecksum: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
@@ -1882,7 +1910,7 @@ ${requirementEpicExecutionBoundary(task)}
             const adoptedRecoveryWorkspace = recoveryTask?.recovery_preflight?.checks?.sideEffectsReconciled === true
                 && Number(recoveryTask?.recovery_preflight?.changedFileCount || 0) > 0;
             const currentFiles = Array.isArray(fileChanges?.files) ? fileChanges.files : [];
-            const merged = [...currentFiles, ...recoveredFiles, ...(adoptedRecoveryWorkspace ? workspaceFiles : [])].filter((item, index, items) => {
+            const merged = [...currentFiles, ...(0, dispatch_receipt_workspace_1.filterDispatchReceiptWorkspaceEvidence)(task, recoveredFiles, currentFiles, adoptedRecoveryWorkspace), ...(adoptedRecoveryWorkspace ? workspaceFiles : [])].filter((item, index, items) => {
                 const filePath = String(item?.path || item?.file || "").replace(/\\/g, "/");
                 return filePath && items.findIndex((candidate) => String(candidate?.path || candidate?.file || "").replace(/\\/g, "/") === filePath) === index;
             });
@@ -2021,7 +2049,7 @@ ${requirementEpicExecutionBoundary(task)}
                     review_round: reviewRound,
                     review_round_total: reviewCycle.total + (reviewRound - reviewCycle.round),
                     review_cycle_id: reviewCycleId,
-                    rework_exhausted: null,
+                    ...(task.dispatch_profile_snapshot ? {} : { rework_exhausted: null }),
                     status_detail: `TestAgent 正在执行第 ${reviewRound}/${maxAcceptanceReviewRounds} 轮独立验收`,
                 });
                 appendTaskTimelineEvent(task.id, {
@@ -2076,6 +2104,10 @@ ${requirementEpicExecutionBoundary(task)}
             if (!projectReview.canAccept) {
                 const detail = reworkProblems.join("；") || projectReview.error || "TestAgent 验收未通过";
                 if (reviewDecision.route === "implementation_rework" && reviewRound < maxAcceptanceReviewRounds) {
+                    const reworkTask = loadTasks().find((row) => row.id === task.id) || task;
+                    const reservation = (0, dispatch_rework_reservation_1.reservePersistentAutomaticRework)(task.id, (0, dispatch_review_gap_1.dispatchReviewGapIdentity)(projectReview, reworkProblems), await (0, dispatch_rework_evidence_1.captureDispatchReworkEvidence)(reworkTask, workDir));
+                    if (!reservation.allowed)
+                        return { ...result, status: "blocked", detail: reservation.update.status_detail, requeue: false, review: projectReview, ...coordination };
                     updateTask(task.id, {
                         status: "pending",
                         acceptance_state: "reworking",
@@ -2117,7 +2149,7 @@ ${requirementEpicExecutionBoundary(task)}
                     review_round_total: reviewCycle.total + (reviewRound - reviewCycle.round),
                     status_detail: reviewDecision.reason || detail,
                     ...(reviewDecision.route === "implementation_rework"
-                        ? (0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "project_direct", rounds: reviewRound })
+                        ? (0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "project_direct", rounds: reviewRound, task: loadTasks().find(row => row.id === task.id) || task })
                         : {}),
                 });
                 return { ...result, status: "blocked", detail: `${reviewDecision.reason}：${detail}`, review: projectReview, testAgent: projectReview, ...coordination };
@@ -2251,7 +2283,7 @@ ${requirementEpicExecutionBoundary(task)}
         const acceptedResult = requiresProjectReview
             ? { ...result, status: "waiting_user", acceptance_state: "awaiting_user_acceptance", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过，等待用户验收" : task.workflow_type === "agent_coordination_dependency" ? "协作验收通过，等待用户验收" : "项目主 Agent 自验通过，等待用户验收", receipt: authoritativeReceipt, review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
             : result;
-        transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : task.workflow_type === "agent_coordination_dependency" ? "协作依赖已交付，等待群聊主 Agent 合并" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
+        transitionExecution(task.id, ccmRevalidated ? "reviewing" : "failed", ccmRevalidated ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : task.workflow_type === "agent_coordination_dependency" ? "协作依赖已交付，等待群聊主 Agent 合并" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
             green,
             receipt: authoritativeReceipt,
             fileChanges,

@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-runtime-runtime-tools.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -96,7 +95,10 @@ exports.buildExecutionDashboard = buildExecutionDashboard;
 exports.continueDailyDevTasksFromGaps = continueDailyDevTasksFromGaps;
 exports.continueTaskWithMessage = continueTaskWithMessage;
 exports.retryTask = retryTask;
-const rework_policy_1 = require("./rework-policy");
+const task_session_development_cycle_1 = require("./task-session-development-cycle");
+// collaboration-runtime-runtime-tools.ts — merged from 2 part files (behavior-freeze merge).
+const dispatch_rework_reservation_1 = require("./dispatch-rework-reservation");
+const dispatch_rework_evidence_1 = require("./dispatch-rework-evidence");
 const task_replay_plan_1 = require("./task-replay-plan");
 const task_recovery_orchestrator_1 = require("../../tasks/task-recovery-orchestrator");
 const fs = __importStar(require("fs"));
@@ -489,14 +491,7 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId) {
 }
 const GLOBAL_AGENT_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
 function normalizeGlobalDispatchHistoryMessages(messages = []) {
-    return messages
-        .filter((item) => item && ["user", "assistant"].includes(String(item.role || "")) && String(item.content || "").trim())
-        .map((item) => ({
-        role: String(item.role),
-        content: String(item.content || "").slice(0, 8000),
-        timestamp: item.timestamp || new Date().toISOString(),
-    }))
-        .slice(-80);
+    return require("./task-global-history-messages").normalizeTaskGlobalHistoryMessages(messages);
 }
 function loadGlobalDispatchHistoryStore() {
     try {
@@ -513,15 +508,9 @@ function loadGlobalDispatchHistoryStore() {
 }
 function writeGlobalDispatchHistoryStore(store) {
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
-    store.sessions = sessions
-        .map((session) => ({
-        ...session,
-        messages: normalizeGlobalDispatchHistoryMessages(session.messages || []),
-        updatedAt: session.updatedAt || new Date().toISOString(),
-    }))
-        .filter((session) => session.id && session.messages.length > 0)
-        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
-        .slice(0, 30);
+    // A task notification only changes its exact source conversation. It must
+    // not prune empty chats, unrelated histories or older source sessions.
+    store.sessions = sessions;
     fs.mkdirSync(path.dirname(GLOBAL_AGENT_HISTORY_FILE), { recursive: true });
     const temp = `${GLOBAL_AGENT_HISTORY_FILE}.${process.pid}.${Date.now()}.${crypto.randomBytes(2).toString("hex")}.tmp`;
     if (fs.existsSync(GLOBAL_AGENT_HISTORY_FILE)) {
@@ -631,20 +620,13 @@ function appendGlobalDirectDispatchContinuationToHistory(task, previousStatus = 
     const content = buildGlobalDirectDispatchContinuationMessage(task);
     const store = loadGlobalDispatchHistoryStore();
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
-    let session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-        session = {
-            id: sessionId,
-            name: "全局 Agent 会话",
-            source: "web",
-            createdAt: new Date().toISOString(),
-            messages: [],
-        };
-        sessions.unshift(session);
-    }
+    const session = require("./task-global-history-messages").resolveTaskGlobalNotificationSession(task, sessions, sessionId);
+    if (!session)
+        return false;
     session.messages = normalizeGlobalDispatchHistoryMessages([
         ...(session.messages || []),
-        { role: "assistant", content, timestamp: new Date().toISOString() },
+        { id: `task-global-continuation:${task.id}:${key}`, task_id: task.id, trace_id: task.trace_id,
+            role: "assistant", content, timestamp: new Date().toISOString() },
     ]);
     session.updatedAt = new Date().toISOString();
     store.sessions = sessions;
@@ -684,20 +666,13 @@ function appendGlobalDirectDispatchCompletionToHistory(task, previousStatus = ""
     const memoryWriteback = recordGlobalDirectDispatchCompletionMemory(task, meta, content);
     const store = loadGlobalDispatchHistoryStore();
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
-    let session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-        session = {
-            id: sessionId,
-            name: "全局 Agent 会话",
-            source: "web",
-            createdAt: new Date().toISOString(),
-            messages: [],
-        };
-        sessions.unshift(session);
-    }
+    const session = require("./task-global-history-messages").resolveTaskGlobalNotificationSession(task, sessions, sessionId);
+    if (!session)
+        return false;
     session.messages = normalizeGlobalDispatchHistoryMessages([
         ...(session.messages || []),
-        { role: "assistant", content, timestamp: new Date().toISOString() },
+        { id: `task-global-completion:${task.id}:${task.active_run_id || task.run_id || task.revision}`, task_id: task.id, trace_id: task.trace_id,
+            role: "assistant", content, timestamp: new Date().toISOString() },
     ]);
     session.updatedAt = new Date().toISOString();
     store.sessions = sessions;
@@ -739,20 +714,13 @@ function appendGlobalDirectDispatchRollbackToHistory(task, previousStatus = "") 
     const memoryWriteback = recordGlobalDirectDispatchRollbackMemoryFromTask(task, meta, content);
     const store = loadGlobalDispatchHistoryStore();
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
-    let session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-        session = {
-            id: sessionId,
-            name: "全局 Agent 会话",
-            source: "web",
-            createdAt: new Date().toISOString(),
-            messages: [],
-        };
-        sessions.unshift(session);
-    }
+    const session = require("./task-global-history-messages").resolveTaskGlobalNotificationSession(task, sessions, sessionId);
+    if (!session)
+        return false;
     session.messages = normalizeGlobalDispatchHistoryMessages([
         ...(session.messages || []),
-        { role: "assistant", content, timestamp: new Date().toISOString() },
+        { id: `task-global-rollback:${task.id}:${task.active_run_id || task.run_id || task.revision}`, task_id: task.id, trace_id: task.trace_id,
+            role: "assistant", content, timestamp: new Date().toISOString() },
     ]);
     session.updatedAt = new Date().toISOString();
     store.sessions = sessions;
@@ -1068,7 +1036,7 @@ function getTaskGapFingerprint(task) {
     return require("./collaboration-acceptance").getTaskGapFingerprint(task);
 }
 function isAutomaticGapContinuationSource(source) {
-    return /(gap_rework|autopilot_gap|watchdog_gap|automatic_gap)/i.test(String(source || ""));
+    return /(gap_rework|autopilot_gap|watchdog_gap|automatic_gap|mission_supervisor_failure_rework)/i.test(String(source || ""));
 }
 function canAutoContinueTaskGaps(task) {
     return require("./collaboration-acceptance").canAutoContinueTaskGaps(task);
@@ -1384,6 +1352,7 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     }
     const source = String(options.source || "user");
     const explicitCompletedRework = continuationKind === "revise_goal"
+        || options.authorizationValid === true && requestedContinuationKind === "supplement"
         || /(?:targeted_rework|completed_task_rework|explicit_rework)/i.test(source);
     const awaitingUserAcceptance = current.status === "waiting_user" && current.acceptance_state === "awaiting_user_acceptance";
     if (completedBeforeContinuation && !explicitCompletedRework && !awaitingUserAcceptance) {
@@ -1465,6 +1434,11 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     }
     const currentTask = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === taskId);
     const currentlyRunning = currentTask ? (0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(currentTask) : collaboration_runtime_task_queue_1.runningTaskIds.has(taskId);
+    if (automaticGapContinuation && currentTask?.dispatch_profile_snapshot && currentlyRunning) {
+        // An automatic repair is a new bounded execution after the writer stops;
+        // it cannot hide inside a live follow-up and bypass its shared allowance.
+        return { success: true, status: 202, deferred: true, queued: false, task: currentTask, reason: "automatic_rework_waits_for_writer" };
+    }
     const continuationRouteKind = continuationKind === "revise_goal"
         ? "revise_existing_task"
         : completedBeforeContinuation || requiresInterruptedRecovery
@@ -1612,7 +1586,7 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         updates.plan_revision_required = true;
         updates.last_goal_revision_at = followup.time;
     }
-    if (current.status === "done") {
+    if (completedBeforeContinuation) {
         const reopened = (0, agent_sessions_1.reopenTaskAgentSessions)(taskId, "用户在同一任务中继续修改，恢复已验收会话");
         updates.reopened_session_count = reopened.length;
     }
@@ -1620,9 +1594,16 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         updates.auto_gap_continue_count = Number(current.auto_gap_continue_count || 0) + 1;
         updates.last_auto_gap_continue_at = followup.time;
     }
-    // 任何形式的继续/返工都开启新的验收周期：清零本周期轮次，保留累计值。
-    // 不清零的话，监工的 gate_gap_rework 重发会让新一轮从上限起步，TestAgent 一失败即 blocked。
-    Object.assign(updates, (0, rework_policy_1.buildReviewCycleResetUpdate)(current, `继续任务：${source}`));
+    // Continuing or recovering a task preserves its cycle; only explicit retry resets it.
+    if (automaticGapContinuation && current.dispatch_profile_snapshot && !currentlyRunning) {
+        const reservation = (0, dispatch_rework_reservation_1.reservePersistentAutomaticRework)(taskId, gapItems.map(item => String(item.reason || item.title || item.id || item)), (0, dispatch_rework_evidence_1.captureDispatchReworkEvidenceSync)(current));
+        if (!reservation.allowed) {
+            const blocked = reservation.task;
+            if (operationKey)
+                (0, reliability_ledger_1.completeIdempotency)("task-continue", `${taskId}:${operationKey}`, { blocked: true, reason: reservation.reason });
+            return { success: false, status: 409, needs_user: true, error: blocked.status_detail, task: blocked };
+        }
+    }
     // 用户在计划书给出后继续追加要求：把追加内容并入计划书（新增步骤 + 修订历史）。
     // 等待确认阶段的计划要求重新确认；已执行中的任务并入后继续，不打断执行。
     const awaitingPlanConfirmation = current.intake_state === "awaiting_confirmation";
@@ -1647,7 +1628,24 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
             }
         }
     }
-    const task = updateTask(taskId, updates);
+    const developmentCycleSource = source === "task-session-follow-up" ? source
+        : completedBeforeContinuation && explicitCompletedRework && !machineGeneratedContinuation && options.authorizationValid === true
+            ? "authorized-completed-follow-up" : "";
+    let task;
+    try {
+        if (current.task_session_boundary_version && !automaticGapContinuation && !internalContinuation && source !== "task-session-follow-up") {
+            require("./task-session-store").appendTaskSessionSourceMessage(current.id, {
+                id: `authorized-followup:${operationKey}`, role: "user", content: followup.message, timestamp: followup.time,
+            }, { ...(current.source_conversation_ref || {}), kind: "authorized_task_continuation" });
+        }
+        Object.assign(updates, (0, task_session_development_cycle_1.taskSessionDevelopmentCycle)(current, developmentCycleSource, currentlyRunning, updates));
+        task = updateTask(taskId, updates, { developmentCycleSource: !currentlyRunning ? developmentCycleSource : undefined });
+    }
+    catch (error) {
+        if (operationKey)
+            (0, reliability_ledger_1.failIdempotency)("task-continue", `${taskId}:${operationKey}`, error);
+        throw error;
+    }
     let interruptionResult = null;
     if (shouldInterruptCurrentRun) {
         try {
@@ -1769,7 +1767,7 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         throw error;
     }
 }
-function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "") {
-    return require("./collaboration-task-service").retryTask(id, ctx, reason, autoExecute, parentRunId);
+function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "", options = {}) {
+    return require("./collaboration-task-service").retryTask(id, ctx, reason, autoExecute, parentRunId, options);
 }
 //# sourceMappingURL=collaboration-runtime-runtime-tools.js.map

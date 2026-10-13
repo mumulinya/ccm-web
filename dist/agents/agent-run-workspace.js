@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.captureAgentRunGitEvidence = captureAgentRunGitEvidence;
+exports.captureAgentRunGitEvidenceAsync = captureAgentRunGitEvidenceAsync;
 exports.captureAgentRunWorkspaceEvidence = captureAgentRunWorkspaceEvidence;
 exports.verifyAgentRunWorkspaceEvidence = verifyAgentRunWorkspaceEvidence;
 const crypto = __importStar(require("crypto"));
@@ -65,6 +66,11 @@ function captureAgentRunGitEvidence(workspacePath) {
     const diff = `${git(workspacePath, ["diff", "--no-ext-diff", "--binary", "HEAD"])}\n${git(workspacePath, ["diff", "--cached", "--no-ext-diff", "--binary"])}`;
     return { repositoryRoot: root, headCommit, changedFiles, diffChecksum: hash(diff), capturedAt: new Date().toISOString() };
 }
+async function captureAgentRunGitEvidenceAsync(workspacePath) {
+    if (!text(workspacePath))
+        return null;
+    return require('../system/readonly-performance-service').collectGitEvidenceOffThread(workspacePath);
+}
 async function captureAgentRunWorkspaceEvidence(run) {
     const rawWorkspacePath = text(run.workspacePath);
     if (!rawWorkspacePath)
@@ -74,6 +80,9 @@ async function captureAgentRunWorkspaceEvidence(run) {
         throw new Error("AgentRun 工作区不存在");
     try {
         const snapshot = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(workspacePath);
+        const gitEvidence = await captureAgentRunGitEvidenceAsync(workspacePath).catch(error => {
+            throw Object.assign(new Error("工作区 Git 证据不可验证"), { code: "CCM_WORKSPACE_EVIDENCE_UNAVAILABLE", cause: error });
+        });
         return {
             runId: run.runId,
             workspacePath,
@@ -84,9 +93,12 @@ async function captureAgentRunWorkspaceEvidence(run) {
             indexChecksum: text(snapshot.index_checksum),
             contentChecksum: text(snapshot.worktree_content_checksum),
             capturedAt: text(snapshot.captured_at) || new Date().toISOString(),
+            gitEvidence,
         };
     }
-    catch {
+    catch (error) {
+        if (error?.code === 'CCM_WORKSPACE_EVIDENCE_UNAVAILABLE')
+            throw error;
         const stat = fs.statSync(workspacePath);
         return {
             runId: run.runId,

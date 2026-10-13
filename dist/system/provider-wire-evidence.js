@@ -71,14 +71,11 @@ function compareProviderWire(previous, current) {
             changedOrUnverifiedTokensEstimate: appendVerified ? 0 : totalEstimate - confirmedEstimate,
             estimationOnly: true, contentStored: false,
         },
-        prefixLayers: current.prefixLayers ? {
-            ...current.prefixLayers,
-            firstChangedSegment: previous?.prefixLayers?.workspacePublicChecksum !== current.prefixLayers.workspacePublicChecksum ? 'workspace_public'
-                : previous?.prefixLayers?.scopePrivateChecksum !== current.prefixLayers.scopePrivateChecksum ? 'scope_private' : null,
-            reuseClassification: !previous?.prefixLayers ? 'no_comparable_request'
-                : previous.prefixLayers.workspacePublicChecksum !== current.prefixLayers.workspacePublicChecksum ? 'stable_prefix_changed'
-                    : previous.prefixLayers.scopePrivateChecksum !== current.prefixLayers.scopePrivateChecksum ? 'tool_schema_changed' : 'public_prefix_same',
-        } : undefined,
+        prefixLayers: current.prefixLayers ? (0, provider_prefix_layers_1.compareProviderPrefixLayers)(previous?.prefixLayers, current.prefixLayers, {
+            fullPrefixPreserved: appendVerified,
+            toolDefinitionChanged: !!previous && previous.protocol === current.protocol
+                && previousPrefix.find(part => part.kind === 'tools')?.checksum !== currentPrefix.find(part => part.kind === 'tools')?.checksum,
+        }) : undefined,
         firstChangedSegment: first?.kind || null,
         firstDivergenceKind: comparison,
         estimationOnly: true, providerReuseReason: 'unconfirmed', contentStored: false };

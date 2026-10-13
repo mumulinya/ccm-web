@@ -47,3 +47,4 @@ export declare function globalWriteAuthorizationAllowsTool(input: {
     reason: string;
 };
 export declare function revokeGlobalWriteAuthorization(run: GlobalAgentRun, at?: string): any;
+export declare function clarificationRevokesGlobalAuthorization(run: GlobalAgentRun, message: string, options: any): boolean;

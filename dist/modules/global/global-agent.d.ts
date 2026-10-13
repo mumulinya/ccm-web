@@ -15,6 +15,7 @@ export declare function runGlobalAgentHistorySyncSelfTest(): {
     };
 };
 declare function loadGlobalAgentHistoryStore(): any;
+export declare function loadGlobalAgentHistoryPage(query: any): Promise<any>;
 export declare function upsertGlobalAgentConversationTaskMessage(sessionId: string, message: any): {
     updated: boolean;
     reason: string;
@@ -100,11 +101,7 @@ export declare function buildGlobalAgentGroupMemoryModelContext(bundle: any, opt
 export declare function buildAgenticContext(query?: string, sessionId?: string, options?: any): any;
 export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<any>;
 export declare function startGlobalMissionSupervisionForServer(ctx: CollabCtx): any;
-export declare function bootstrapGlobalAgentMemoryForServer(): {
-    total: any;
-    migrated: number;
-    results: any[];
-};
+export declare function bootstrapGlobalAgentMemoryForServer(): any;
 export declare function stopGlobalMissionSupervisionForServer(): void;
 type FeishuTurnCommand = {
     kind: "normal" | "steer" | "queue" | "stop";

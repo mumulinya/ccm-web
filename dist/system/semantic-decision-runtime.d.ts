@@ -2,7 +2,7 @@ import { type LlmTokenUsage } from "../modules/collaboration/group-orchestrator-
 import { type CcmAgentCacheAffinityV1 } from "./agent-cache-affinity";
 import type { ModelRetryProfileId } from "./model-call-retry";
 export type SemanticDecisionScope = "global" | "group" | "project" | "music" | "test_agent";
-export type SemanticDecisionKind = "workflow" | "music_intent" | "music_selection" | "agent_collaboration_route" | "test_agent_plan" | "memory_extraction" | "acceptance_projection" | "main_agent_self_verification" | "requirement_intake_quality" | "work_report_summary";
+export type SemanticDecisionKind = "task_session_message" | "workflow" | "music_intent" | "music_selection" | "agent_collaboration_route" | "test_agent_plan" | "memory_extraction" | "acceptance_projection" | "main_agent_self_verification" | "requirement_intake_quality" | "work_report_summary";
 export interface SemanticDecisionIdentityV1 {
     scope: SemanticDecisionScope;
     scopeId: string;

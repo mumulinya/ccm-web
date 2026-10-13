@@ -138,6 +138,8 @@ function isPersistedToolResult(value) {
     return !!value && typeof value === "object" && value.schema === exports.PERSISTED_TOOL_RESULT_SCHEMA && value.contentStored === true;
 }
 function shouldSkipToolResultPersist(toolName, value) {
+    if (value?.schema === 'ccm-global-project-source-result-v1' && value?.contentStored === false)
+        return true;
     if (SKIP_PERSIST_TOOLS.test(String(toolName || "")))
         return true;
     if (isPersistedToolResult(value) || isPersistedToolResult(value?.observation))

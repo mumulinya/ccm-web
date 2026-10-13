@@ -41,6 +41,7 @@ exports.startWebConversationTurnRecoveryForServer = startWebConversationTurnReco
 exports.stopWebConversationTurnRecoveryForServer = stopWebConversationTurnRecoveryForServer;
 exports.handleConversationTurnControlApi = handleConversationTurnControlApi;
 exports.runConversationTurnControlSelfTest = runConversationTurnControlSelfTest;
+const task_dispatch_reconciliation_1 = require("./task-dispatch-reconciliation");
 const crypto = __importStar(require("crypto"));
 const conversation_turn_observation_api_1 = require("./conversation-turn-observation-api");
 const project_queued_turn_request_1 = require("./project-queued-turn-request");
@@ -60,7 +61,6 @@ const project_session_agent_binding_1 = require("../modules/projects/project-ses
 const storage_1 = require("../modules/collaboration/storage");
 const api_access_control_1 = require("../modules/system/api-access-control");
 const conversation_event_journal_1 = require("./conversation-event-journal");
-const task_conversation_binding_1 = require("./task-conversation-binding");
 const STORE_FILE = process.env.CCM_CONVERSATION_TURN_FILE || path.join(utils_1.CCM_DIR, "conversation-turn-control.json");
 const MAX_RECORDS = 800;
 const TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -468,11 +468,13 @@ class ConversationTurnControlStore {
             return result;
         });
     }
-    recoverInterrupted() {
+    recoverInterrupted(options = {}) {
         let recovered = 0;
         const turns = this.mutate((store) => {
             const at = nowIso();
             store.turns = store.turns.map((turn) => {
+                if (!require('./conversation-startup-recovery').isPreStartupConversationTurn(turn, options.createdBefore))
+                    return turn;
                 if (!["sending", "pausing", "resuming"].includes(turn.status) || turn.kind === "task_dispatch")
                     return turn;
                 recovered += 1;
@@ -503,8 +505,9 @@ class ConversationTurnControlStore {
             throw new Error("消息和附件不能同时为空");
         const mode = normalizeMode(input?.mode);
         const newTopic = input?.metadata?.new_topic === true;
-        const pendingTask = !newTopic && mode === "queue" && !input?.metadata?.continuation_task_id
-            ? (0, task_conversation_binding_1.pendingTaskForConversation)(scope, conversationId) : null;
+        // A candidate is context, not a confirmed task association. Semantic routing
+        // commits the association only after deciding what this message requests.
+        const pendingTask = null;
         const requestId = String(input?.request_id || input?.requestId || crypto.randomUUID()).trim();
         const result = this.mutate((store) => {
             const duplicate = store.turns.find((turn) => turn.scope === scope
@@ -677,7 +680,7 @@ class ConversationTurnControlStore {
         const conversationId = String(input?.conversation_id || input?.conversationId || "").trim();
         const statuses = new Set(String(input?.statuses || input?.status || "")
             .split(",").map((value) => value.trim()).filter(Boolean));
-        const limit = Math.max(1, Math.min(500, Number(input?.limit || 120)));
+        const limit = input?._all === true ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.min(500, Number(input?.limit || 120)));
         const store = this.read();
         const turns = store.turns.filter((turn) => (!scope || turn.scope === scope)
             && (!conversationId || turn.conversation_id === conversationId)
@@ -1245,37 +1248,7 @@ class ConversationTurnControlStore {
         });
     }
     syncTaskDispatch(task) {
-        const taskId = String(task?.id || "").trim();
-        if (!taskId)
-            return null;
-        const rawStatus = String(task?.status || "pending").toLowerCase();
-        const nextStatus = ["done", "completed", "success", "accepted"].includes(rawStatus)
-            ? "completed"
-            : ["failed", "error"].includes(rawStatus)
-                ? "failed"
-                : ["cancelled", "canceled", "archived"].includes(rawStatus)
-                    ? "cancelled"
-                    : ["in_progress", "running", "executing", "verifying", "reviewing", "reworking", "blocked", "waiting", "needs_user"].includes(rawStatus)
-                        ? "sending"
-                        : "queued";
-        return this.mutate((store) => {
-            const turn = store.turns.find((item) => item.kind === "task_dispatch" && item.task_id === taskId);
-            if (turn?.metadata?.dismissed_by_user === true)
-                return turn;
-            if (!turn || turn.status === nextStatus)
-                return turn || null;
-            turn.status = nextStatus;
-            turn.revision += 1;
-            turn.updated_at = nowIso();
-            turn.checkpoint = `task_${rawStatus}`;
-            if (TERMINAL_STATUSES.has(nextStatus)) {
-                turn.settled_at = turn.updated_at;
-                turn.lease_id = "";
-                turn.lease_expires_at = "";
-            }
-            emitTurnChanged(turn, "task_sync");
-            return turn;
-        });
+        return (0, task_dispatch_reconciliation_1.syncTaskDispatchProjection)(task, () => this.read(), operation => this.mutate(operation), emitTurnChanged);
     }
 }
 exports.ConversationTurnControlStore = ConversationTurnControlStore;
@@ -1355,20 +1328,11 @@ function admitTaskDispatchTurn(task) {
     return turn;
 }
 function reconcileTaskDispatchTurns() {
-    let admitted = 0;
-    for (const task of (0, db_1.loadTasks)()) {
-        try {
-            if (admitTaskDispatchTurn(task))
-                admitted += 1;
-            exports.conversationTurnControl.syncTaskDispatch(task);
-        }
-        catch { }
-    }
-    return { admitted };
+    return (0, task_dispatch_reconciliation_1.reconcileDispatchCandidates)(() => exports.conversationTurnControl.listInternal({ _all: true }).turns, admitTaskDispatchTurn, task => exports.conversationTurnControl.syncTaskDispatch(task));
 }
 (0, runtime_events_1.subscribeRuntimeEventListener)(["task"], (event) => {
     if (event.type === "tasks.changed") {
-        reconcileTaskDispatchTurns();
+        void reconcileTaskDispatchTurns().catch(() => { });
         return;
     }
     if (event.type !== "task.changed")
@@ -1376,7 +1340,7 @@ function reconcileTaskDispatchTurns() {
     const taskId = String(event.data?.taskId || event.data?.task_id || "");
     if (!taskId)
         return;
-    const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === taskId);
+    const task = (0, db_1.getTaskById)(taskId);
     if (!task)
         return;
     try {

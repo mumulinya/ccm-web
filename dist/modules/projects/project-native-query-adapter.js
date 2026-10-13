@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runProjectMainNativeQueryLoop = runProjectMainNativeQueryLoop;
 const native_query_loop_1 = require("../../agents/native-query-loop");
+const deferred_tool_invocation_1 = require("../../agents/deferred-tool-invocation");
 const main_agent_harness_1 = require("../../agents/main-agent-harness");
 const model_tool_result_1 = require("../../agents/model-tool-result");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
@@ -120,6 +121,7 @@ async function runProjectMainNativeQueryLoop(input) {
         scope: "project",
         scopeId: project,
         exactSessionId: projectSessionId,
+        checkpointIdentity: input.checkpointIdentity,
         providerContextCache: {
             scope: "project",
             scopeId: project,
@@ -133,6 +135,7 @@ async function runProjectMainNativeQueryLoop(input) {
         loopBudget,
         planModeEnabled: input.planModeEnabled ?? (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("project", project, projectSessionId),
         getTools: () => [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(input.getToolContext())],
+        resolveToolCall: call => (0, deferred_tool_invocation_1.resolveDeferredToolCall)(call.name, call.arguments, input.getToolContext().catalog.loadedMcp || []),
         getToolPromptLayout: () => input.getToolContext().toolPromptLayout,
         onConversationContextPressure: async ({ messages, forcePromptTooLong }) => {
             const fallbackPrefixCount = String(messages[0]?.content || "").includes("Fallback protocol: return one JSON object") ? 1 : 0;

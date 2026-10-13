@@ -40,9 +40,12 @@ exports.defaultTaskSessionCreationPolicy = defaultTaskSessionCreationPolicy;
 exports.resolveTaskExecutionPolicy = resolveTaskExecutionPolicy;
 exports.buildTaskSpecV1 = buildTaskSpecV1;
 exports.buildTaskRunV1 = buildTaskRunV1;
+exports.upgradeTaskSpecDispatchProfile = upgradeTaskSpecDispatchProfile;
 exports.buildAutomationDefinitionV1 = buildAutomationDefinitionV1;
 exports.validateTaskWorkflowModel = validateTaskWorkflowModel;
 const crypto = __importStar(require("crypto"));
+const dispatch_profile_1 = require("../../agents/dispatch-profile");
+const dispatch_execution_policy_1 = require("../../agents/dispatch-execution-policy");
 function text(value, fallback = "") {
     return String(value ?? fallback).trim();
 }
@@ -169,23 +172,35 @@ function resolveTaskExecutionPolicy(task) {
     const explicitDispatch = text(task?.dispatch_policy || task?.dispatchPolicy).toLowerCase();
     const explicitVerification = text(task?.verification_policy || task?.verificationPolicy).toLowerCase();
     const explicitApproval = text(task?.approval_policy || task?.approvalPolicy).toLowerCase();
-    const dispatch = ["direct_worker", "planned_worker", "orchestrated"].includes(explicitDispatch)
+    const explicitProfile = text(task?.dispatch_profile || task?.dispatchProfile).toLowerCase();
+    let dispatch = ["direct_worker", "planned_worker", "orchestrated"].includes(explicitDispatch)
         ? explicitDispatch
         : strict ? "orchestrated" : conversation ? "planned_worker" : "direct_worker";
-    const verification = ["quick_check", "main_agent_self", "test_agent"].includes(explicitVerification)
+    let verification = ["quick_check", "main_agent_self", "test_agent"].includes(explicitVerification)
         ? explicitVerification
         : strict ? "test_agent" : conversation ? "main_agent_self" : "quick_check";
-    const workspace = text(task?.workspace_policy || task?.workspacePolicy).toLowerCase() === "isolated_worktree"
+    let workspace = text(task?.workspace_policy || task?.workspacePolicy).toLowerCase() === "isolated_worktree"
         || text(task?.child_agent_isolation || task?.childAgentIsolation).toLowerCase() === "worktree"
         || strict && (crossProject || destructive || bool(task?.requires_isolation))
         ? "isolated_worktree" : "shared_serial";
-    const approval = ["preapproved", "confirm_before_write", "confirm_before_delivery"].includes(explicitApproval)
+    let approval = ["preapproved", "confirm_before_write", "confirm_before_delivery"].includes(explicitApproval)
         ? explicitApproval
         : destructive || risk === "high"
             ? "confirm_before_delivery"
             : bool(task?.requires_confirmation) || bool(task?.requiresConfirmation)
                 ? "confirm_before_write"
                 : "preapproved";
+    if (explicitProfile === "light") {
+        dispatch = "direct_worker";
+        verification = "quick_check";
+        workspace = workspace === "isolated_worktree" ? workspace : "shared_serial";
+    }
+    else if (explicitProfile === "strict") {
+        dispatch = "orchestrated";
+        verification = "test_agent";
+        workspace = "isolated_worktree";
+        approval = approval === "confirm_before_write" ? approval : "confirm_before_delivery";
+    }
     const reasons = [
         origin === "workbench" ? "工作台明确任务默认轻量执行" : "",
         origin === "dispatch" ? "任务派发明确任务默认轻量执行" : "",
@@ -194,15 +209,18 @@ function resolveTaskExecutionPolicy(task) {
         destructive ? "破坏性或发布类任务必须人工确认" : "",
         strict && !destructive && !crossProject ? "高风险或需要独立验收" : "",
     ].filter(Boolean);
-    const core = { dispatch, verification, workspace, approval, reasons };
+    const core = task?.dispatch_profile_snapshot
+        ? (0, dispatch_execution_policy_1.applyDispatchExecutionPolicy)({ dispatch, verification, workspace, approval, reasons }, (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task))
+        : { dispatch, verification, workspace, approval, reasons };
     return { ...core, checksum: checksum(core) };
 }
 function buildTaskSpecV1(task, policy = resolveTaskExecutionPolicy(task)) {
     const origin = normalizeTaskOrigin(task);
-    const targetType = text(task?.group_id || task?.groupId) ? "group" : "project";
+    const targetType = text(task?.group_id || task?.groupId) ? "group" : task?.workflow_type === "global_mission" ? "global" : "project";
     const targetId = targetType === "group" ? text(task?.group_id || task?.groupId) : text(task?.target_project || task?.targetProject);
     const exactSessionId = text(task?.exact_session_id || task?.exactSessionId || task?.group_session_id || task?.groupSessionId || task?.project_session_id || task?.projectSessionId);
     const acceptance = Array.isArray(task?.acceptance_criteria) ? task.acceptance_criteria.map((item) => text(item)).filter(Boolean) : text(task?.acceptance_criteria || task?.acceptanceCriteria) ? [text(task?.acceptance_criteria || task?.acceptanceCriteria)] : [];
+    const dispatchProfile = (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task);
     const core = {
         schema: "ccm-task-spec-v1",
         task_id: text(task?.id),
@@ -225,6 +243,7 @@ function buildTaskSpecV1(task, policy = resolveTaskExecutionPolicy(task)) {
             channels: Array.isArray(task?.delivery_channels || task?.deliveryChannels) ? [...task.delivery_channels || task.deliveryChannels] : [],
         },
         execution_policy: policy,
+        dispatch_profile_snapshot: dispatchProfile,
         source_snapshot: {
             content_checksum: text(task?.content_checksum || task?.contentChecksum || task?.requirement_content_hash),
             source_channel: text(task?.source_channel || task?.sourceChannel || task?.request_origin),
@@ -258,6 +277,13 @@ function buildTaskRunV1(task, spec, trigger = "user") {
         ...(text(task?.queue_scope || task?.queueScope) ? { queue_lane: text(task?.queue_scope || task?.queueScope) } : {}),
         ...(text(task?.parent_run_id || task?.parentRunId) ? { parent_run_id: text(task?.parent_run_id || task?.parentRunId) } : {}),
     };
+}
+function upgradeTaskSpecDispatchProfile(taskSpec, snapshot, executionPolicy) {
+    const nextRevision = Math.max(1, Number(taskSpec?.revision || taskSpec?.spec_revision || 1) + 1);
+    const { checksum: _oldChecksum, plan_checksum: _oldPlanChecksum, ...base } = taskSpec;
+    const core = { ...base, ...(executionPolicy ? { execution_policy: executionPolicy, acceptance_policy: { ...base.acceptance_policy, verification: executionPolicy.verification }, approval_policy: executionPolicy.approval } : {}), dispatch_profile_snapshot: snapshot, revision: nextRevision, spec_revision: nextRevision, plan_revision: nextRevision };
+    const nextChecksum = checksum(core);
+    return { ...core, checksum: nextChecksum, plan_checksum: nextChecksum };
 }
 function buildAutomationDefinitionV1(job, policy) {
     const targetType = text(job?.group_id || job?.groupId) ? "group" : "project";
@@ -295,6 +321,8 @@ function buildAutomationDefinitionV1(job, policy) {
         attachments: source.source_attachments.map((item) => ({ ...item })),
         schedule: source.schedule,
         timezone: source.timezone,
+        catch_up_policy: text(job?.catch_up_policy || job?.catchUpPolicy, "skip"),
+        concurrency_policy: text(job?.concurrency_policy || job?.concurrencyPolicy, "queue_one"),
         execution_policy: effectivePolicy,
         notification_policy: job?.notification_policy || job?.notificationPolicy || {},
         ...(job?.metadata && typeof job.metadata === "object" ? { metadata: { ...job.metadata } } : {}),
@@ -311,11 +339,13 @@ function validateTaskWorkflowModel(task) {
         && ["quick_check", "main_agent_self", "test_agent"].includes(policy.verification)
         && ["shared_serial", "isolated_worktree"].includes(policy.workspace)
         && ["preapproved", "confirm_before_write", "confirm_before_delivery"].includes(policy.approval);
+    const dispatchProfile = spec?.dispatch_profile_snapshot || task?.dispatch_profile_snapshot;
+    const validDispatchProfile = !dispatchProfile || (0, dispatch_profile_1.validateDispatchProfileSnapshot)(dispatchProfile).valid;
     return {
-        valid: spec?.schema === "ccm-task-spec-v1" && run?.schema === "ccm-task-run-v1" && validPolicy && spec.task_id === run.task_id && !!run.trace_id,
+        valid: spec?.schema === "ccm-task-spec-v1" && run?.schema === "ccm-task-run-v1" && validPolicy && validDispatchProfile && spec.task_id === run.task_id && !!run.trace_id,
         spec,
         run,
-        reason: !spec ? "task_spec_missing" : !run ? "task_run_missing" : !validPolicy ? "execution_policy_invalid" : "ok",
+        reason: !spec ? "task_spec_missing" : !run ? "task_run_missing" : !validPolicy ? "execution_policy_invalid" : !validDispatchProfile ? "dispatch_profile_invalid" : "ok",
     };
 }
 //# sourceMappingURL=task-workflow-model.js.map

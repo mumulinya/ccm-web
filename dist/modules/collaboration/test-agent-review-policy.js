@@ -6,6 +6,7 @@ exports.deriveTestAgentReviewPolicy = deriveTestAgentReviewPolicy;
 exports.buildTestAgentIncrementalScope = buildTestAgentIncrementalScope;
 exports.classifyTestAgentReview = classifyTestAgentReview;
 exports.runTestAgentReviewPolicySelfTest = runTestAgentReviewPolicySelfTest;
+const acceptance_failure_routing_1 = require("../../agents/acceptance-failure-routing");
 const EVIDENCE_TYPES = new Set(["code_diff", "command", "http", "browser", "artifact"]);
 const REVIEW_TIERS = new Set(["lightweight", "standard", "interactive", "critical"]);
 const CHANGE_CLASSES = new Set(["documentation", "configuration", "code", "interactive", "critical"]);
@@ -170,35 +171,19 @@ function resultsByStatus(report, expected) {
         .filter((item) => expected.includes(status(item?.status)));
 }
 function classifyTestAgentReview(review) {
-    if (review?.canAccept === true)
-        return { route: "accept", reason: "TestAgent 证据门禁已通过" };
     const report = review?.report || review?.invocation?.report || {};
     const verdict = review?.verdict || review?.invocation?.verdict || {};
-    const failed = resultsByStatus(report, ["failed"]);
-    const blocked = resultsByStatus(report, ["blocked", "timed_out"]);
-    const unknownCoverage = [
-        ...(Array.isArray(report.requiredCheckCoverage) ? report.requiredCheckCoverage : []),
-        ...(Array.isArray(report.acceptanceCoverage) ? report.acceptanceCoverage : []),
-    ].filter((item) => status(item?.status) === "unknown");
-    const providerGaps = Array.isArray(report.browserProviderGaps) ? report.browserProviderGaps : [];
-    const flaky = Number(report.browserStabilitySummary?.statusCounts?.flaky || 0);
-    const invocationStatus = status(review?.invocation?.status || review?.runner?.status || review?.status);
-    if (failed.length) {
-        return { route: "implementation_rework", reason: "存在由真实执行证据确认的实现失败" };
-    }
-    if (blocked.length
-        || verdict.needsEnvironment === true
-        || status(report.status) === "blocked"
-        || ["blocked", "timed_out", "timeout"].includes(invocationStatus)) {
-        return { route: "environment", reason: "验证环境、服务、凭据或执行条件阻塞" };
-    }
-    if (unknownCoverage.length || providerGaps.length || flaky > 0 || status(report.status) === "partial" || verdict.needsRecheck === true) {
-        return { route: "test_agent_recheck", reason: "实现尚未被判定失败，但验收证据需要补齐或重新执行" };
-    }
-    if (verdict.needsRework === true || status(verdict.recommendation) === "rework") {
-        return { route: "implementation_rework", reason: "TestAgent 验收结论确认需要修复实现" };
-    }
-    return { route: "needs_user", reason: "现有证据不足以自动验收或自动返工" };
+    const feedback = (0, acceptance_failure_routing_1.classifyAcceptanceFailure)({ ...review, report, verdict,
+        evidenceMissing: Number(report.browserStabilitySummary?.statusCounts?.flaky || 0) > 0 });
+    if (feedback.failure_kind === null)
+        return { route: "accept", reason: "TestAgent 证据门禁已通过" };
+    if (feedback.failure_kind === "environment")
+        return { route: "environment", reason: "运行条件阻塞，先准备环境" };
+    if (feedback.failure_kind === "implementation")
+        return { route: "implementation_rework", reason: "存在由真实执行证据或结构化验收结论确认的实现失败" };
+    if (feedback.failure_kind === "evidence")
+        return { route: "test_agent_recheck", reason: "补充实际验证证据，不消耗开发返工额度" };
+    return { route: "needs_user", reason: "需要处理授权、验收标准、提交对账或未知问题" };
 }
 function runTestAgentReviewPolicySelfTest() {
     const evidencePlan = normalizeTestAgentAcceptanceEvidencePlan([{

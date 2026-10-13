@@ -6,14 +6,14 @@ const agent_loop_budget_1 = require("../system/agent-loop-budget");
 const readonly_tool_concurrency_1 = require("../system/readonly-tool-concurrency");
 const conversation_attempt_1 = require("./conversation-attempt");
 /** A complete model batch is the scheduling boundary, never an SSE arrival. */
-function createNativeToolExecution(input, save) {
+function createNativeToolExecution(input, save, beforeExecute) {
     const budget = input.loopBudget || (0, agent_loop_budget_1.resolveAgentLoopBudget)(input.config);
     const binding = (0, conversation_attempt_1.currentConversationAttemptBinding)(input.scope, input.scope === 'global' ? input.exactSessionId : `${input.scopeId}:${input.exactSessionId}`);
     const affinity = input.providerContextCache?.cacheAffinity || {};
     const recovery = Number(affinity.attempt || 1) > 1 || Number(affinity.generation || 0) > 0;
     let modelRetried = false;
     const readonly = (call) => !['ccm_ask_user', 'ccm_present_plan', 'ccm_dispatch',
-        'tool_search', 'invoke_skill', 'invoke_mcp', 'read_scope_instruction'].includes(call.name)
+        'tool_search', 'invoke_skill', 'invoke_mcp', 'invoke_deferred_tool', 'read_scope_instruction'].includes(call.name)
         && input.isReadOnly?.(call) === true;
     const guard = () => {
         if (input.signal?.aborted)
@@ -29,6 +29,14 @@ function createNativeToolExecution(input, save) {
         const parallel = input.toolExecutionMode !== 'single_step' && !recovery && !modelRetried
             && ctx.turn.toolCalls.length > 1 && ctx.turn.toolCalls.every(readonly);
         const declaredTools = new Map((input.getTools?.() || input.tools).map(tool => [tool.name, (0, provider_native_tools_1.serializeProviderToolSchema)([tool])]));
+        const targetSchemas = new Map(calls.filter(call => call.name === 'invoke_deferred_tool').map(call => {
+            try {
+                return [call.id, input.resolveToolCall?.(call)?.targetSchemaChecksum || ''];
+            }
+            catch {
+                return [call.id, ''];
+            }
+        }));
         const validate = (call) => {
             guard();
             const current = (input.getTools?.() || input.tools).find(tool => tool.name === call.name);
@@ -37,6 +45,10 @@ function createNativeToolExecution(input, save) {
             // if it is revoked or its schema changes while waiting in our queue.
             if (declaredTools.has(call.name) && (!current || (0, provider_native_tools_1.serializeProviderToolSchema)([current]) !== declaredTools.get(call.name))) {
                 throw Object.assign(new Error(`工具已撤销或定义已变化：${call.name}`), { code: 'CCM_TOOL_SCHEDULING_UNAVAILABLE' });
+            }
+            const target = targetSchemas.get(call.id);
+            if (target && input.resolveToolCall?.(call)?.targetSchemaChecksum !== target) {
+                throw Object.assign(new Error('工具已撤销或定义已变化'), { code: 'CCM_TOOL_SCHEDULING_UNAVAILABLE' });
             }
         };
         const runReadonlyTools = options => (0, readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
@@ -62,6 +74,7 @@ function createNativeToolExecution(input, save) {
         const context = { ...ctx, runReadonlyTools, onToolResult: (row) => { record([row]); } };
         const execute = async (batch) => {
             batch.forEach(validate);
+            beforeExecute?.(batch);
             const rows = await input.executeTools(batch, context);
             const completed = record(rows);
             guard();

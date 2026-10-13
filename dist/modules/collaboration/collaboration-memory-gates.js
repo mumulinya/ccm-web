@@ -152,6 +152,10 @@ function forEachTaskAgentMemoryContextSnapshotSource(context = {}, visit) {
     }
 }
 function summarizeTaskAgentMemoryContextSnapshot(snapshot = {}) {
+    // Callers may pass the already persisted summary while collecting evidence.
+    // Do not erase its binding by treating it as a full snapshot a second time.
+    if (snapshot.snapshot_id && !snapshot.context && !snapshot.session && snapshot.task_agent_session_id)
+        return snapshot;
     const context = snapshot.context || {};
     const session = snapshot.session || {};
     const groupSessionMemoryBinding = context.group_session_memory_binding || context.groupSessionMemoryBinding || null;

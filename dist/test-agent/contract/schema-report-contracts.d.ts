@@ -47938,6 +47938,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
             blocked?: number;
             failed?: number;
+            http?: number;
             browser?: number;
             items?: z.objectOutputType<{
                 project: z.ZodString;
@@ -47955,7 +47956,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             total?: number;
             passed?: number;
             required?: boolean;
-            http?: number;
             unlinked?: number;
             waived?: boolean;
             waiverReason?: string;
@@ -48843,6 +48843,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
             blocked?: number;
             failed?: number;
+            http?: number;
             browser?: number;
             items?: z.objectInputType<{
                 project: z.ZodString;
@@ -48860,7 +48861,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             total?: number;
             passed?: number;
             required?: boolean;
-            http?: number;
             unlinked?: number;
             waived?: boolean;
             waiverReason?: string;
@@ -49748,6 +49748,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
             blocked?: number;
             failed?: number;
+            http?: number;
             browser?: number;
             items?: z.objectOutputType<{
                 project: z.ZodString;
@@ -49765,7 +49766,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             total?: number;
             passed?: number;
             required?: boolean;
-            http?: number;
             unlinked?: number;
             waived?: boolean;
             waiverReason?: string;
@@ -50653,6 +50653,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
             blocked?: number;
             failed?: number;
+            http?: number;
             browser?: number;
             items?: z.objectInputType<{
                 project: z.ZodString;
@@ -50670,7 +50671,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             total?: number;
             passed?: number;
             required?: boolean;
-            http?: number;
             unlinked?: number;
             waived?: boolean;
             waiverReason?: string;

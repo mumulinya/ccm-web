@@ -4,7 +4,15 @@ export declare const MAX_TASK_ATTACHMENT_TOTAL_BYTES: number;
 export declare function removeUploadedFiles(files: any[]): void;
 export declare function validateTaskUploadedFiles(files: any[], retainedCount?: number, retainedBytes?: number): void;
 export declare function renderTaskAttachmentContext(contexts: any[]): string;
-export declare function buildTaskAttachmentMutation(input: {
+export declare function buildTaskAttachmentMutation(...args: Parameters<typeof buildTaskAttachmentMutationMeasured>): Promise<{
+    attachments: any[];
+    contexts: any[];
+    context: string;
+    warnings: string[];
+    technical: any;
+    removed: any[];
+}>;
+declare function buildTaskAttachmentMutationMeasured(input: {
     files?: any[];
     currentAttachments?: any[];
     currentContexts?: any[];
@@ -20,3 +28,4 @@ export declare function buildTaskAttachmentMutation(input: {
     removed: any[];
 }>;
 export declare function parseRetainedAttachmentIds(value: any): string[];
+export {};

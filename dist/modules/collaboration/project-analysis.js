@@ -68,6 +68,8 @@ const PROJECT_ANALYSIS_SAFE_EXTENSIONS = new Set([
     ".ts",
     ".tsx",
     ".js",
+    ".cjs",
+    ".mjs",
     ".jsx",
     ".vue",
     ".svelte",

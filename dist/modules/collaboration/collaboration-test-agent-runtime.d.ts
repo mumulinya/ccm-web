@@ -65,68 +65,7 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
     requiredChecks: string[];
     projects: any[];
     options: any;
-    metadata: {
-        providerGapReroute?: boolean;
-        providerGapRerouteReason?: string;
-        handoffWarnings?: string[];
-        handoffSource: string;
-        route: any;
-        reviewSubject: string;
-        verifier: string;
-        previousLedger: {
-            schema: string;
-            project: string;
-            evidence: import("../../test-agent/evidence-projection").TestAgentEvidenceProjectionV2;
-            summary: string;
-            actionCount: any;
-            actionChecksum: string;
-            filesChanged: any[];
-            verification: any[];
-            blockerCount: any;
-            blockerChecksum: string;
-            sourceRefs: any[];
-            contentStored: boolean;
-        };
-        verifierContext: {
-            schema: string;
-            mode: string;
-            contentStored: boolean;
-            fields: string[];
-        };
-        requirementBinding: any;
-        planBinding: {
-            planId: any;
-            revision: any;
-            checksum: any;
-            contentStored: boolean;
-        };
-        acceptanceMatrix: any;
-        reviewPolicy: {
-            browserEnabled: boolean;
-            requireAdversarialProbe: boolean;
-            requiredChecks: string[];
-            schema: "ccm-test-agent-review-policy-v1";
-            tier: import("./test-agent-review-policy").TestAgentReviewTier;
-            reason: string;
-            httpEnabled: boolean;
-            collectBrowserArtifacts: boolean;
-            autoDiscoverVerificationCommands: boolean;
-        };
-        hardeningPolicy: any;
-        verificationHardening: {
-            version: number;
-            policy: any;
-        };
-        coordinatorOutputReference: {
-            checksum: string;
-            charCount: number;
-            contentStored: boolean;
-        };
-        projectRuntimeSource: string;
-        surfaceAudit: import("../../test-agent/surface-audit").TestAgentSurfaceAuditReceipt;
-        runtimeFingerprint: import("../../test-agent/runtime-fingerprint").TestAgentRuntimeFingerprint;
-        reviewInstructions: string[];
-    };
+    metadata: any;
     target: string;
     review_subject: string;
     warnings: string[];

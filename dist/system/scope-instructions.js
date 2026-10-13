@@ -50,14 +50,19 @@ exports.restoreScopeInstructionContext = restoreScopeInstructionContext;
 exports.readScopeInstructionDetail = readScopeInstructionDetail;
 exports.supplementScopeInstruction = supplementScopeInstruction;
 exports.regenerateScopeInstruction = regenerateScopeInstruction;
+exports.runScopeInstructionGeneration = runScopeInstructionGeneration;
 exports.initializeScopeInstructions = initializeScopeInstructions;
 exports.scopeInstructionStoreRootForTests = scopeInstructionStoreRootForTests;
+exports.stopScopeInstructionValidationTasks = stopScopeInstructionValidationTasks;
+const scope_navigation_contract_1 = require("./scope-navigation-contract");
+const scope_navigation_runtime_1 = require("./scope-navigation-runtime");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const project_main_agent_source_1 = require("../modules/projects/project-main-agent-source");
+const scope_navigation_source_1 = require("./scope-navigation-source");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
 const runtime_events_1 = require("./runtime-events");
@@ -70,7 +75,6 @@ const USER_START = "<!-- CCM:USER:START -->";
 const USER_END = "<!-- CCM:USER:END -->";
 const MAX_DOCUMENT_CHARS = 40_000;
 const MAX_SUPPLEMENT_CHARS = 12_000;
-const JOB_LEASE_MS = 5 * 60_000;
 const FRESHNESS_CHECK_INTERVAL_MS = 5 * 60_000;
 let workerTimer = null;
 let workerRunning = false;
@@ -95,6 +99,7 @@ function readStore() {
         revision: Math.max(1, Number(raw?.revision || 1)),
         documents: Array.isArray(raw?.documents) ? raw.documents : [],
         jobs: Array.isArray(raw?.jobs) ? raw.jobs : [],
+        generationEvidence: Array.isArray(raw?.generationEvidence) ? raw.generationEvidence : [],
         loads: Array.isArray(raw?.loads) ? raw.loads : [],
         updatedAt: String(raw?.updatedAt || now()),
     };
@@ -237,12 +242,15 @@ function upsertDocument(store, input) {
     }
     return row;
 }
-function enqueue(store, job) {
-    const key = sha({ kind: job.kind, projectId: job.projectId || "", groupId: job.groupId || "", inputChecksum: job.inputChecksum });
-    const existing = store.jobs.find(item => item.key === key);
-    if (!existing)
-        store.jobs.push({ ...job, key, attempts: 0, availableAt: Date.now(), queuedAt: now() });
-    return existing || store.jobs.find(item => item.key === key);
+function enqueue(store, job) { return (0, scope_navigation_runtime_1.enqueueNavigation)(store, job); }
+function documentIsValid(row) {
+    try {
+        const body = fs.readFileSync(absoluteDocumentFile(row), 'utf8');
+        return row.generation > 0 && sha(body) === row.checksum && !!splitSections(body).generated && body.includes(GENERATED_END) && body.includes(USER_END);
+    }
+    catch {
+        return false;
+    }
 }
 function changedSourceFileCount(previous, current) {
     const before = new Map(previous.files.map(item => [item.path, `${item.size}:${item.mtimeMs}`]));
@@ -276,7 +284,7 @@ function ensureProjectScopeInstructionInternal(projectIdValue, options = {}) {
         const store = readStore();
         let fingerprint = null;
         try {
-            const manifest = (0, project_main_agent_source_1.buildProjectSourceManifest)(projectId, (0, utils_1.getWorkDirForProject)(projectId));
+            const manifest = (0, scope_navigation_source_1.buildScopeNavigationSourceManifest)(projectId, (0, utils_1.getWorkDirForProject)(projectId));
             fingerprint = projectCognitionFingerprint(projectId, (0, utils_1.getWorkDirForProject)(projectId), manifest);
         }
         catch { }
@@ -286,6 +294,10 @@ function ensureProjectScopeInstructionInternal(projectIdValue, options = {}) {
         });
         const currentTime = now();
         row.lastCheckedAt = currentTime;
+        if ((row.generationOutcome === 'unknown' || row.generationOutcome === 'failed' && row.generationRequestIds?.length && (!fingerprint || row.inputChecksum === fingerprint.checksum)) && !store.jobs.some(job => job.kind === 'project' && job.projectId === projectId)) {
+            saveStore(store);
+            return publicEntry(row, store);
+        }
         if (fingerprint) {
             row.currentFingerprint = fingerprint;
             const isInitial = Math.max(0, Number(row.generation || 0)) === 0;
@@ -320,6 +332,10 @@ function ensureProjectScopeInstructionInternal(projectIdValue, options = {}) {
             row.refreshReasons = ["initial_generation"];
             row.updatedAt = currentTime;
             enqueue(store, { kind: "project", projectId, inputChecksum: row.inputChecksum });
+        }
+        if ((0, scope_navigation_runtime_1.navigationResultNeedsRefresh)(row, () => documentIsValid(row), (0, group_orchestrator_config_1.loadOrchestratorConfig)())) {
+            row.status = 'stale';
+            enqueue(store, { kind: 'project', projectId, inputChecksum: row.inputChecksum });
         }
         saveStore(store);
         emit(row);
@@ -402,11 +418,13 @@ function ensureGroupScopeInstructions(input) {
             row.active = false;
             row.updatedAt = now();
         }
-        const inputChecksum = sha({ groupId, purpose, projects, projectVersions });
+        const inputChecksum = sha({ groupId, purpose, name: groupRow.title, projects, projectVersions });
         for (const row of store.documents.filter(row => activeIds.has(row.documentId))) {
             row.purpose = purpose;
             row.lastCheckedAt = now();
-            if (row.inputChecksum !== inputChecksum || row.status === "waiting_input") {
+            if ((row.inputChecksum !== inputChecksum || row.status === "waiting_input") && row.generationOutcome !== 'unknown') {
+                if (row.generationOutcome === 'failed')
+                    delete row.generationOutcome;
                 row.status = row.generation ? "stale" : "queued";
                 row.refreshReasons = Array.from(new Set([
                     ...(previousPurpose && previousPurpose !== purpose ? ["group_purpose_changed"] : []),
@@ -417,6 +435,10 @@ function ensureGroupScopeInstructions(input) {
             }
             row.inputChecksum = inputChecksum;
             row.updatedAt = now();
+        }
+        if (store.documents.some(row => activeIds.has(row.documentId) && row.generationOutcome !== 'unknown' && (0, scope_navigation_runtime_1.navigationResultNeedsRefresh)(row, () => documentIsValid(row), (0, group_orchestrator_config_1.loadOrchestratorConfig)()))) {
+            for (const row of store.documents.filter(row => activeIds.has(row.documentId)))
+                row.status = 'stale';
         }
         if (store.documents.some(row => activeIds.has(row.documentId) && ["queued", "stale"].includes(row.status)))
             enqueue(store, { kind: "group", groupId, inputChecksum });
@@ -492,14 +514,7 @@ function getScopeInstructionCatalogEntry(documentIdValue) {
     return row ? publicEntry(row, store) : null;
 }
 function renderScopeInstructionCatalog(identity) {
-    const entries = listScopeInstructionCatalog(identity);
-    if (!entries.length)
-        return "";
-    return [
-        "[作用域认知文档目录；正文未加载]",
-        ...entries.map(row => `- 文档：${row.fileName}; documentId=${row.documentId}; 状态：${row.status}; 版本：${row.revision}; 读取方式：read_scope_instruction`),
-        "仅在当前问题需要时调用 read_scope_instruction。目录出现不代表正文已进入上下文。",
-    ].join("\n");
+    return require('./scope-instruction-model-catalog').renderScopeInstructionModelCatalog(listScopeInstructionCatalog(identity));
 }
 function readScopeInstructionForAgent(input) {
     const row = readStore().documents.find(item => item.documentId === String(input.documentId || ""));
@@ -617,6 +632,13 @@ function regenerateScopeInstruction(documentIdValue, expectedRevision) {
         if (Number.isFinite(Number(expectedRevision)) && Number(expectedRevision) > 0 && Number(expectedRevision) !== Number(row.revision)) {
             throw Object.assign(new Error("认知文档已更新，请刷新后重试"), { code: "SCOPE_INSTRUCTION_REVISION_CONFLICT" });
         }
+        const pending = store.jobs.find(job => job.inputChecksum === row.inputChecksum && (row.kind === 'project' ? job.kind === 'project' && job.projectId === row.projectId : job.kind === 'group' && job.groupId === row.groupId));
+        if (pending) {
+            pending.force = true;
+            pending.triggerSource = 'manual';
+            saveStore(store);
+            return publicEntry(row, store);
+        }
         // `waiting_input` is kept only for reading historical rows. Group
         // navigation can always be regenerated; an optional description is not a
         // generation gate.
@@ -628,7 +650,7 @@ function regenerateScopeInstruction(documentIdValue, expectedRevision) {
         if (row.kind === "project" && row.currentFingerprint?.checksum)
             row.inputChecksum = row.currentFingerprint.checksum;
         if (row.status === "queued")
-            enqueue(store, { kind: row.kind === "project" ? "project" : "group", projectId: row.projectId, groupId: row.groupId, inputChecksum: row.inputChecksum || sha({ documentId: row.documentId, generation: row.generation }) });
+            enqueue(store, { force: true, kind: row.kind === "project" ? "project" : "group", projectId: row.projectId, groupId: row.groupId, inputChecksum: row.inputChecksum || sha({ documentId: row.documentId, generation: row.generation }) });
         saveStore(store);
         emit(row);
         if (row.status === "queued")
@@ -638,11 +660,12 @@ function regenerateScopeInstruction(documentIdValue, expectedRevision) {
 }
 function preferredSourcePaths(files) {
     const preferred = /(^|\/)(readme[^/]*|package\.json|pnpm-workspace\.yaml|pyproject\.toml|cargo\.toml|go\.mod|pom\.xml|build\.gradle(?:\.kts)?|dockerfile|makefile|agents\.md|claude\.md|\.claude\/claude\.md|tsconfig\.json|vite\.config\.[^/]+|next\.config\.[^/]+|vitest\.config\.[^/]+|jest\.config\.[^/]+)$/i;
-    const chosen = files.filter(item => preferred.test(item.path)).slice(0, 12).map(item => item.path);
-    return chosen.length ? chosen : files.slice(0, 8).map(item => item.path);
+    const ordered = [...files].sort((a, b) => a.path.localeCompare(b.path, "en"));
+    const chosen = ordered.filter(item => preferred.test(item.path)).slice(0, 12).map(item => item.path);
+    return chosen.length ? chosen : ordered.slice(0, 8).map(item => item.path);
 }
 function projectNavigationSnapshot(files) {
-    const paths = files.map(item => String(item.path || "").replace(/\\/g, "/")).filter(Boolean);
+    const paths = [...files].sort((a, b) => a.path.localeCompare(b.path, "en")).map(item => String(item.path || "").replace(/\\/g, "/")).filter(Boolean);
     const directories = Array.from(new Set(paths.flatMap(file => {
         const parts = file.split("/").filter(Boolean);
         if (parts.length < 2)
@@ -729,16 +752,18 @@ function groupNavigationFallback(groupLabel, inputs) {
         `本说明属于 ${redactUnsafeText(groupLabel, 200)}。群聊主 Agent应按需读取对应项目文档，只核对与当前问题相关的成员项目。`,
     ].join("\n");
 }
-async function modelJson(system, prompt) {
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+async function modelJson(snapshot, job, config) {
     if (!config.apiKey || !config.model)
         throw new Error("统一模型尚未配置，无法生成认知文档");
-    const options = { system, messages: [{ role: "user", content: prompt }], temperature: 0.1, maxTokens: 5000, timeoutMs: Math.min(120_000, Number(config.timeoutMs || 120_000)), retryAttempts: 2, invalidJsonMessage: "认知文档生成未返回有效 JSON" };
+    const options = { ...(0, scope_navigation_contract_1.scopeNavigationRequestOptions)(config, snapshot), cacheValidationId: job.validationId,
+        requestAttribution: { purpose: 'scope_navigation_generation', requestClass: 'auxiliary', scope: snapshot.scope,
+            scopeId: snapshot.scopeId, exactSessionId: (0, scope_navigation_contract_1.scopeNavigationRequestOptions)(config, snapshot).providerContextCache.sessionId,
+            turnId: job.key, trace_id: job.trace_id } };
     return (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config) ? (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, options) : (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, options);
 }
-async function generateProject(projectId) {
+function prepareProjectGeneration(projectId) {
     const workDir = (0, utils_1.getWorkDirForProject)(projectId);
-    const manifest = (0, project_main_agent_source_1.buildProjectSourceManifest)(projectId, workDir);
+    const manifest = (0, scope_navigation_source_1.buildScopeNavigationSourceManifest)(projectId, workDir);
     const fingerprint = projectCognitionFingerprint(projectId, workDir, manifest);
     const navigation = projectNavigationSnapshot(manifest.files);
     const selectedPaths = Array.from(new Set([
@@ -748,32 +773,44 @@ async function generateProject(projectId) {
     const evidence = (0, project_main_agent_source_1.readProjectSourceEvidence)({ project: projectId, workDir, manifest, selectedPaths });
     if (!evidence.files.length)
         throw new Error("未读取到可用于项目认知的安全源码证据");
-    const prompt = JSON.stringify({
-        project: projectId,
-        manifestChecksum: manifest.checksum,
-        navigation,
-        files: evidence.files.map(file => ({ path: file.path, checksum: file.checksum, content: file.content })),
-        output: { sections: [{ heading: "代码导航", body: "常见需求应先查看哪些相对目录或入口" }] },
-    });
-    const result = await modelJson("你是 CCM 项目主 Agent的只读代码导航提取器。仅依据真实文件证据和安全目录拓扑生成简洁认知。首要目标是帮助 Agent快速定位：项目入口、关键模块、常见需求应先搜索的相对目录、构建/运行/测试位置。其次简述用途、技术栈、架构边界、特殊约定和非显然陷阱。只能引用输入中存在的相对路径，不得猜测文件，不要输出穷举式逐文件清单、源码正文、绝对路径、密钥、Prompt或工具原始结果。只返回 JSON：{sections:[{heading,body}]}。", prompt);
+    const snapshot = (0, scope_navigation_contract_1.buildScopeNavigationSnapshot)({ scope: 'project', scopeId: projectId, system: "你是 CCM 项目主 Agent的只读代码导航提取器。仅依据真实文件证据和安全目录拓扑生成简洁认知。首要目标是帮助 Agent快速定位：项目入口、关键模块、常见需求应先搜索的相对目录、构建/运行/测试位置。其次简述用途、技术栈、架构边界、特殊约定和非显然陷阱。只能引用输入中存在的相对路径，不得猜测文件，不要输出穷举式逐文件清单、源码正文、绝对路径、密钥、Prompt或工具原始结果。只返回 JSON：{sections:[{heading,body}]}。",
+        blocks: evidence.files.map(file => ({ path: file.path, content: file.content, checksum: file.checksum })),
+        metadata: { checksum: manifest.checksum, navigation } });
+    return { snapshot, projectId, navigation, fingerprint, inputChecksum: fingerprint.checksum };
+}
+async function generateProject(prepared, job, config) {
+    const { projectId, navigation, fingerprint, snapshot } = prepared;
+    const result = await modelJson(snapshot, job, config);
     const rendered = markdownFromJson(result, projectId);
     const markdown = rendered.includes("的认知资料尚不充分。") ? projectNavigationFallback(projectId, navigation) : rendered;
-    return { markdown, sourceCount: evidence.files.length, inputChecksum: fingerprint.checksum, fingerprint };
+    return { markdown, sourceCount: snapshot.sourceCount, inputChecksum: fingerprint.checksum, fingerprint };
 }
-async function generateGroup(groupId) {
+function prepareGroupGeneration(groupId) {
     const store = readStore();
     const rows = store.documents.filter(row => row.groupId === groupId && row.active);
     const groupRow = rows.find(row => row.kind === "group");
     if (!groupRow)
         throw new Error("群聊认知目录不存在");
-    const projectRows = rows.filter(row => row.kind === "group_project");
+    const projectRows = rows.filter(row => row.kind === "group_project").sort((a, b) => String(a.projectId).localeCompare(String(b.projectId), "en"));
     const inputs = projectRows.map(row => {
         const base = store.documents.find(item => item.kind === "project" && item.projectId === row.projectId && item.active && item.status === "ready");
         if (!base)
             throw new Error(`成员项目 ${row.projectId} 的项目认知尚未就绪`);
-        return { projectId: row.projectId, checksum: base.checksum, markdown: splitSections(fs.readFileSync(absoluteDocumentFile(base), "utf8")).generated };
+        const body = fs.readFileSync(absoluteDocumentFile(base), "utf8");
+        if (!base.checksum || sha(body) !== base.checksum)
+            throw new Error('成员项目认知完整性校验失败');
+        return { projectId: row.projectId, checksum: sha(splitSections(body).generated), markdown: splitSections(body).generated };
     });
-    const result = await modelJson("你是 CCM 群聊主 Agent的跨项目代码导航提取器。依据成员项目认知，一次生成群聊总导航与每个成员项目的群聊专属导航。总导航必须说明遇到哪类问题应先查哪个项目、项目间依赖和跨项目边界；项目导航必须说明该项目在群聊中的能力范围、关键相对目录和入口、与其他成员的接口关系。可选的群聊说明只作为补充背景，留空时也必须正常生成，不能虚构业务目标、交付范围或验收要求。不要输出源码、绝对路径、密钥或内部Prompt。只返回 JSON：{group:{sections:[...]},projects:[{projectId,sections:[...]}]}。", JSON.stringify({ groupId, description: groupRow.purpose || "", projects: inputs }));
+    const snapshot = (0, scope_navigation_contract_1.buildScopeNavigationSnapshot)({ scope: 'group', scopeId: groupId, system: "你是 CCM 群聊主 Agent的跨项目代码导航提取器。依据成员项目认知，一次生成群聊总导航与每个成员项目的群聊专属导航。总导航必须说明遇到哪类问题应先查哪个项目、项目间依赖和跨项目边界；项目导航必须说明该项目在群聊中的能力范围、关键相对目录和入口、与其他成员的接口关系。可选的群聊说明只作为补充背景，留空时也必须正常生成，不能虚构业务目标、交付范围或验收要求。不要输出源码、绝对路径、密钥或内部Prompt。只返回 JSON：{group:{sections:[...]},projects:[{projectId,sections:[...]}]}。",
+        blocks: inputs.map(item => ({ projectId: item.projectId, content: item.markdown, checksum: item.checksum })),
+        metadata: { title: groupRow.title, description: groupRow.purpose || '' } });
+    const projectVersions = projectRows.map(row => { const base = store.documents.find(item => item.kind === 'project' && item.active && item.projectId === row.projectId); return { projectId: row.projectId, generation: base?.generation || 0, checksum: base?.checksum || '' }; });
+    return { snapshot, groupId, groupRow, projectRows, inputs,
+        inputChecksum: sha({ groupId, purpose: groupRow.purpose, name: groupRow.title, projects: projectRows.map(row => row.projectId), projectVersions }) };
+}
+async function generateGroup(prepared, job, config) {
+    const { groupId, groupRow, projectRows, inputs, snapshot } = prepared;
+    const result = await modelJson(snapshot, job, config);
     const projectOutputs = new Map((Array.isArray(result?.projects) ? result.projects : []).map((item) => [String(item?.projectId || ""), markdownFromJson(item, String(item?.projectId || "项目"))]));
     const renderedGroup = markdownFromJson(result?.group, groupRow.title);
     return {
@@ -795,8 +832,13 @@ function commitGenerated(job, output) {
     const affectedGroupIds = (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
         const store = readStore();
         const activeJob = store.jobs.find(item => item.key === job.key);
-        if (!activeJob)
+        if (!activeJob || activeJob.leaseToken !== job.leaseToken)
             return [];
+        const fresh = job.kind === 'project' ? prepareProjectGeneration(job.projectId) : prepareGroupGeneration(job.groupId);
+        if (fresh.snapshot.inputDigest !== job.inputDigest || (0, scope_navigation_contract_1.navigationDigest)((0, scope_navigation_contract_1.scopeNavigationRequestOptions)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), fresh.snapshot).providerContextCache.sessionId) !== job.executionIdentity
+            || job.targetRevisions.some((target) => !store.documents.some(row => row.active && row.documentId === target.id && row.revision === target.revision))) {
+            throw Object.assign(new Error('认知生成提交目标已变化'), { code: 'CCM_SCOPE_NAVIGATION_SUPERSEDED' });
+        }
         const allTargets = job.kind === "project"
             ? store.documents.filter(row => row.kind === "project" && row.projectId === job.projectId && row.active)
             : store.documents.filter(row => row.groupId === job.groupId && row.active);
@@ -837,6 +879,14 @@ function commitGenerated(job, output) {
         const committedAt = now();
         for (const item of prepared) {
             const { row, content } = item;
+            row.generatedInputDigest = output.inputDigest;
+            row.generationContractVersion = scope_navigation_contract_1.SCOPE_NAVIGATION_CONTRACT;
+            row.generationIdentity = output.executionIdentity;
+            row.generationOutcome = 'model';
+            row.generationTaskId = job.key;
+            row.generationTriggerSource = job.triggerSource;
+            row.generationRequestIds = job.requestIds || [];
+            row.generationEvidence = job.receipts || [];
             row.status = "ready";
             row.generation += 1;
             row.revision += 1;
@@ -856,10 +906,22 @@ function commitGenerated(job, output) {
             delete row.failure;
         }
         store.jobs = store.jobs.filter(item => item.key !== job.key);
+        (0, scope_navigation_runtime_1.recordNavigationCompletion)(store, job, 'model');
         const affected = job.kind === "project"
             ? Array.from(new Set(store.documents.filter(row => row.kind === "group_project" && row.projectId === job.projectId && row.active).map(row => String(row.groupId || "")).filter(Boolean)))
             : [];
-        saveStore(store);
+        try {
+            saveStore(store);
+        }
+        catch (error) {
+            for (const item of written.reverse()) {
+                try {
+                    writeTextAtomic(item.file, item.old);
+                }
+                catch { }
+            }
+            throw error;
+        }
         for (const item of prepared)
             emit(item.row);
         return affected;
@@ -879,7 +941,11 @@ function failJob(job, error) {
             return;
         active.attempts += 1;
         delete active.leasedAt;
-        const retry = active.attempts <= 2;
+        delete active.leaseToken;
+        delete active.leasePid;
+        const retry = !active.dispatchedAt && active.attempts <= 2;
+        if (!retry)
+            (0, scope_navigation_runtime_1.recordNavigationCompletion)(store, active, 'failed', String(error?.code || 'generation_failed'));
         active.availableAt = Date.now() + Math.min(60_000, 2_000 * (2 ** active.attempts));
         const targets = job.kind === "project"
             ? store.documents.filter(row => row.kind === "project" && row.projectId === job.projectId && row.active && row.inputChecksum === job.inputChecksum)
@@ -891,6 +957,12 @@ function failJob(job, error) {
         }
         for (const row of targets) {
             row.status = retry ? "queued" : "failed";
+            if (!retry && active.dispatchedAt) {
+                row.generationOutcome = 'failed';
+                row.generationTaskId = active.key;
+                row.generationRequestIds = active.requestIds || [];
+                row.generationEvidence = active.receipts || [];
+            }
             row.failure = redactUnsafeText(error?.message || error || "生成失败", 300);
             row.updatedAt = now();
         }
@@ -901,40 +973,41 @@ function failJob(job, error) {
             emit(row);
     });
 }
+async function runScopeInstructionGeneration(taskId) {
+    const result = await (0, scope_navigation_runtime_1.runNextScopeNavigation)({
+        transaction: operation => (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => { const store = readStore(); const before = new Map(store.documents.map(row => [row.documentId, row.status])); const value = operation(store); saveStore(store); for (const row of store.documents)
+            if (before.get(row.documentId) !== row.status)
+                emit(row); return value; }),
+        prepare: job => job.kind === 'project' ? prepareProjectGeneration(job.projectId) : prepareGroupGeneration(job.groupId),
+        config: group_orchestrator_config_1.loadOrchestratorConfig,
+        documentValid: documentIsValid,
+        send: (prepared, job, config) => job.kind === 'project' ? generateProject(prepared, job, config) : generateGroup(prepared, job, config),
+        commit: commitGenerated, fail: failJob,
+    }, taskId);
+    if (result.outcome === 'superseded') {
+        const evidence = readStore().generationEvidence?.find(item => item.taskId === result.taskId);
+        if (evidence?.kind === 'project')
+            ensureProjectScopeInstruction(evidence.scopeId);
+        else if (evidence?.kind === 'group') {
+            const group = (0, storage_1.loadGroups)().find(item => item.id === evidence.scopeId);
+            if (group)
+                ensureGroupScopeInstructions({ groupId: group.id, name: group.name, purpose: group.purpose, projectIds: (group.members || []).map((item) => item.project).filter((id) => id && id !== 'coordinator') });
+        }
+    }
+    return result;
+}
 async function runWorker() {
+    if (require('./cache-validation-budget').cacheValidationBackgroundDeferred()) {
+        scheduleWorker(1000);
+        return;
+    }
     if (workerRunning)
         return;
     workerRunning = true;
     try {
-        const job = (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
-            const store = readStore();
-            const current = Date.now();
-            const row = store.jobs.find(item => item.availableAt <= current && (!item.leasedAt || current - item.leasedAt > JOB_LEASE_MS));
-            if (!row)
-                return null;
-            row.leasedAt = current;
-            const targets = row.kind === "project"
-                ? store.documents.filter(item => item.kind === "project" && item.projectId === row.projectId && item.active && item.inputChecksum === row.inputChecksum)
-                : store.documents.filter(item => item.groupId === row.groupId && item.active && item.inputChecksum === row.inputChecksum);
-            for (const target of targets) {
-                target.status = "generating";
-                target.updatedAt = now();
-            }
-            saveStore(store);
-            for (const target of targets)
-                emit(target);
-            return { ...row };
-        });
-        if (!job)
-            return;
-        try {
-            const output = job.kind === "project" ? await generateProject(job.projectId) : await generateGroup(job.groupId);
-            commitGenerated(job, output);
-        }
-        catch (error) {
-            failJob(job, error);
-        }
+        await runScopeInstructionGeneration();
     }
+    catch { }
     finally {
         workerRunning = false;
         if (readStore().jobs.length)
@@ -953,11 +1026,7 @@ function initializeScopeInstructions(input = {}) {
     fs.mkdirSync(ROOT, { recursive: true });
     (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
         const store = readStore();
-        for (const job of store.jobs)
-            delete job.leasedAt;
-        for (const row of store.documents)
-            if (row.status === "generating")
-                row.status = "queued";
+        (0, scope_navigation_runtime_1.recoverNavigationJobs)(store);
         saveStore(store);
     });
     for (const projectId of input.projects || []) {
@@ -978,4 +1047,12 @@ function initializeScopeInstructions(input = {}) {
     scheduleWorker(250);
 }
 function scopeInstructionStoreRootForTests() { return ROOT; }
+function stopScopeInstructionValidationTasks(validationId, reason) {
+    return (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
+        const store = readStore();
+        const count = (0, scope_navigation_runtime_1.stopNavigationValidationJobs)(store, validationId, reason);
+        saveStore(store);
+        return count;
+    });
+}
 //# sourceMappingURL=scope-instructions.js.map

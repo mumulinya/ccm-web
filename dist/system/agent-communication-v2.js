@@ -62,6 +62,7 @@ const task_store_1 = require("../core/task-store");
 const unified_evidence_registry_1 = require("./unified-evidence-registry");
 const user_visible_agent_events_1 = require("./user-visible-agent-events");
 const agent_runtime_progress_1 = require("./agent-runtime-progress");
+const dispatch_communication_policy_1 = require("../agents/dispatch-communication-policy");
 exports.AGENT_COMMUNICATION_ENVELOPE_SCHEMA = "ccm-agent-communication-envelope-v2";
 exports.AGENT_DISPATCH_ACK_SCHEMA = "ccm-agent-dispatch-ack-v2";
 exports.AGENT_PROGRESS_RECEIPT_SCHEMA = "ccm-agent-progress-receipt-v2";
@@ -253,7 +254,7 @@ const allowedTransitions = {
     queued: new Set(["lease_acquired", "cancel_requested", "startup_timeout", "recovery_required", "failed"]),
     lease_acquired: new Set(["runner_starting", "lease_expired", "cancel_requested", "recovery_required", "failed"]),
     runner_starting: new Set(["runner_started", "startup_timeout", "lease_expired", "cancel_requested", "recovery_required", "failed"]),
-    runner_started: new Set(["acknowledged", "ack_timeout", "heartbeat_lost", "cancel_requested", "recovery_required", "failed"]),
+    runner_started: new Set(["acknowledged", "executing", "result_submitted", "ack_timeout", "heartbeat_lost", "cancel_requested", "recovery_required", "failed"]),
     acknowledged: new Set(["executing", "waiting_dependency", "result_submitted", "heartbeat_lost", "cancel_requested", "recovery_required", "failed"]),
     executing: new Set(["waiting_dependency", "result_submitted", "heartbeat_lost", "cancel_requested", "recovery_required", "failed"]),
     waiting_dependency: new Set(["executing", "result_submitted", "heartbeat_lost", "cancel_requested", "recovery_required", "failed"]),
@@ -717,6 +718,8 @@ function recordAgentCommunicationReceipt(messageId, receiptType, identity, rawRe
                 return { accepted: false, stale: true, issues, receiptChecksum, envelope: rowToEnvelope(row) };
             }
             const nextState = receiptType === "dispatch_ack" ? "acknowledged" : receiptType === "progress" ? (projected.phase === "waiting_dependency" ? "waiting_dependency" : "executing") : receiptType === "result" ? "result_submitted" : (projected.status === "accepted" ? "completed" : projected.status === "cancelled" ? "cancelled" : "failed");
+            if (row.state === "runner_started" && ["executing", "result_submitted"].includes(nextState) && (0, dispatch_communication_policy_1.communicationRequiresDispatchAck)(row.task_id))
+                throw new Error("当前派发档位要求执行前 ACK");
             if (row.state !== nextState && !allowedTransitions[row.state]?.has(nextState))
                 throw new Error(`当前状态不能接收${receiptType}回执：${row.state}`);
             db.prepare("INSERT INTO agent_communication_receipts(receipt_checksum,message_id,receipt_type,generation,attempt,lease_id,status,receipt_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(receiptChecksum, row.message_id, receiptType, row.generation, row.attempt, row.lease_id, projected.status, JSON.stringify(projected), projected.recordedAt);
@@ -801,8 +804,10 @@ function reconcileAgentCommunications(options = {}) {
                     next = lease.side_effect_state === "none" ? "lease_expired" : "recovery_required";
                 else if (row.state === "runner_starting" && now - Date.parse(row.updated_at) > policy.agentRunnerStartTimeoutMs)
                     next = "startup_timeout";
-                else if (row.state === "runner_started" && now - Date.parse(row.updated_at) > policy.agentAckTimeoutMs)
+                else if (row.state === "runner_started" && (0, dispatch_communication_policy_1.communicationRequiresDispatchAck)(row.task_id) && now - Date.parse(row.updated_at) > policy.agentAckTimeoutMs)
                     next = "ack_timeout";
+                else if (row.state === "runner_started" && !(0, dispatch_communication_policy_1.communicationRequiresDispatchAck)(row.task_id) && lease && now - Date.parse(lease.heartbeat_at) > policy.agentHeartbeatLostTimeoutMs)
+                    next = lease.side_effect_state === "none" ? "heartbeat_lost" : "recovery_required";
                 else if (["acknowledged", "executing", "waiting_dependency"].includes(row.state) && lease && now - Date.parse(lease.heartbeat_at) > policy.agentHeartbeatLostTimeoutMs)
                     next = lease.side_effect_state === "none" ? "heartbeat_lost" : "recovery_required";
                 if (!next || !allowedTransitions[row.state]?.has(next))
@@ -1030,7 +1035,7 @@ function markAgentCommunicationRunnerStarted(messageId, detail = {}) {
     if (["runner_started", "acknowledged", "executing", "waiting_dependency", "result_submitted", "verifying", "accepted", "completed"].includes(current.state))
         return { envelope: current, unchanged: true };
     const result = transitionAgentCommunication(messageId, "runner_started", { eventType: "runner_started", detail });
-    projectCommunicationEvent(result.envelope, "agent_progress", { ...detail, phase: "runner_started", summary: detail?.summary || "执行 Agent 已启动，等待 ACK" });
+    projectCommunicationEvent(result.envelope, "agent_progress", { ...detail, phase: "runner_started", summary: detail?.summary || ((0, dispatch_communication_policy_1.communicationRequiresDispatchAck)(current.taskId) ? "执行 Agent 已启动，等待 ACK" : "执行 Agent 已启动，使用轻量回执") });
     return result;
 }
 /** Compatibility bridge for runtimes that still return ACK inside CCM_AGENT_RECEIPT. */
@@ -1061,10 +1066,14 @@ function submitAgentCommunicationResult(messageId, result = {}) {
         throw new Error("Agent Communication消息不存在");
     if (["runner_starting", "runner_started"].includes(current.state)) {
         const payload = current.payload || {};
-        if (payload.strictPreExecutionAck === true || payload.strict_pre_execution_ack === true) {
+        const requireAck = (0, dispatch_communication_policy_1.communicationRequiresDispatchAck)(current.taskId);
+        if (requireAck && (payload.strictPreExecutionAck === true || payload.strict_pre_execution_ack === true)) {
             throw new Error("新任务必须在执行前通过 acknowledge_assignment 完成真实ACK，Result不能补造ACK");
         }
-        ensureAgentCommunicationAcknowledged(messageId, result.ack || result);
+        if (requireAck)
+            ensureAgentCommunicationAcknowledged(messageId, result.ack || result);
+        else if (current.state === "runner_starting")
+            markAgentCommunicationRunnerStarted(messageId, { ackRequired: false });
         current = getAgentCommunication(messageId, { includeEvents: false, includeReceipts: false });
     }
     if (current.state === "acknowledged")

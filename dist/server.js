@@ -34,6 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+const dispatch_receipt_template_1 = require("./agents/dispatch-receipt-template");
+const dispatch_profile_1 = require("./agents/dispatch-profile");
 const http = __importStar(require("http"));
 const conversation_attempt_1 = require("./agents/conversation-attempt");
 const fs = __importStar(require("fs"));
@@ -186,6 +188,7 @@ const pet_asset_pack_1 = require("./modules/pets/pet-asset-pack");
 const server_agent_runner_1 = require("./server-agent-runner");
 const server_static_1 = require("./server-static");
 const server_bootstrap_1 = require("./server-bootstrap");
+const dispatch_startup_barrier_1 = require("./agents/dispatch-startup-barrier");
 // === 运行时内存状态与心跳推送 ===
 let PORT = 3080;
 let LISTEN_HOST = "127.0.0.1";
@@ -451,6 +454,7 @@ function actorIdFromRequest(req) {
     return String(req?.ccmAuth?.userId || req?.auth?.username || req?.ccmAuth?.username || req?.ccmAuth?.caller || "local-user");
 }
 function handleRequest(req, res) {
+    require('./system/performance-monitor').trackHttpPerformance(req, res);
     const parsed = url.parse(req.url, true);
     const pathname = parsed.pathname || "/";
     (0, api_access_control_1.applySecurityHeaders)(res);
@@ -507,6 +511,7 @@ function handleRequest(req, res) {
             success: ready,
             ready,
             lifecycle_state: SERVICE_LIFECYCLE_STATE,
+            execution_recovery: (0, dispatch_startup_barrier_1.dispatchStartupStatus)(),
             identity: lock.owner,
             identity_verified: lock.identity_verified,
         }, ready ? 200 : 503);
@@ -668,6 +673,8 @@ function handleRequest(req, res) {
         readRequestJson(req).then(payload => {
             const runId = decodeURIComponent(runApprovalsMatch[1]);
             if (runApprovalsMatch[2]) {
+                if (!(0, agent_governance_store_1.listAgentApprovals)(runId).some(item => item.approvalId === decodeURIComponent(runApprovalsMatch[2])))
+                    throw new Error("审批不属于当前 Run");
                 const approval = (0, agent_governance_store_1.decideAgentApproval)(decodeURIComponent(runApprovalsMatch[2]), { status: payload.status || payload.decision, decisionBy: actorIdFromRequest(req), reason: payload.reason, actionFingerprint: payload.action_fingerprint || payload.actionFingerprint });
                 (0, utils_1.sendJson)(res, { success: true, approval });
                 return;
@@ -732,7 +739,7 @@ function handleRequest(req, res) {
     const runUsageMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/usage$/);
     if (runUsageMatch && req.method === "GET") {
         const runId = decodeURIComponent(runUsageMatch[1]);
-        (0, utils_1.sendJson)(res, { success: true, run_id: runId, budget_incidents: (0, agent_governance_store_1.listAgentBudgetIncidents)(runId) });
+        (0, utils_1.sendJson)(res, { success: true, run_id: runId, usage: (0, agent_run_store_1.listAgentRunUsage)(runId), budget_incidents: (0, agent_governance_store_1.listAgentBudgetIncidents)(runId) });
         return;
     }
     const runArtifactsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/artifacts$/);
@@ -958,7 +965,7 @@ function handleRequest(req, res) {
     }
     // 2. 静态页面与 React SPA 托管
     if (pathname === "/" || pathname === "/index.html") {
-        return (0, server_static_1.sendFile)(res, path.join(utils_1.PUBLIC_DIR, "index.html"));
+        return (0, server_static_1.sendFile)(res, path.join(utils_1.PUBLIC_DIR, "index.html"), req);
     }
     if (pathname.startsWith("/assets/") || pathname.startsWith("/public/") ||
         pathname.startsWith("/css/") || pathname.startsWith("/js/") ||
@@ -966,16 +973,16 @@ function handleRequest(req, res) {
         pathname === "/favicon.svg" || pathname === "/icons.svg" || pathname === "/favicon.ico") {
         const filePath = path.join(utils_1.PUBLIC_DIR, pathname.startsWith("/public/") ? pathname.replace("/public/", "") : pathname);
         if (fs.existsSync(filePath)) {
-            return (0, server_static_1.sendFile)(res, filePath);
+            return (0, server_static_1.sendFile)(res, filePath, req);
         }
     }
     // SPA fallback
     if (!pathname.startsWith("/api/") && req.method === "GET") {
         const filePath = path.join(utils_1.PUBLIC_DIR, pathname);
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-            return (0, server_static_1.sendFile)(res, filePath);
+            return (0, server_static_1.sendFile)(res, filePath, req);
         }
-        return (0, server_static_1.sendFile)(res, path.join(utils_1.PUBLIC_DIR, "index.html"));
+        return (0, server_static_1.sendFile)(res, path.join(utils_1.PUBLIC_DIR, "index.html"), req);
     }
     // 提供飞书扫码二维码等临时文件访问的动态路由
     if (pathname.startsWith("/api/uploads/") && req.method === "GET") {
@@ -1710,7 +1717,6 @@ function handleRequest(req, res) {
                             run_id: "",
                             interruption: null,
                             ...extras,
-                            ...(discussionTaskId && !newTopic && mode === "conversation" ? { task_id: discussionTaskId } : {}),
                             source: source === "feishu" ? "feishu-project-main-agent-reply" : "web-project-main-agent-reply",
                         });
                     }
@@ -2015,11 +2021,14 @@ function handleRequest(req, res) {
                     workflowDecision: projectFirstTurn.workflowDecision,
                 };
                 const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({
+                    messageId: safeClientMessageId, message, scopeId: project,
                     workflowDecision: projectFirstTurn.workflowDecision,
                     candidates: recoverableProjectCandidates,
                     exactSessionId: exactProjectSessionId,
                     scope: "project",
                 });
+                require("./modules/collaboration/task-session-source-discussion").saveTaskSourceDiscussion({ route: routeDecision, scope: "project", scopeId: project, sessionId: exactProjectSessionId,
+                    messageId: safeClientMessageId, message, assistantMessageId: safeAssistantMessageId, newTopic });
                 const bindProjectContinuationCandidate = async (candidate) => {
                     if (!candidate)
                         return null;
@@ -2036,12 +2045,17 @@ function handleRequest(req, res) {
                     }
                     if (summary?.candidateKind === "completed") {
                         const continuationKind = String(projectFirstTurn.workflowDecision?.continuationKind || "supplement");
+                        require("./modules/collaboration/task-session-store").appendTaskSessionSourceMessage(candidate.id, {
+                            id: safeClientMessageId, role: "user", content: finalMessage, attachments: files,
+                        }, { scope: "project", scope_id: project, exact_session_id: exactProjectSessionId, kind: "authorized_task_continuation" });
                         (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
-                            execution_attempt: Math.max(0, Number(candidate.execution_attempt || candidate.attempt || 0)) + 1,
+                            ...require("./modules/collaboration/task-session-development-cycle").taskSessionDevelopmentCycle(candidate, "project-completed-follow-up", false, { business_goal: `${candidate.business_goal || candidate.title || ""}\n${finalMessage}` }),
+                            business_goal: `${candidate.business_goal || candidate.title || ""}\n${finalMessage}`,
+                            status: "pending",
                             continuation_route_kind: continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
                             resumed_from_completed_at: new Date().toISOString(),
                             status_detail: continuationKind === "revise_goal" ? "已按用户要求开启返工执行" : "已从正式交付任务继续未完成工作项",
-                        });
+                        }, { developmentCycleSource: "project-completed-follow-up" });
                     }
                     else {
                         (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
@@ -2508,7 +2522,7 @@ function handleRequest(req, res) {
                     let activeTaskAgentSession = bound.session;
                     let activeAgentSessionOptions = bound.options;
                     const existingTask = parentProjectMainTask;
-                    const plan = existingTask?.workflow_meta?.project_main_plan || projectFirstTurn.plan || await (0, project_main_agent_1.planProjectMainTask)({
+                    const plan = (!existingTask?.plan_revision_required && existingTask?.workflow_meta?.project_main_plan) || (!existingTask?.plan_revision_required && projectFirstTurn.plan) || await (0, project_main_agent_1.planProjectMainTask)({
                         project,
                         projectSessionId: exactProjectSessionId,
                         userMessage: finalMessage,
@@ -2533,7 +2547,7 @@ function handleRequest(req, res) {
                     const workItemMemoryReceiptStarted = new Set();
                     let worktreeMergeQueue = Promise.resolve();
                     projectRun.project_main_task_id = task.id;
-                    projectRun.status = plan.requiresConfirmation && !existingTask ? "paused" : "queued";
+                    projectRun.status = plan.requiresConfirmation && (!existingTask || existingTask.plan_revision_required) ? "paused" : "queued";
                     projectRun.updated_at = new Date().toISOString();
                     (0, chat_runs_1.saveProjectChatRuns)();
                     const feishuTask = source === "feishu";
@@ -2647,7 +2661,7 @@ function handleRequest(req, res) {
                         operation: () => (0, project_main_agent_1.executeProjectMainTask)({
                             task,
                             plan,
-                            confirmed: !!existingTask || !plan.requiresConfirmation,
+                            confirmed: (!!existingTask && !existingTask.plan_revision_required) || !plan.requiresConfirmation,
                             verificationCommands: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands)
                                 ? (0, db_1.loadProjectConfigs)()[project].verification_commands
                                 : [],
@@ -2685,9 +2699,20 @@ function handleRequest(req, res) {
                                     workerSession = (0, agent_sessions_1.openTaskAgentSession)({ scopeId: `${exactProjectSessionId}:${task.id}:${workItem.id}`, taskId: task.id, groupId: "project-chat", project, agentType });
                                     workItemAgentSessions.set(String(workItem.id), workerSession);
                                 }
+                                const isolatedWorkDir = (0, worktree_1.prepareChildAgentWorkDir)(workDir, {
+                                    mode: task.workflow_policy_snapshot?.workspace === "isolated_worktree" || (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task).profile === "standard" && workItem.dispatchContract?.worktree?.strategy === "isolated" ? "worktree" : "shared",
+                                    failClosed: task.workflow_policy_snapshot?.workspace === "isolated_worktree" || (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task).profile === "standard" && workItem.dispatchContract?.worktree?.strategy === "isolated",
+                                    taskId: task.id,
+                                    agentName: workItem.id,
+                                    sourceProject: project,
+                                    reuseKey: `${task.id}-${workItem.id}`,
+                                });
+                                const workerWorkDir = isolatedWorkDir.workDir;
+                                workerSession = await require("./modules/collaboration/task-session-continuation-launch").prepareTaskSessionContinuationLaunch(task, workerSession, workerWorkDir);
+                                workItemAgentSessions.set(String(workItem.id), workerSession);
                                 let workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
                                 const workerExecutionId = `${task.id}:${workItem.id}:attempt:${workItem.attempts}`;
-                                const needsMemoryReceipt = firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
+                                const needsMemoryReceipt = (0, dispatch_receipt_template_1.dispatchRequiresAck)(task) && firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
                                 const workerMemoryChallenge = needsMemoryReceipt
                                     ? (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
                                         project,
@@ -2721,81 +2746,75 @@ function handleRequest(req, res) {
                                 const workerProjectSessionContext = memoryMcpEnabled
                                     ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, workerMemoryChallenge)
                                     : projectSessionContext;
-                                const isolatedWorkDir = (0, worktree_1.prepareChildAgentWorkDir)(workDir, {
-                                    mode: workItem.dispatchContract?.worktree?.strategy === "isolated" ? "worktree" : "shared",
-                                    failClosed: workItem.dispatchContract?.worktree?.strategy === "isolated",
-                                    taskId: task.id,
-                                    agentName: workItem.id,
-                                    sourceProject: project,
-                                    reuseKey: `${task.id}-${workItem.id}`,
-                                });
-                                const workerWorkDir = isolatedWorkDir.workDir;
-                                if (!workItem.dispatchContract)
+                                if ((0, dispatch_receipt_template_1.dispatchRequiresAck)(task) && !workItem.dispatchContract)
                                     throw new Error("项目子 Agent 缺少已确认计划工作合同，禁止写入");
-                                let ackDoneState = null;
-                                const ackSnapshot = (0, utils_1.createFileChangeSnapshot)(workerWorkDir);
-                                const ackOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckPrompt)(workItem.dispatchContract), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
-                                    background: true,
-                                    taskId: task.id,
-                                    executionId: `${workerExecutionId}:semantic-ack`,
-                                    projectSessionId: exactProjectSessionId,
-                                    role: "project-child-agent-ack",
-                                    source: "project-main-agent",
-                                    title: `${workItem.title} · ACK`,
-                                    allowedTools: [],
-                                    cliAllowedTools: [],
-                                    // This preflight accepts one JSON response only. Claude's empty
-                                    // --allowed-tools list does not disable Bash by itself, so make
-                                    // the built-in tool set unavailable at the provider harness.
-                                    disableBuiltinTools: true,
-                                    agentSession: workerSessionOptions,
-                                    taskAgentSessionId: workerSession.id,
-                                    onDone: (state) => { ackDoneState = state; },
-                                });
-                                const ackChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
-                                if (Number(ackChanges?.count || 0) > 0)
-                                    throw new Error("项目子 Agent ACK 预检产生了未授权文件副作用，已阻止正式写入");
-                                let semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, ackOutput);
-                                if (!semanticAck.ok && (0, project_worker_semantic_ack_1.projectWorkerSemanticAckCanRepair)(semanticAck.issues)) {
-                                    let repairDoneState = null;
-                                    const repairOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckRepairPrompt)(workItem.dispatchContract, semanticAck.issues), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
+                                if ((0, dispatch_receipt_template_1.dispatchRequiresAck)(task)) {
+                                    let ackDoneState = null;
+                                    const ackSnapshot = (0, utils_1.createFileChangeSnapshot)(workerWorkDir);
+                                    const ackOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckPrompt)(workItem.dispatchContract), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
                                         background: true,
                                         taskId: task.id,
-                                        executionId: `${workerExecutionId}:semantic-ack-repair`,
+                                        executionId: `${workerExecutionId}:semantic-ack`,
                                         projectSessionId: exactProjectSessionId,
                                         role: "project-child-agent-ack",
                                         source: "project-main-agent",
-                                        title: `${workItem.title} · ACK 修正`,
+                                        title: `${workItem.title} · ACK`,
                                         allowedTools: [],
                                         cliAllowedTools: [],
+                                        // This preflight accepts one JSON response only. Claude's empty
+                                        // --allowed-tools list does not disable Bash by itself, so make
+                                        // the built-in tool set unavailable at the provider harness.
                                         disableBuiltinTools: true,
                                         agentSession: workerSessionOptions,
                                         taskAgentSessionId: workerSession.id,
-                                        onDone: (state) => { repairDoneState = state; },
+                                        onDone: (state) => { ackDoneState = state; },
                                     });
-                                    const repairChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
-                                    if (Number(repairChanges?.count || 0) > 0)
-                                        throw new Error("项目子 Agent ACK 修正产生了未授权文件副作用，已阻止正式写入");
-                                    semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, repairOutput);
-                                    if (semanticAck.ok)
-                                        ackDoneState = repairDoneState;
+                                    const ackChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
+                                    if (Number(ackChanges?.count || 0) > 0)
+                                        throw new Error("项目子 Agent ACK 预检产生了未授权文件副作用，已阻止正式写入");
+                                    let semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, ackOutput);
+                                    if (!semanticAck.ok && (0, project_worker_semantic_ack_1.projectWorkerSemanticAckCanRepair)(semanticAck.issues)) {
+                                        let repairDoneState = null;
+                                        const repairOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckRepairPrompt)(workItem.dispatchContract, semanticAck.issues), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
+                                            background: true,
+                                            taskId: task.id,
+                                            executionId: `${workerExecutionId}:semantic-ack-repair`,
+                                            projectSessionId: exactProjectSessionId,
+                                            role: "project-child-agent-ack",
+                                            source: "project-main-agent",
+                                            title: `${workItem.title} · ACK 修正`,
+                                            allowedTools: [],
+                                            cliAllowedTools: [],
+                                            disableBuiltinTools: true,
+                                            agentSession: workerSessionOptions,
+                                            taskAgentSessionId: workerSession.id,
+                                            onDone: (state) => { repairDoneState = state; },
+                                        });
+                                        const repairChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
+                                        if (Number(repairChanges?.count || 0) > 0)
+                                            throw new Error("项目子 Agent ACK 修正产生了未授权文件副作用，已阻止正式写入");
+                                        semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, repairOutput);
+                                        if (semanticAck.ok)
+                                            ackDoneState = repairDoneState;
+                                    }
+                                    if (!semanticAck.ok)
+                                        throw new Error(`项目子 Agent 未通过业务语义 ACK 门禁：${semanticAck.issues.join(", ")}`);
+                                    workerSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(workerSession.id, {
+                                        nativeSessionId: ackDoneState?.nativeSessionId || "",
+                                        nativeContinuationEvidence: ackDoneState?.nativeContinuationEvidence || null,
+                                        success: ackDoneState?.isError !== true,
+                                        error: ackDoneState?.error || "",
+                                        runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
+                                    }) || workerSession;
+                                    workItemAgentSessions.set(String(workItem.id), workerSession);
+                                    workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
+                                    (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_worker_semantic_ack", title: `${project} 已确认业务工作单`, detail: `已绑定需求 ${workItem.dispatchContract.requirementRevision}、计划 ${workItem.dispatchContract.planRevision} 和步骤 ${workItem.dispatchContract.stepId}`, status: "ok", phase: "dispatching", agent: project, data: { requirementChecksum: workItem.dispatchContract.requirementChecksum, planChecksum: workItem.dispatchContract.planChecksum, stepId: workItem.dispatchContract.stepId, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, contentStored: false } });
                                 }
-                                if (!semanticAck.ok)
-                                    throw new Error(`项目子 Agent 未通过业务语义 ACK 门禁：${semanticAck.issues.join(", ")}`);
-                                workerSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(workerSession.id, {
-                                    nativeSessionId: ackDoneState?.nativeSessionId || "",
-                                    nativeContinuationEvidence: ackDoneState?.nativeContinuationEvidence || null,
-                                    success: ackDoneState?.isError !== true,
-                                    error: ackDoneState?.error || "",
-                                    runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-                                }) || workerSession;
-                                workItemAgentSessions.set(String(workItem.id), workerSession);
-                                workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
-                                (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_worker_semantic_ack", title: `${project} 已确认业务工作单`, detail: `已绑定需求 ${workItem.dispatchContract.requirementRevision}、计划 ${workItem.dispatchContract.planRevision} 和步骤 ${workItem.dispatchContract.stepId}`, status: "ok", phase: "dispatching", agent: project, data: { requirementChecksum: workItem.dispatchContract.requirementChecksum, planChecksum: workItem.dispatchContract.planChecksum, stepId: workItem.dispatchContract.stepId, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, contentStored: false } });
                                 const workerPrompt = [
                                     workerToolContext.prompt,
                                     projectKnowledge.context,
                                     workerProjectSessionContext,
+                                    require("./modules/collaboration/task-session-continuation-context").renderTaskSessionContinuationContext(task),
                                     (0, memory_1.buildProjectExecutionBrief)(project, workItem.objective, {
                                         workDir: workerWorkDir,
                                         query: finalMessage,
@@ -2804,7 +2823,7 @@ function handleRequest(req, res) {
                                         memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
                                     }),
                                     `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n整体业务目标：${workItem.dispatchContract?.businessGoal || plan.summary}\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过，也不得改写业务目标、验收标准或排除项。`,
-                                    workItem.dispatchContract ? `计划派发合同绑定：${JSON.stringify({ workItemId: workItem.dispatchContract.workItemId, stepId: workItem.dispatchContract.stepId, title: workItem.dispatchContract.title, objective: workItem.dispatchContract.objective, businessGoal: workItem.dispatchContract.businessGoal, requirementId: workItem.dispatchContract.requirementId, requirementRevision: workItem.dispatchContract.requirementRevision, requirementChecksum: workItem.dispatchContract.requirementChecksum, planRevision: workItem.dispatchContract.planRevision, planChecksum: workItem.dispatchContract.planChecksum, contractChecksum: workItem.dispatchContract.contractChecksum, sourceManifestChecksum: workItem.dispatchContract.sourceManifestChecksum, files: workItem.dispatchContract.files, dependsOn: workItem.dispatchContract.dependsOn, allowedTools: workItem.dispatchContract.allowedTools, forbiddenPaths: workItem.dispatchContract.forbiddenPaths, constraints: workItem.dispatchContract.constraints, exclusions: workItem.dispatchContract.exclusions, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, acceptance: workItem.dispatchContract.acceptance, verification: workItem.dispatchContract.verification, worktree: workItem.dispatchContract.worktree })}` : "",
+                                    (0, dispatch_receipt_template_1.dispatchRequiresAck)(task) && workItem.dispatchContract ? `计划派发合同绑定：${JSON.stringify({ workItemId: workItem.dispatchContract.workItemId, stepId: workItem.dispatchContract.stepId, title: workItem.dispatchContract.title, objective: workItem.dispatchContract.objective, businessGoal: workItem.dispatchContract.businessGoal, requirementId: workItem.dispatchContract.requirementId, requirementRevision: workItem.dispatchContract.requirementRevision, requirementChecksum: workItem.dispatchContract.requirementChecksum, planRevision: workItem.dispatchContract.planRevision, planChecksum: workItem.dispatchContract.planChecksum, contractChecksum: workItem.dispatchContract.contractChecksum, sourceManifestChecksum: workItem.dispatchContract.sourceManifestChecksum, files: workItem.dispatchContract.files, dependsOn: workItem.dispatchContract.dependsOn, allowedTools: workItem.dispatchContract.allowedTools, forbiddenPaths: workItem.dispatchContract.forbiddenPaths, constraints: workItem.dispatchContract.constraints, exclusions: workItem.dispatchContract.exclusions, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, acceptance: workItem.dispatchContract.acceptance, verification: workItem.dispatchContract.verification, worktree: workItem.dispatchContract.worktree })}` : "",
                                 ].filter(Boolean).join("\n\n");
                                 if (memoryMcpEnabled) {
                                     const bootstrapTokens = (0, context_budget_1.estimateTextTokens)(workerPrompt);
@@ -2842,7 +2861,7 @@ function handleRequest(req, res) {
                                     runtimeToolDispatchGate: workerToolContext.dispatchGate,
                                     agentSession: workerSessionOptions,
                                     taskAgentSessionId: workerSession.id,
-                                    planDispatchContract: workItem.dispatchContract || null,
+                                    planDispatchContract: (0, dispatch_receipt_template_1.dispatchRequiresAck)(task) ? workItem.dispatchContract || null : null,
                                     planId: task.id,
                                     planRevision: Number(workItem.dispatchContract?.planRevision || 0),
                                     planChecksum: String(workItem.dispatchContract?.planChecksum || ""),
@@ -2873,7 +2892,7 @@ function handleRequest(req, res) {
                                     usage: doneState?.usage || null,
                                     error: doneState?.error || "",
                                 };
-                                const deliveryJob = (0, project_worker_delivery_1.enqueueProjectWorkerDelivery)({ prepared: isolatedWorkDir, workItem, mainWorkDir: workDir, queue: worktreeMergeQueue });
+                                const deliveryJob = (0, project_worker_delivery_1.enqueueProjectWorkerDelivery)({ prepared: isolatedWorkDir, workItem, mainWorkDir: workDir, queue: worktreeMergeQueue, taskId: task.id });
                                 worktreeMergeQueue = deliveryJob.queue;
                                 const delivery = await deliveryJob.promise;
                                 if (delivery)
@@ -3270,6 +3289,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         bootId: (0, process_lifecycle_1.getProcessBootId)(),
     });
     (0, git_workspace_runtime_1.cleanupStaleGitMutationLeases)();
+    (0, dispatch_startup_barrier_1.prepareDispatchStartup)();
     (0, project_git_1.cleanupStaleProjectCloneArtifacts)();
     (0, context_engine_recovery_1.registerContextEngineRecoveryHook)();
     const startupCollabCtx = createCollabCtx();
@@ -3280,6 +3300,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
     });
     server.on("close", () => {
+        (0, dispatch_startup_barrier_1.stopDispatchStartup)();
         STARTUP_RECOVERY_TRIGGER = null;
         SERVICE_LIFECYCLE_STATE = "stopped";
         (0, projects_1.stopFeishuChannelSupervisorForServer)();
@@ -3309,11 +3330,15 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         petAgentMilestoneProjector.stop();
         (0, soak_test_1.shutdownSoakMonitor)();
         if (!managedShutdownInProgress) {
+            require('./system/readonly-performance-service').stopReadonlyPerformanceWorker();
+            require('./system/performance-monitor').stopPerformanceMonitor();
+            require('./system/metrics-performance-summary').stopMetricsPerformanceSummary();
             (0, task_store_1.closeSqliteTaskStore)();
             (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
         }
     });
     server.listen(port, LISTEN_HOST, () => {
+        void require('./system/task-list-preparation').prepareTaskListReadCache();
         // Port ownership and the data-directory lock are the fail-closed singleton
         // gates. No mutable startup work may run before both have succeeded.
         SERVICE_LIFECYCLE_STATE = "ready";
@@ -3340,9 +3365,13 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
                     console.warn(`[工具市场] 启动恢复失败：${error?.message || error}`);
                 }
                 try {
-                    bootstrapServerRuntime(startupCollabCtx, port);
+                    void bootstrapServerRuntime(startupCollabCtx, port).catch(error => {
+                        (0, dispatch_startup_barrier_1.failDispatchStartup)(error);
+                        console.error(`[执行恢复] ${error?.code || "startup_failed"}`);
+                    });
                 }
                 catch (error) {
+                    (0, dispatch_startup_barrier_1.failDispatchStartup)(error);
                     console.error(`[启动恢复] 后台启动恢复失败：${error?.stack || error?.message || error}`);
                 }
             });
@@ -3360,7 +3389,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
                 startupCollabCtx.broadcastPetSpeech?.("global-agent", { role: payload.role, text: payload.text, final: true, source: payload.source });
             });
             (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
-            (0, agent_communication_v2_1.startAgentCommunicationWatchdog)({
+            void (0, dispatch_startup_barrier_1.afterDispatchStartup)(() => (0, agent_communication_v2_1.startAgentCommunicationWatchdog)({
                 onSafeRetry: outcome => {
                     const reason = `Agent Communication ${outcome.toState}，确认无副作用后自动重试`;
                     try {
@@ -3373,7 +3402,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
                     }
                     const deadline = Date.now() + 60_000;
                     const retryAfterRunnerStops = () => {
-                        const result = (0, collaboration_1.retryTask)(outcome.taskId, startupCollabCtx, reason, true);
+                        const result = (0, collaboration_1.retryTask)(outcome.taskId, startupCollabCtx, reason, true, "", { automaticRecovery: true });
                         if (result?.success)
                             return;
                         if (Date.now() < deadline && [409, 429].includes(Number(result?.status || 0))) {
@@ -3392,7 +3421,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
                     const timer = setTimeout(retryAfterRunnerStops, 250);
                     timer.unref?.();
                 },
-            });
+            })).catch(error => console.warn(`[Agent Communication] 启动恢复未放行：${error?.code || "recovery_failed"}`));
             const petAutoStart = (0, pets_1.maybeAutoStartPet)(port);
             if (!petAutoStart.success) {
                 console.warn(`[桌面宠物] 自动启动失败：${"error" in petAutoStart ? petAutoStart.error || "未知错误" : "未知错误"}`);
@@ -3425,7 +3454,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
             // CCM_AUTO_RESUME_GLOBAL_AGENT=1.
             const autoResumeGlobalAgent = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_RESUME_GLOBAL_AGENT || ""));
             if (autoResumeGlobalAgent) {
-                void (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port)
+                void (0, dispatch_startup_barrier_1.afterDispatchStartup)(() => (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port))
                     .then(result => {
                     if (result.total > 0)
                         console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`);
@@ -3438,10 +3467,12 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
             else {
                 console.log("[全局 Agent] 启动自动续跑默认关闭；如需恢复中断运行，请显式设置 CCM_AUTO_RESUME_GLOBAL_AGENT=1");
             }
-            (0, project_feishu_turn_queue_1.startProjectFeishuTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
-            (0, global_agent_1.startGlobalWebTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx);
-            (0, conversation_turn_control_1.reconcileTaskDispatchTurns)();
-            (0, conversation_turn_control_1.startWebConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
+            void (0, dispatch_startup_barrier_1.afterDispatchStartup)(() => {
+                (0, project_feishu_turn_queue_1.startProjectFeishuTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
+                (0, global_agent_1.startGlobalWebTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx);
+                void (0, conversation_turn_control_1.reconcileTaskDispatchTurns)().catch(error => console.warn(`[会话对账] ${error?.code || "reconcile_failed"}`));
+                (0, conversation_turn_control_1.startWebConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
+            }).catch(error => console.warn(`[会话恢复] 执行恢复未放行：${error?.code || "recovery_failed"}`));
             try {
                 const feishuConfig = (0, db_1.loadFeishuConfig)();
                 const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));
@@ -3527,6 +3558,10 @@ if (require.main === module) {
             signal,
             exit_code: exitCode,
         });
+        require('./system/readonly-performance-service').stopReadonlyPerformanceWorker();
+        require('./system/performance-monitor').stopPerformanceMonitor();
+        require('./system/metrics-performance-summary').stopMetricsPerformanceSummary();
+        require('./core/task-store-checkpoint').stopTaskStoreCheckpoints();
         (0, task_store_1.closeSqliteTaskStore)();
         server.finalizeManagedShutdown?.();
         clearTimeout(forceExit);

@@ -4,6 +4,6 @@ import type { NativeToolResult } from './native-query-messages';
 import { runReadonlyToolsAdaptive } from '../system/readonly-tool-concurrency';
 export type NativeReadonlyRunner = typeof runReadonlyToolsAdaptive;
 /** A complete model batch is the scheduling boundary, never an SSE arrival. */
-export declare function createNativeToolExecution(input: NativeQueryLoopInput, save: (rows: NativeToolResult[]) => NativeToolResult[]): ((calls: ProviderToolCall[], ctx: NativeQueryExecuteContext) => Promise<NativeToolResult[]>) & {
+export declare function createNativeToolExecution(input: NativeQueryLoopInput, save: (rows: NativeToolResult[]) => NativeToolResult[], beforeExecute?: (calls: ProviderToolCall[]) => void): ((calls: ProviderToolCall[], ctx: NativeQueryExecuteContext) => Promise<NativeToolResult[]>) & {
     markModelRetry: () => void;
 };

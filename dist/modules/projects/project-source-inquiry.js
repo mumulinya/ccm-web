@@ -40,10 +40,10 @@ const db_1 = require("../../core/db");
 const source_inquiry_contract_1 = require("../../agents/source-inquiry-contract");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
-const project_main_agent_source_1 = require("./project-main-agent-source");
 const project_validation_1 = require("./project-validation");
 const agent_cache_affinity_1 = require("../../system/agent-cache-affinity");
 const source_evidence_guidance_1 = require("../../agents/source-evidence-guidance");
+const readonly_performance_service_1 = require("../../system/readonly-performance-service");
 const receiptCache = new Map();
 function hash(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
@@ -118,17 +118,12 @@ async function requestProjectSourceInquiry(input) {
     const readDepth = input.readDepth === "broad" ? "broad" : "focused";
     const generation = Math.max(0, Math.floor(Number(input.generation || 0)));
     const workDir = projectWorkDir(project);
-    const manifest = (0, project_main_agent_source_1.buildProjectSourceManifest)(project, workDir);
+    const manifest = await (0, readonly_performance_service_1.readProjectSourcesOffThread)(project, workDir, 'manifest', {}, input.signal);
     const evidenceGaps = cleanList(input.evidenceGaps, 8, 500);
     const key = cacheKey({ project, projectSessionId, generation, readDepth, question, evidenceGaps });
     const cached = receiptCache.get(key);
     if (cached && cached.manifestChecksum === manifest.checksum) {
-        const currentEvidence = (0, project_main_agent_source_1.readProjectSourceEvidence)({
-            project,
-            workDir,
-            manifest,
-            selectedPaths: cached.result.evidence.selectedPaths,
-        });
+        const currentEvidence = await (0, readonly_performance_service_1.readProjectSourcesOffThread)(project, workDir, 'legacy-read', { selectedPaths: cached.result.evidence.selectedPaths, expectedManifestChecksum: manifest.checksum }, input.signal);
         const currentChecksums = new Map(currentEvidence.files.map(file => [file.path, file.checksum]));
         const evidenceUnchanged = cached.result.evidence.files.length === currentEvidence.files.length
             && cached.result.evidence.files.every(file => currentChecksums.get(file.path) === file.checksum);
@@ -178,12 +173,13 @@ Return JSON only: {"paths":["relative/path"],"reason":"why these files are suffi
         }], 1000, "项目源码选择失败", cacheBinding("project_source_selection"), input.signal);
     const selectedPaths = cleanList(selection?.paths, maxFiles, 500)
         .map(item => item.replace(/\\/g, "/").replace(/^\.\/+/, ""));
-    const source = (0, project_main_agent_source_1.readProjectSourceEvidence)({ project, workDir, manifest, selectedPaths });
+    const source = await (0, readonly_performance_service_1.readProjectSourcesOffThread)(project, workDir, 'legacy-read', { selectedPaths, expectedManifestChecksum: manifest.checksum }, input.signal);
     const safeFiles = source.files.map(file => ({
         path: file.path,
         checksum: file.checksum,
         evidenceId: evidenceId(project, file.path, file.checksum),
         chars: file.chars,
+        startLine: file.startLine, endLine: file.endLine, truncated: file.truncated,
     }));
     const synthesis = await modelJson(config, [{
             role: "system",

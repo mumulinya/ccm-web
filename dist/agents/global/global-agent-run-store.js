@@ -56,6 +56,7 @@ exports.stable = stable;
 exports.toolSignature = toolSignature;
 exports.validateTool = validateTool;
 const crypto = __importStar(require("crypto"));
+const deferred_tool_invocation_1 = require("../deferred-tool-invocation");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
@@ -188,6 +189,7 @@ function normalizeRun(run) {
     const lastUserSteer = normalizeGlobalAgentUserSteer(run?.last_user_steer || run?.lastUserSteer);
     return {
         version: 1,
+        ...(0, deferred_tool_invocation_1.normalizeDeferredToolEvidence)(run),
         id: String(run?.id || ""),
         trace_id: (0, reliability_ledger_1.ensureTraceId)(run?.trace_id, "global-agent"),
         session_id: String(run?.session_id || "default"),
@@ -198,6 +200,9 @@ function normalizeRun(run) {
         phase: (["answer", "investigate", "plan", "execute", "needs_confirmation", "complete"].includes(run?.phase) ? run.phase : "plan"),
         explicit_write_authorization: run?.explicit_write_authorization === true,
         turn_id: String(run?.turn_id || run?.turnId || "") || undefined,
+        source_access_principal: run?.source_access_principal || null,
+        source_message_id: String(run?.source_message_id || ''),
+        source_access_updates: Array.isArray(run?.source_access_updates) ? run.source_access_updates.slice(-120) : [],
         queue_scope: String(run?.queue_scope || run?.queueScope || "") || undefined,
         write_authorization_receipt: run?.write_authorization_receipt || run?.writeAuthorizationReceipt || null,
         writeAuthorizationReceipt: run?.writeAuthorizationReceipt || run?.write_authorization_receipt || null,
@@ -480,13 +485,16 @@ function validateTool(name, args) {
     return values;
 }
 exports.GLOBAL_AGENT_TOOL_SPECS = [
+    { name: 'list_project_sources', description: '按需列出一个已授权项目的源码文件，不读取其他项目，不产生开发任务。', required: ['project'], risk: 'read' },
+    { name: 'search_project_sources', description: '在已授权项目的源码清单内按字面文本搜索，返回路径、行号；搜索命中还需 read_project_sources 才能核对实现。', required: ['project', 'query'], risk: 'read' },
+    { name: 'read_project_sources', description: '只读核对已授权项目的指定文件或行范围。简单源码问题优先使用；复杂问题可以委托核对。读取不会授权修改。', required: ['project', 'files'], risk: 'read' },
     { name: "tool_search", description: "按需发现本轮尚未加载的低频只读或管理工具。", required: ["query"], risk: "read" },
     { name: "inspect_system", description: "读取 CCM 服务、项目、群聊、任务、定时任务和执行器概况。", risk: "read" },
     { name: "list_projects", description: "列出真实项目及 Agent 配置。", risk: "read" },
     { name: "inspect_project", description: "读取指定项目的路由配置；项目记忆由群聊主 Agent 和项目子 Agent 使用。", required: ["project"], risk: "read" },
     { name: "read_scope_instruction", description: "按 documentId 读取当前全局目录中已授权的项目或群聊认知文档；正文仅进入本轮上下文。", required: ["documentId"], risk: "read" },
-    { name: "request_project_source_inquiry", description: "委托指定项目主 Agent只读核对当前源码，返回安全结论、相对路径和证据引用；全局 Agent本身不读取项目文件。", required: ["project", "question", "read_depth"], risk: "read" },
-    { name: "request_group_source_inquiry", description: "委托指定群聊主 Agent只读核对其授权成员项目源码，适用于群聊归属或多项目问题；全局 Agent本身不读取项目文件。", required: ["group", "question", "read_depth"], risk: "read" },
+    { name: "request_project_source_inquiry", description: "复杂问题或需要独立核对时，委托指定项目主 Agent只读核对源码，返回结论和证据；简单问题优先使用项目源码读取工具。", required: ["project", "question", "read_depth"], risk: "read" },
+    { name: "request_group_source_inquiry", description: "委托指定群聊主 Agent核对授权成员项目源码，适用于多项目或需要独立核对的问题。", required: ["group", "question", "read_depth"], risk: "read" },
     { name: "list_groups", description: "列出群聊、成员项目及协调配置。", risk: "read" },
     { name: "list_tasks", description: "查询开发任务；可按 id 或 status 过滤。", risk: "read" },
     { name: "list_cron", description: "查询定时任务。", risk: "read" },

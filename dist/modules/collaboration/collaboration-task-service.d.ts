@@ -119,92 +119,14 @@ export declare function updateRequirementEpicFromPlan(payload: any): {
 export declare function classifyTaskContinuation(message: string): string;
 export declare function looksLikeTaskContinuation(message: string): boolean;
 export declare function hasStructuredTaskAcceptanceEvidence(task: any, updates?: any): boolean;
-export declare function validateTaskTerminalTransition(task: any, updates?: any): string;
-export declare function buildTaskTerminalDecisionV2(task: any, updates?: any): {
-    checksum: string;
-    schema: string;
-    task_id: any;
-    status: any;
-    acceptance_state: any;
-    actor: string;
-    gate_passed: boolean;
-    contract_checksum: string;
-    generation: number;
-    evidence_registry: {
-        evidenceIds: any[] | string[];
-        validCount: number;
-        staleCount: number;
-        acceptance: {
-            satisfied: boolean;
-            criteria: any[] | {
-                criterionId: string;
-                description: string;
-                expected: string;
-                verificationIds: string[];
-                status: string;
-                freshness: string;
-                evidenceIds: string[];
-                verifier: string;
-                reason: string;
-            }[];
-            evidenceIds: any[] | string[];
-        };
-    };
-    evidence_checksum: string;
-    reason: string;
-    decided_at: string;
-} | {
-    checksum: string;
-    schema: string;
-    task_id: any;
-    status: any;
-    acceptance_state: string;
-    actor: string;
-    gate_passed: boolean;
-    source_receipts: any[];
-    evidence_registry: {
-        evidenceIds: any[];
-        validCount: number;
-        staleCount: number;
-        acceptance: {
-            satisfied: boolean;
-            criteria: any[];
-            evidenceIds: any[];
-        };
-    };
-    evidence_checksum: string;
-    reason: any;
-    decided_at: string;
-} | {
-    checksum: string;
-    schema: string;
-    task_id: string;
-    status: string;
-    acceptance_state: string;
-    actor: string;
-    gate_passed: boolean;
-    evidence_registry: {
-        evidenceIds: string[];
-        validCount: number;
-        staleCount: number;
-        acceptance: {
-            satisfied: boolean;
-            criteria: {
-                criterionId: string;
-                description: string;
-                requiredEvidenceTypes: string[];
-                status: string;
-                evidenceIds: string[];
-            }[];
-            evidenceIds: string[];
-        };
-    };
-    evidence_checksum: string;
-    reason: string;
-    decided_at: string;
-};
+export declare function validateTaskTerminalTransition(task: any, updates?: any, options?: {
+    developmentCycleSource?: string;
+}): string;
+export declare function buildTaskTerminalDecisionV2(task: any, updates?: any): any;
 export declare function updateTask(id: string, updates: any, options?: {
     allowCancelledRecovery?: boolean;
+    repairProjectionOnReplay?: boolean;
+    developmentCycleSource?: string;
 }): any;
 export declare function normalizeTaskTerminalStateView(task: any): any;
 export declare function removeTaskFromQueues(taskId: string, requestedRunId?: string): number;
@@ -221,76 +143,7 @@ export declare function continueDailyDevTasksFromGaps(ctx: CollabCtx, options?: 
     max_per_task: number;
     results: any[];
 };
-export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, autoExecute?: boolean, parentRunId?: string): {
-    success: boolean;
-    status: number;
-    error: string;
-    code?: undefined;
-    reason?: undefined;
-    retry_after?: undefined;
-    remaining_ms?: undefined;
-    task?: undefined;
-    queued?: undefined;
-    queue_result?: undefined;
-    queue_status?: undefined;
-} | {
-    success: boolean;
-    status: number;
-    code: string;
-    error: string;
-    reason?: undefined;
-    retry_after?: undefined;
-    remaining_ms?: undefined;
-    task?: undefined;
-    queued?: undefined;
-    queue_result?: undefined;
-    queue_status?: undefined;
-} | {
-    success: boolean;
-    status: number;
-    error: any;
-    reason: string;
-    retry_after: any;
-    remaining_ms: any;
-    code?: undefined;
-    task?: undefined;
-    queued?: undefined;
-    queue_result?: undefined;
-    queue_status?: undefined;
-} | {
-    success: boolean;
-    task: any;
-    queued: boolean;
-    queue_result: any;
-    queue_status: {
-        total_queued: number;
-        running_targets: number;
-        target_status: any;
-        pending_tasks: number;
-        in_progress_tasks: number;
-        failed_tasks: number;
-        running_task_ids: string[];
-        running_run_ids: string[];
-        unified_scheduler: {
-            schema: string;
-            queued: number;
-            running_lanes: string[];
-            running_task_ids: string[];
-            workspace_lanes: string[];
-            queues: {
-                queue_key: string;
-                task_ids: string[];
-            }[];
-        };
-        unified_queued: number;
-        unified_running_lanes: number;
-        workspace_mutation_lanes: string[];
-    };
-    status?: undefined;
-    error?: undefined;
-    code?: undefined;
-    reason?: undefined;
-    retry_after?: undefined;
-    remaining_ms?: undefined;
-};
+export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, autoExecute?: boolean, parentRunId?: string, options?: {
+    automaticRecovery?: boolean;
+}): any;
 export declare function purgeArchivedTask(id: string): any;

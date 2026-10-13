@@ -33,6 +33,8 @@ export declare function createAgentRunnerSupport(deps: any): {
         nativeContinuationEvidence: any;
     };
     callAgentViaExternalRunner: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, allowedTools?: any, mcpConfigPath?: string, agentSession?: any, executionInfo?: any) => Promise<{
+        agentRunId: string;
+        nativeContinuationEvidence: any;
         output: any;
         nativeSessionId: any;
         nativeModelCapabilityReceipt: any;
@@ -57,8 +59,6 @@ export declare function createAgentRunnerSupport(deps: any): {
         expectedProviderContractId: string;
         providerContractTransition: boolean;
         providerContractContinuityVerified: boolean;
-        nativeContinuationEvidence: any;
-        agentRunId: string;
         fileChanges: any;
         usage: any;
         runnerRequestId: string;
@@ -157,12 +157,25 @@ export declare function createAgentRunnerSupport(deps: any): {
         removed: number;
         contentStored: boolean;
     };
-    createAgentRunnerRequest: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, allowedTools?: any, mcpConfigPath?: string, agentSession?: any, executionInfo?: any) => {
+    createAgentRunnerRequest: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, allowedTools?: any, mcpConfigPath?: string, agentSession?: any, executionInfo?: any) => Promise<{
         id: string;
         requestFile: any;
         resultFile: any;
-    };
-    waitForAgentRunnerResult: (resultFile: string, timeoutMs: number) => Promise<any>;
+        agentRunId: string;
+        heartbeatWakeId: string;
+        leaseOwnerId: string;
+        leaseId: string;
+        taskId: string;
+        run_id: string;
+        trace_id: string;
+        task_id: string;
+        attempt_id: string;
+        runtime_id: any;
+        lease_id: string;
+        task_agent_session_id: string;
+        native_session_id: string;
+    }>;
+    waitForAgentRunnerResult: (resultFile: string, timeoutMs: number, assertWaiting?: () => void) => Promise<any>;
     recordNativeCapacityRefreshOutcome: (agentType: string, model: string, capabilityRecord: any, binding?: any) => any;
     callAgentViaExternalRunnerRaw: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, allowedTools?: any, mcpConfigPath?: string, agentSession?: any, executionInfo?: any) => Promise<{
         nativeModelCapabilityReceipt: any;
@@ -210,9 +223,12 @@ export declare function createAgentRunnerSupport(deps: any): {
         envAllowlist?: string[];
         maxOutputBytes?: number;
         maxContextOutputBytes?: number;
+        nativeContinuationEvidence?: any;
+        initialUsage?: any;
     }) => Promise<{
         output: any;
         nativeSessionId: any;
+        nativeContinuationEvidence: any;
     }>;
     continueAgentToolCalls: (input: {
         output: string;
@@ -231,6 +247,8 @@ export declare function createAgentRunnerSupport(deps: any): {
         maxOutputBytes?: number;
         maxContextOutputBytes?: number;
         onEvent?: (event: any) => void;
+        nativeContinuationEvidence?: any;
+        initialUsage?: any;
         continueAgent?: (prompt: string, state: any) => Promise<{
             output: string;
             nativeSessionId?: string;

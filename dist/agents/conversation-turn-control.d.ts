@@ -83,7 +83,9 @@ export declare class ConversationTurnControlStore {
     constructor(file?: string);
     private read;
     private mutate;
-    recoverInterrupted(): {
+    recoverInterrupted(options?: {
+        createdBefore?: number;
+    }): {
         recovered: number;
         turns: ConversationTurnRecord[];
     };
@@ -189,7 +191,7 @@ export declare class ConversationTurnControlStore {
     retry(id: string, expectedRevision?: number, attemptId?: string): ConversationTurnRecord;
     rememberAction(id: string, key: string, action: string, attemptId: string): ConversationTurnRecord;
     heartbeat(input: any): ConversationTurnRecord;
-    syncTaskDispatch(task: any): ConversationTurnRecord;
+    syncTaskDispatch(task: any): any;
 }
 export declare const conversationTurnControl: ConversationTurnControlStore;
 export declare function admitTaskDispatchTurn(task: any): ConversationTurnRecord | {
@@ -258,9 +260,9 @@ export declare function admitTaskDispatchTurn(task: any): ConversationTurnRecord
     execution_state: string;
     attempt_id: string;
 };
-export declare function reconcileTaskDispatchTurns(): {
+export declare function reconcileTaskDispatchTurns(): Promise<{
     admitted: number;
-};
+}>;
 export declare function startWebConversationTurnRecoveryForServer(baseUrl: string): {
     started: boolean;
 };

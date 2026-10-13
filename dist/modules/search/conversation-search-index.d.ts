@@ -23,7 +23,7 @@ export type ConversationSearchRecordV3 = {
     sourceIdentity: string;
     sourceChecksum: string;
 };
-type SourceRow = {
+export type SourceRow = {
     sourceIdentity: string;
     scopeType: ConversationTypeV3;
     scopeId: string;
@@ -35,21 +35,8 @@ type SourceRow = {
 };
 export declare function collapseGeneratedGlobalWelcomeSessions(sessions: any[]): any[];
 export declare function collectConversationSearchSources(): SourceRow[];
-export declare function buildConversationSearchIndexSync(): {
-    success: boolean;
-    unchanged: boolean;
-    generation: any;
-    message_count: any;
-    source_count: any;
-    degraded_source_count?: undefined;
-} | {
-    success: boolean;
-    generation: string;
-    source_count: number;
-    message_count: number;
-    degraded_source_count: number;
-    unchanged?: undefined;
-};
+export declare function buildConversationSearchIndexSync(): any;
+export declare function buildConversationSearchIndexAsync(): Promise<any>;
 export declare function getConversationSearchIndexStatus(): {
     schema: string;
     ready: boolean;

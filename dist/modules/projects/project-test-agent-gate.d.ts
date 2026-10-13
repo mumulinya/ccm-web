@@ -2,6 +2,11 @@ import { type ResolvedProjectTestTarget } from "./project-test-targets";
 export declare function buildProjectTestTargetBrowserChecks(target: ResolvedProjectTestTarget, workDir: string): any[];
 export declare function projectTestAgentProblems(review: any): string[];
 export declare function projectTestAgentReworkProblems(review: any): string[];
+export declare function scopeAuditForTask(task: any, actualFiles: string[], workspacePath?: string): {
+    status: string;
+    outOfScopeFiles: string[];
+    advisoryFiles: string[];
+};
 export declare function runProjectTaskTestAgentReview(input: {
     task: any;
     project: string;

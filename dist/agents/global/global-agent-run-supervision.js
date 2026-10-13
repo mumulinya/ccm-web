@@ -11,6 +11,35 @@ function createGlobalAgentRunSupervision(deps) {
         run.supervisor_id = String(link.supervisor_id || "");
         run.supervision_state = String(link.state || "monitoring");
         run.updated_at = new Date().toISOString();
+        // A global conversation may become a formal mission after the initial
+        // read-only turn has already started. Materialize the CCM AgentRun at the
+        // binding point so the mission keeps the original trace identity.
+        if (run.mission_id && !run.ccm_agent_run_id && typeof deps.startPersistentAgentExecutionSync === "function") {
+            try {
+                const coordinated = deps.startPersistentAgentExecutionSync({
+                    traceId: run.trace_id,
+                    taskId: run.mission_id,
+                    attemptId: String(run.resume_count || 1),
+                    scope: "global",
+                    scopeId: "global",
+                    agentId: "global-agent",
+                    runtimeId: "global-agent",
+                    taskAgentSessionId: run.session_id,
+                    executionId: run.id,
+                    triggerType: "user",
+                    reason: "assignment",
+                    idempotencyKey: `global-agent:${run.id}:mission:${run.mission_id}`,
+                    source: "global-agent",
+                });
+                if (coordinated?.run?.runId) {
+                    run.ccm_agent_run_id = coordinated.run.runId;
+                    deps.markPersistentAgentExecutionStarted?.(coordinated.run.runId, coordinated.lease?.run?.leaseId || "");
+                }
+            }
+            catch (error) {
+                appendTraceEvent(run.trace_id, { id: `${run.id}:ccm-run-bind-failed:${run.mission_id}`, type: "global_agent.ccm_run_bind_failed", status: "warning", task_id: run.mission_id, message: String(error?.message || error).slice(0, 500), data: { code: error?.code || "CCM_RUN_BIND_FAILED" } });
+            }
+        }
         saveRun(run, !volatileRuns.has(run.id));
         return run;
     }

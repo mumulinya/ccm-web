@@ -4,6 +4,7 @@ exports.handleTaskGovernanceRoutes = handleTaskGovernanceRoutes;
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const logs_1 = require("./logs");
+const task_approval_decisions_1 = require("./task-approval-decisions");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const execution_kernel_1 = require("../../agents/execution-kernel");
@@ -21,6 +22,8 @@ function rejectMutationConflict(res, guard) {
 }
 function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
+    if ((0, task_approval_decisions_1.handleTaskApprovalDecisions)(pathname, req, res, deps.updateTask))
+        return true;
     if (pathname === "/api/tasks/delete" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
@@ -170,6 +173,14 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                 const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (!(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "manage"))
+                    return (0, utils_1.sendJson)(res, { error: "当前账户没有该任务的管理权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+                // A successful retry has already replaced the active legacy Run. Its
+                // exact request replay must precede that stale-Run fence, after access
+                // validation, and return only the persisted original outcome.
+                const replay = operationKey ? (0, reliability_ledger_1.getIdempotencyRecord)("task-retry", `${taskId}:${operationKey}`) : null;
+                if (replay?.status === "completed")
+                    return (0, utils_1.sendJson)(res, { success: true, duplicate: true, ...(replay.result || {}), trace_id: replay.trace_id });
                 const runGuard = requireTaskRunForNewModel(task, payload);
                 if (!runGuard.ok)
                     return (0, utils_1.sendJson)(res, runGuard, 409);

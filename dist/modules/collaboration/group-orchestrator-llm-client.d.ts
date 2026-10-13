@@ -1,4 +1,5 @@
 import { ModelRetryProfileId, ModelCallRetryNotice } from "../../system/model-call-retry";
+import { type ModelRequestContext } from '../../system/model-request-context';
 import { type CcmProviderStreamActivityV1, type CcmProviderStreamTimingV1 } from "../../system/provider-stream-activity";
 export { normalizeOpenAiResponsesUrl } from "../../system/openai-responses-transport";
 export type LlmChatMessage = {
@@ -6,6 +7,7 @@ export type LlmChatMessage = {
     content: any;
 };
 export type LlmTokenUsage = {
+    cacheUsageReported?: boolean;
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
@@ -28,6 +30,14 @@ export type ProviderRequestEvidence = {
     contentStored: false;
 };
 export type LlmCallOptions = {
+    cacheValidationId?: string;
+    cacheValidationFallbackReason?: string;
+    modelRequestContext?: ModelRequestContext;
+    executionOrigin?: 'business' | 'test' | 'probe' | 'unknown';
+    cachePreparationStatus?: string;
+    _modelCacheBinding?: any;
+    _modelCachePreserveWire?: boolean;
+    _modelCacheEligibility?: any;
     messages: LlmChatMessage[];
     system?: string;
     temperature?: number;

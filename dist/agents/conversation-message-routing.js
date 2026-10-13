@@ -41,6 +41,7 @@ exports.bindConversationRouteToWorkflowDecision = bindConversationRouteToWorkflo
 exports.decideConversationMessageRoute = decideConversationMessageRoute;
 exports.conversationRouteAuditChecksum = conversationRouteAuditChecksum;
 exports.runConversationMessageRoutingSelfTest = runConversationMessageRoutingSelfTest;
+const conversation_message_route_store_1 = require("./conversation-message-route-store");
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../core/db");
 // Routing is intentionally split into a high-confidence automatic path and a
@@ -59,6 +60,8 @@ function updatedAt(task) {
     return Date.parse(task?.updated_at || task?.updatedAt || task?.created_at || task?.createdAt || "") || 0;
 }
 function exactTaskSession(task, scope) {
+    if (task?.task_session_boundary_version)
+        return (task.source_conversation_ref?.scope === scope || scope === "feishu" && task.source_conversation_ref?.scope === "global" && String(task.source_channel || task.request_origin || "").includes("feishu")) ? text(task.source_conversation_ref.exactSessionId) : "";
     if (scope === "project")
         return text(task?.project_session_id || task?.projectSessionId || task?.exact_session_id || task?.exactSessionId || task?.origin_session_id || task?.originSessionId);
     if (scope === "group")
@@ -66,6 +69,8 @@ function exactTaskSession(task, scope) {
     return text(task?.exact_session_id || task?.exactSessionId || task?.origin_session_id || task?.originSessionId || task?.session_id || task?.sessionId);
 }
 function taskScopeId(task, scope) {
+    if (task?.task_session_boundary_version && task.source_conversation_ref?.scope === scope)
+        return text(task.source_conversation_ref.scopeId || task.source_conversation_ref.scope_id);
     if (scope === "project")
         return text(task?.target_project || task?.targetProject || task?.project || task?.project_id || task?.projectId);
     if (scope === "group")
@@ -191,6 +196,9 @@ function targetExpanded(workflowDecision, candidate) {
     return requestedProjects.some((project) => !candidateProjects.has(project));
 }
 function decideConversationMessageRoute(input) {
+    return (0, conversation_message_route_store_1.persistConversationMessageRoute)(input, computeConversationMessageRoute(input));
+}
+function computeConversationMessageRoute(input) {
     const workflowDecision = input.workflowDecision || {};
     const continuationKind = lower(workflowDecision.continuationKind || workflowDecision.continuation_kind || "new_task");
     const confidence = Math.max(0, Math.min(1, Number(workflowDecision.confidence || 0)));
@@ -200,7 +208,8 @@ function decideConversationMessageRoute(input) {
         recoverable: candidates.filter((item) => candidateKind(item) === "recoverable"),
         completed: candidates.filter((item) => candidateKind(item) === "completed"),
     };
-    const eligibleCandidates = groupedCandidates.active.length
+    const requestedTaskId = text(workflowDecision.relatedTaskId || workflowDecision.related_task_id);
+    const eligibleCandidates = requestedTaskId ? candidates.filter((item) => text(item.id) === requestedTaskId) : groupedCandidates.active.length
         ? groupedCandidates.active
         : groupedCandidates.recoverable.length ? groupedCandidates.recoverable : groupedCandidates.completed;
     const candidate = eligibleCandidates.length === 1 ? eligibleCandidates[0] : null;
@@ -224,7 +233,9 @@ function decideConversationMessageRoute(input) {
         contentStored: false,
     };
     if (workflowDecision.actionRequired !== true && workflowDecision.requiresCodeChanges !== true) {
-        return { ...base, routeKind: "answer_only", decision: "answer", confidence, candidate: null, reason: text(workflowDecision.reason || "这条消息只需要回答") };
+        return { ...base, routeKind: "answer_only", decision: "answer", confidence, candidate: null,
+            discussionTaskId: candidate && continuationKind !== "new_task" && confidence >= exports.CONVERSATION_AUTO_RESUME_CONFIDENCE ? text(candidate.id) : "",
+            reason: text(workflowDecision.reason || "这条消息只需要回答") };
     }
     if (continuationKind === "new_task") {
         return { ...base, routeKind: "start_new_task", decision: "new_task", confidence, candidate: null, reason: text(workflowDecision.reason || "这是独立的新需求") };
@@ -249,8 +260,7 @@ function decideConversationMessageRoute(input) {
             reason: "这条消息扩大了原任务的项目范围，需要你确认是否作为新任务",
         };
     }
-    if (candidate && candidateSummary?.candidateKind === "completed"
-        && continuationKind !== "revise_goal" && candidateSummary.hasIncompleteWorkItems !== true) {
+    if (candidate && candidateSummary?.candidateKind === "completed") {
         return {
             ...base,
             decision: "needs_user",

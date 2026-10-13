@@ -20,17 +20,28 @@ export type ProjectSourceEvidence = {
         checksum: string;
         chars: number;
         content: string;
+        startLine?: number;
+        endLine?: number;
+        truncated?: boolean;
     }>;
     totalChars: number;
     truncated: boolean;
 };
-export declare function buildProjectSourceManifest(project: string, workDir: string): {
+export declare function normalizeRelativePath(value: string): string;
+export declare function isSensitivePath(relativePath: string): boolean;
+export declare function safeResolvedFile(root: string, relativePath: string): string;
+export declare function redactSensitiveValues(content: string): string;
+export declare function buildProjectSourceManifest(project: string, workDir: string, options?: {
+    excludedRootDirectories?: string[];
+    excludedDirectories?: string[];
+}): {
     schema: "ccm-project-main-source-manifest-v1";
     project: string;
     workDir: string;
     files: ProjectSourceManifestEntry[];
     scannedFiles: number;
     truncated: boolean;
+    truncationReasons: string[];
     checksum: string;
 };
 export declare function readProjectSourceEvidence(input: {
@@ -54,6 +65,9 @@ export declare function readProjectSourceEvidence(input: {
         checksum: string;
         chars: number;
         content: string;
+        startLine?: number;
+        endLine?: number;
+        truncated?: boolean;
     }[];
     totalChars: number;
     truncated: boolean;

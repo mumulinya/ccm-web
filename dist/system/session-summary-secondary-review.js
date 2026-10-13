@@ -38,6 +38,7 @@ exports.runSessionSummarySecondaryReviewSelfTest = runSessionSummarySecondaryRev
 const crypto = __importStar(require("crypto"));
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
 const provider_cache_protocol_1 = require("./provider-cache-protocol");
+const model_request_context_1 = require("./model-request-context");
 function checksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
@@ -76,7 +77,7 @@ async function reviewSessionSummaryIfSelected(input) {
         model: String(input.config?.summaryReviewerModel || ""),
         timeoutMs: Math.max(5000, Number(input.config?.summaryReviewerTimeoutMs || 30000)),
         temperature: 0,
-        providerCacheInternalMode: "off",
+        userId: input.config?.userId || input.config?.user_id,
     };
     if (!reviewer.apiUrl || !reviewer.apiKey || !reviewer.model) {
         const error = new Error("摘要双模型抽检已命中，但复核模型配置不完整");
@@ -84,6 +85,7 @@ async function reviewSessionSummaryIfSelected(input) {
         throw error;
     }
     const request = {
+        modelRequestContext: { ...(0, model_request_context_1.statelessModelRequestContext)(reviewer, { purpose: 'session_summary_secondary_review', scope: input.scope, scopeId: input.scopeId }), bindingMode: 'session', sessionId: input.sessionId },
         system: "You are an independent conversation-summary acceptance reviewer. Return JSON only. Check whether the summary omits persistent constraints, invents completion state, or conflicts with the boundary and reference. Fields: passed, missingAnchors, hallucinations, reason.",
         messages: [{ role: "user", content: JSON.stringify({
                     scope: input.scope,
@@ -152,7 +154,7 @@ async function runSessionSummarySecondaryReviewSelfTest() {
             summaryReviewerApiKey: "mock",
             summaryReviewerModel: "mock-reviewer",
         },
-        scope: "project", sessionId: "s1", summary: { primaryRequest: "x" }, sourceMessageIds: ["m1"],
+        scope: "project", scopeId: 'p1', sessionId: "s1", summary: { primaryRequest: "x" }, sourceMessageIds: ["m1"],
         modelCall: async () => { calls += 1; return { passed: true, missingAnchors: [], hallucinations: [], reason: "ok" }; },
     });
     return { pass: disabled.selected === false && selectedReceipt.passed === true && calls === 1, checks: { disabledHasNoCall: calls === 1, selectedPasses: selectedReceipt.passed } };

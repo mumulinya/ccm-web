@@ -54,10 +54,13 @@ async function requestGroupSourceInquiry(input) {
         group,
         message: String(input.question || "").trim(),
         source: "global-source-inquiry",
-        groupSessionId: "",
+        // This is the source conversation's backend identity in the group scope,
+        // not a public group chat. No group conversation row/navigation is created.
+        groupSessionId: String(input.exactSessionId || ""),
         sessionId: String(input.exactSessionId || ""),
         delegatedExactSessionId: String(input.exactSessionId || ""),
         authorizedProjectIds,
+        ...(input.sourceRun ? { sourceInquiryContext: require('../../system/group-delegated-source-tools').createGroupSourceInquiryContext(input.sourceRun, input.principal, authorizedProjectIds) } : {}),
         sourceGeneration: Math.max(0, Math.floor(Number(input.generation || 0))),
         workflowDecision: {
             actionRequired: false,
@@ -72,7 +75,7 @@ async function requestGroupSourceInquiry(input) {
     });
     const rawReceipt = result?.sourceInquiryReceipt;
     if (!rawReceipt || rawReceipt.contentStored !== false)
-        throw new Error("GROUP_SOURCE_INQUIRY_SAFE_RECEIPT_MISSING");
+        throw new Error(`GROUP_SOURCE_INQUIRY_SAFE_RECEIPT_MISSING:${String(result?.providerFailure?.code || result?.providerFailure?.kind || 'no_receipt')}`);
     const planningEvidenceEntries = (Array.isArray(rawReceipt.evidence) ? rawReceipt.evidence : [])
         .filter((item) => authorizedProjectIds.includes(String(item?.project || "")))
         .map((item) => ({

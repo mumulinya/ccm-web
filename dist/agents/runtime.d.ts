@@ -47,6 +47,13 @@ export interface AgentRuntimeVersionSnapshot {
     snapshotChecksum: string;
 }
 export declare function captureAgentRuntimeVersionSnapshot(agentType: string): AgentRuntimeVersionSnapshot;
+interface RuntimeLaunchMetadata {
+    runtime?: string;
+    runtimeHomePath?: string;
+    isolatedHomePath?: string;
+    pluginDirPath?: string;
+}
+export declare function readRuntimeLaunchMetadata(options?: AgentCommandOptions): RuntimeLaunchMetadata;
 export declare const AGENT_RUNTIMES: AgentRuntimeDescriptor[];
 export declare function normalizeAgentRuntimeId(agentType?: string): RegisteredAgentRuntimeId;
 export declare function getAgentRuntime(agentType?: string): AgentRuntimeDescriptor;
@@ -239,3 +246,4 @@ export declare function runAgentRuntimeSessionSelfTest(): {
         cursorJsonFailureDetected: boolean;
     };
 };
+export {};

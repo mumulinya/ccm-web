@@ -1,8 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentLoopSelfTest = createGlobalAgentLoopSelfTest;
+const global_agent_authorization_1 = require("./global-agent-authorization");
 function createGlobalAgentLoopSelfTest(deps) {
-    const { GLOBAL_USER_SUMMARY_INTERNAL_PATTERN, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, buildGlobalDispatchLaunchSummary, completeGlobalAgentSupervision, continueGlobalAgentRunWithClarification, parseGlobalAgentDecision, pauseGlobalAgentRun, resumeGlobalAgentRun, runMainAgentDeliveryReportSelfTest, runMainAgentWorkchainSelfTest, startGlobalAgentRun, steerGlobalAgentRun, updateGlobalAgentSupervisionState } = deps;
+    const { GLOBAL_USER_SUMMARY_INTERNAL_PATTERN, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, buildGlobalDispatchLaunchSummary, completeGlobalAgentSupervision, continueGlobalAgentRunWithClarification, parseGlobalAgentDecision, pauseGlobalAgentRun, resumeGlobalAgentRun, runMainAgentDeliveryReportSelfTest, runMainAgentWorkchainSelfTest, startGlobalAgentRun: startRun, steerGlobalAgentRun, updateGlobalAgentSupervisionState } = deps;
+    let fixtureTurn = 0;
+    const startGlobalAgentRun = (input, runtime) => {
+        if (!input.explicitWriteAuthorization)
+            return startRun(input, runtime);
+        const turnId = `global-selftest-${++fixtureTurn}`, sessionId = input.sessionId || 'default';
+        const receipt = (0, global_agent_authorization_1.buildGlobalWriteAuthorizationReceipt)({ turnId, sessionId, source: 'self-test', message: input.message,
+            workflowDecision: { authorizationDirective: 'grant', actionRequired: true, requiresUserConfirmation: false, riskLevel: 'write', targetRefs: ['demo', 't1'], needsEpicDecomposition: false } });
+        return startRun({ ...input, turnId, sessionId, writeAuthorizationReceipt: receipt }, runtime);
+    };
     async function runGlobalAgentLoopSelfTest() {
         const calls = [];
         const decisions = [
@@ -139,13 +149,20 @@ function createGlobalAgentLoopSelfTest(deps) {
             { state: "complete", message: "澄清后的任务已执行", intent: { category: "execution", goal: "给 demo 实现支付", action_required: true, target_refs: ["demo"], confidence: .96, authorization_basis: "current_message", reason: "工具已返回可核验结果" }, tool: null, completion: { evidence: ["demo:success"] } },
         ];
         const clarifiedEvents = [];
-        const clarified = await continueGlobalAgentRunWithClarification(waiting.id, "请给 demo 实现支付，只改支付模块并完成验证", {
+        const clarificationRuntime = {
             persist: false,
             callModel: async () => clarificationDecisions.shift(),
             executeTool: async () => ({ success: true, project: "demo", verification: "passed" }),
             getContext: () => ({ projects: ["demo"], current_head: "abc" }),
             onEvent: event => clarifiedEvents.push(event),
-        }, { explicitWriteAuthorization: true });
+        };
+        const clarifiedPending = await continueGlobalAgentRunWithClarification(waiting.id, "请给 demo 实现支付，只改支付模块并完成验证", clarificationRuntime, { explicitWriteAuthorization: true, turnId: 'global-selftest-clarified', writeAuthorizationReceipt: (0, global_agent_authorization_1.buildGlobalWriteAuthorizationReceipt)({
+                turnId: 'global-selftest-clarified', sessionId: waiting.session_id || 'default', source: 'self-test', message: '请给 demo 实现支付，只改支付模块并完成验证',
+                workflowDecision: { authorizationDirective: 'grant', actionRequired: true, riskLevel: 'write', targetRefs: ['demo'], requiresUserConfirmation: false },
+            }) });
+        if (clarifiedPending.status !== 'waiting_confirmation' || clarifiedPending.tool_calls !== 0)
+            throw new Error('澄清后写操作必须保持确认门禁');
+        const clarified = await resumeGlobalAgentRun(clarifiedPending.id, clarificationRuntime, { approved: true });
         const analysisClarificationEvents = [];
         const analysisWaiting = await startGlobalAgentRun({ message: "帮我优化一下", explicitWriteAuthorization: true }, {
             persist: false,
@@ -157,7 +174,10 @@ function createGlobalAgentLoopSelfTest(deps) {
             persist: false,
             callModel: async () => ({ state: "answer", message: "只提供分析建议", intent: { category: "analysis", goal: "分析 demo 性能", action_required: false, target_refs: ["demo"], confidence: .96, authorization_basis: "none", reason: "用户明确禁止执行" }, tool: null }),
             executeTool: async () => { throw new Error("不应执行"); },
-        }, { explicitWriteAuthorization: false });
+        }, { explicitWriteAuthorization: false, turnId: 'global-selftest-revoke', writeAuthorizationReceipt: (0, global_agent_authorization_1.buildGlobalWriteAuthorizationReceipt)({
+                turnId: 'global-selftest-revoke', sessionId: analysisWaiting.session_id || 'default', source: 'self-test', message: '只分析 demo 的性能方向，不执行、不修改代码',
+                workflowDecision: { authorizationDirective: 'revoke', actionRequired: false, riskLevel: 'read', targetRefs: ['demo'] },
+            }) });
         const replanDecisions = [
             { state: "execute", message: "按初始方案执行", plan: ["直接修复", "验证"], intent: { category: "execution", goal: "修复 demo 登录", action_required: true, target_refs: ["demo"], confidence: .95, reason: "先尝试修复" }, tool: { name: "send_project_cmd", arguments: { project: "demo", message: "按旧入口修复登录" } } },
             { state: "execute", message: "观察变化后重规划", plan: ["重新读取当前入口", "按新入口修复", "验证"], intent: { category: "execution", goal: "修复 demo 登录", action_required: true, target_refs: ["demo"], confidence: .96, reason: "旧入口不存在，依据工具观察调整方案" }, tool: { name: "send_project_cmd", arguments: { project: "demo", message: "读取当前入口后修复登录并验证" } } },

@@ -35,6 +35,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.setFeishuChannelAlertHandler = setFeishuChannelAlertHandler;
 exports.resolveFeishuDestination = resolveFeishuDestination;
+exports.getFeishuProjectSessionBindings = getFeishuProjectSessionBindings;
+exports.updateFeishuProjectSessionBinding = updateFeishuProjectSessionBinding;
+exports.purgeFeishuProjectSessionBindings = purgeFeishuProjectSessionBindings;
 exports.bindFeishuTaskContext = bindFeishuTaskContext;
 exports.resolveBoundFeishuGlobalSessionId = resolveBoundFeishuGlobalSessionId;
 exports.getFeishuGlobalSessionBindings = getFeishuGlobalSessionBindings;
@@ -250,6 +253,55 @@ function resolveFeishuDestination(payload = {}, sessionId = "") {
 function uniqueStrings(values) {
     return [...new Set(values.map(value => String(value || "").trim()).filter(Boolean))].slice(0, 100);
 }
+/** Project and global consumers share the same authoritative channel ledger. */
+function getFeishuProjectSessionBindings(project) {
+    return loadState().bindings.filter((row) => row.target_type === "project_agent"
+        && String(row.project_id || "") === project).map((row) => ({ ...row, session_ids: [...(row.session_ids || [])] }));
+}
+function updateFeishuProjectSessionBinding(input) {
+    const state = loadState();
+    const binding = state.bindings.find((row) => row.target_type === "project_agent"
+        && row.project_id === input.project && (row.id === input.bindingId || row.platform_session_key === input.bindingId));
+    if (!binding)
+        throw new Error("飞书目标不属于当前项目或尚未被发现");
+    const before = JSON.stringify([binding.active_session_id, binding.session_ids]);
+    if (input.action === "unbind") {
+        if (binding.active_session_id === input.sessionId)
+            binding.active_session_id = "";
+    }
+    else {
+        binding.active_session_id = input.sessionId;
+        binding.session_ids = uniqueStrings([...(binding.session_ids || []), input.sessionId]);
+    }
+    if (before !== JSON.stringify([binding.active_session_id, binding.session_ids])) {
+        binding.updated_at = new Date().toISOString();
+        saveState(state);
+        (0, runtime_events_1.publishRuntimeEvent)("project", "project.feishu_session_binding_changed", {
+            project: input.project, sessionId: input.sessionId, id: binding.id,
+            status: input.action === "bind" ? "bound" : "unbound", source: "feishu-channel-v2",
+        });
+    }
+    return { ...binding };
+}
+function purgeFeishuProjectSessionBindings(project, sessionId) {
+    const state = loadState();
+    let changed = false;
+    for (const binding of state.bindings) {
+        if (binding.target_type !== "project_agent" || binding.project_id !== project)
+            continue;
+        if (binding.active_session_id === sessionId) {
+            binding.active_session_id = "";
+            changed = true;
+        }
+        const previous = binding.session_ids || [];
+        binding.session_ids = previous.filter((id) => id !== sessionId);
+        if (binding.session_ids.length !== previous.length)
+            changed = true;
+    }
+    if (changed)
+        saveState(state);
+    return { changed };
+}
 function bindFeishuTaskContext(input) {
     const destination = input.destination || resolveFeishuDestination({}, input.sessionId || "");
     if (!destination?.receive_id)
@@ -266,7 +318,7 @@ function bindFeishuTaskContext(input) {
     const existing = state.bindings.find((row) => {
         const rowTarget = String(row.target_type || (String(row.source || "").includes("project") ? "project_agent" : "global_agent"));
         const sameTarget = rowTarget === requestedTarget;
-        const sameProject = requestedTarget !== "project_agent" || String(row.project_id || requestedProject) === requestedProject;
+        const sameProject = requestedTarget !== "project_agent" || String(row.project_id || "") === requestedProject;
         if (!sameTarget || !sameProject)
             return false;
         return (destination.conversation_key_v2 && row.conversation_key_v2 === destination.conversation_key_v2)

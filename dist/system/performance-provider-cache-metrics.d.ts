@@ -15,6 +15,7 @@ export declare function buildPerformanceProviderCacheMetrics(groups?: any[], pro
                 fullReuseRequests: number;
                 partialReuseRequests: number;
                 baselineOnlyRequests: number;
+                cacheReportedCalls: number;
                 fullReuseRequestRate: number;
                 partialReuseRequestRate: number;
                 baselineOnlyRequestRate: number;
@@ -38,6 +39,8 @@ export declare function buildPerformanceProviderCacheMetrics(groups?: any[], pro
                 projectionFallbackCount: any;
                 publicStablePrefixTokens: any;
                 agentStablePrefixTokens: any;
+                cacheUnreportedCalls: number;
+                cacheTokenReportingCoverage: number;
                 tokenReuseRate: number;
                 cacheableUtilizationRate: number;
                 dynamicSuffixRate: number;
@@ -56,6 +59,7 @@ export declare function buildPerformanceProviderCacheMetrics(groups?: any[], pro
                 fullReuseRequests: number;
                 partialReuseRequests: number;
                 baselineOnlyRequests: number;
+                cacheReportedCalls: number;
                 fullReuseRequestRate: number;
                 partialReuseRequestRate: number;
                 baselineOnlyRequestRate: number;
@@ -79,6 +83,8 @@ export declare function buildPerformanceProviderCacheMetrics(groups?: any[], pro
                 projectionFallbackCount: any;
                 publicStablePrefixTokens: any;
                 agentStablePrefixTokens: any;
+                cacheUnreportedCalls: number;
+                cacheTokenReportingCoverage: number;
                 tokenReuseRate: number;
                 cacheableUtilizationRate: number;
                 dynamicSuffixRate: number;

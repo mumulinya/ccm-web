@@ -1,11 +1,26 @@
 export type ScopeExpansionRequest = {
     id: string;
+    requestId?: string;
+    taskId?: string;
+    runId?: string;
+    traceId?: string;
+    attemptId?: string;
+    workItemId?: string;
     path: string;
+    requestedPaths?: string[];
     reason: string;
+    impactSummary?: string;
     allowedChanges: string[];
     requestedBy: string;
-    status: "pending" | "approved" | "rejected";
+    status: "pending" | "approved" | "rejected" | "expired";
+    expiresAt?: string;
+    actionFingerprint?: string;
+    applicationState?: "pending" | "applying" | "applied";
+    appliedRevision?: number;
     requestedAt: string;
+    createdAt?: string;
+    contractRevision?: number;
+    idempotencyKey?: string;
     approvedAt?: string;
     approvedBy?: string;
 };

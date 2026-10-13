@@ -435,7 +435,7 @@ function buildMainAgentWorkItems(task = {}, options = {}) {
         ? [...filteredExplicit, ...derivedItems]
         : [fallback].filter(Boolean);
     const receipts = normalizeReceiptRows(task);
-    const executions = Array.isArray(options.executions) ? options.executions : [];
+    const executions = (Array.isArray(options.executions) ? options.executions : []).filter(execution => !task.task_session_continuation_context || execution.reviewCycleId === task.review_cycle_id);
     const enriched = dedupeWorkItems(baseItems)
         .map(item => applyReceiptAndExecution(item, task, receipts, executions, now));
     return enriched

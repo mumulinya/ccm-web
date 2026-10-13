@@ -38,6 +38,7 @@ exports.getEffectiveAccess = getEffectiveAccess;
 exports.hasFeatureAccess = hasFeatureAccess;
 exports.hasResourceAccess = hasResourceAccess;
 exports.hasTaskResourceAccess = hasTaskResourceAccess;
+exports.taskReadAccessSnapshot = taskReadAccessSnapshot;
 exports.authorizeResource = authorizeResource;
 exports.removeUserAccess = removeUserAccess;
 exports.filterAccessibleResources = filterAccessibleResources;
@@ -105,9 +106,27 @@ function hasResourceAccess(userId, role, type, id, required = "use") {
  * used to read another project's task details.
  */
 function hasTaskResourceAccess(task, principal, required = "use") {
+    return checkTaskResourceAccess(task, principal, required, (type, id) => hasResourceAccess(String(principal?.userId || ""), principal?.role, type, id, required));
+}
+/** One authoritative permission snapshot for a single list projection. Never
+ * reuse this predicate for a later action or another HTTP request. */
+function taskReadAccessSnapshot(principal) {
+    const store = loadStore();
+    const levels = new Map();
+    for (const grant of store.resourceGrants)
+        if (grant.userId === String(principal?.userId || "")) {
+            const key = JSON.stringify([grant.resourceType, grant.resourceId]);
+            if (!levels.has(key))
+                levels.set(key, grant.level);
+        }
+    return { policyRevision: store.revision, allows: (task) => checkTaskResourceAccess(task, principal, "use", (type, id) => {
+            const level = levels.get(JSON.stringify([type, id]));
+            return level === "manage" || level === "use";
+        }) };
+}
+function checkTaskResourceAccess(task, principal, required, allowed) {
     if (!principal || principal.kind !== "browser" || principal.role === "admin")
         return true;
-    const userId = String(principal.userId || "");
     const refs = new Map([["project", new Set()], ["group", new Set()]]);
     const add = (type, value) => { const id = String(value || "").trim(); if (id)
         refs.get(type).add(id); };
@@ -125,10 +144,10 @@ function hasTaskResourceAccess(task, principal, required = "use") {
     if (!projectRefs.size && !groupRefs.size)
         return false;
     for (const id of projectRefs)
-        if (!hasResourceAccess(userId, principal.role, "project", id, required))
+        if (!allowed("project", id))
             return false;
     for (const id of groupRefs)
-        if (!hasResourceAccess(userId, principal.role, "group", id, required))
+        if (!allowed("group", id))
             return false;
     return true;
 }

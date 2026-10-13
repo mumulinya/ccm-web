@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { AgentActivityEvent, AgentApproval, AgentBudgetDecision, AgentBudgetPolicy, AgentComment, AgentHeartbeatContext, AgentRunArtifact, AgentRunSecretBinding, AgentTaskCheckout, AgentTaskDependency } from "./agent-governance-types";
+import type { AgentActivityEvent, AgentApproval, AgentApprovalStatus, AgentBudgetDecision, AgentBudgetPolicy, AgentComment, AgentHeartbeatContext, AgentRunArtifact, AgentRunSecretBinding, AgentTaskCheckout, AgentTaskDependency } from "./agent-governance-types";
 export interface ActivityInput {
     taskId?: string;
     runId?: string;
@@ -55,8 +55,27 @@ export declare function decideAgentApproval(approvalId: string, input: {
     decisionBy: string;
     reason?: string;
     actionFingerprint?: string;
-}): AgentApproval;
+}): AgentApproval | {
+    heartbeatWakeId: any;
+    approvalId: string;
+    taskId: string;
+    runId: string;
+    traceId: string;
+    actionType: string;
+    actionFingerprint: string;
+    requestedBy: string;
+    decisionBy: string;
+    status: AgentApprovalStatus;
+    reason: string;
+    requestedAt: string;
+    decidedAt: string;
+    expiresAt: string;
+    idempotencyKey: string;
+    payload: any;
+};
 export declare function listAgentApprovals(runId: string): AgentApproval[];
+/** Read-only task projection: one indexed query, without per-Run write transactions. */
+export declare function listTaskAgentApprovals(taskId: string, attemptId?: string): AgentApproval[];
 export declare function acquireAgentTaskCheckout(input: {
     taskId: string;
     runId: string;
@@ -67,6 +86,7 @@ export declare function acquireAgentTaskCheckout(input: {
     leaseId: string;
     ttlMs?: number;
     idempotencyKey: string;
+    exclusiveWorkspace?: boolean;
 }): {
     checkout: AgentTaskCheckout;
     acquired: boolean;
@@ -82,6 +102,7 @@ export declare function acquireAgentTaskCheckoutInTransaction(db: Database.Datab
     leaseId: string;
     ttlMs?: number;
     idempotencyKey: string;
+    exclusiveWorkspace?: boolean;
 }): {
     checkout: AgentTaskCheckout;
     acquired: boolean;
@@ -89,6 +110,11 @@ export declare function acquireAgentTaskCheckoutInTransaction(db: Database.Datab
 };
 export declare function releaseAgentTaskCheckout(checkoutId: string, ownerId?: string, status?: "released" | "blocked"): AgentTaskCheckout;
 export declare function getAgentTaskCheckout(taskId: string, runId?: string): AgentTaskCheckout;
+/** Reconcile expired Checkout leases during startup and supervisor passes. */
+export declare function reconcileAgentTaskCheckouts(): {
+    checked: number;
+    recovered: number;
+};
 export declare function saveAgentHeartbeatContext(context: AgentHeartbeatContext): AgentHeartbeatContext;
 export declare function getAgentHeartbeatContext(wakeId: string): AgentHeartbeatContext;
 export declare function getLatestAgentHeartbeatContext(runId: string): AgentHeartbeatContext;
@@ -102,6 +128,7 @@ export declare function evaluateAgentRunBudget(runId: string, additional?: {
     inputTokens?: number;
     outputTokens?: number;
     cost?: number;
+    record?: boolean;
 }): AgentBudgetDecision;
 export declare function recordAgentBudgetUsageUnreported(runId: string, reason?: string): {
     incidentId: string;

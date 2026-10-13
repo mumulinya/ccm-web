@@ -22,6 +22,17 @@ type FeishuChannelAlertHandler = (payload: {
 }) => void;
 export declare function setFeishuChannelAlertHandler(handler: FeishuChannelAlertHandler | null): void;
 export declare function resolveFeishuDestination(payload?: any, sessionId?: string): FeishuDestination | null;
+/** Project and global consumers share the same authoritative channel ledger. */
+export declare function getFeishuProjectSessionBindings(project: string): any;
+export declare function updateFeishuProjectSessionBinding(input: {
+    project: string;
+    bindingId: string;
+    sessionId: string;
+    action: "bind" | "unbind";
+}): any;
+export declare function purgeFeishuProjectSessionBindings(project: string, sessionId: string): {
+    changed: boolean;
+};
 export declare function bindFeishuTaskContext(input: {
     sessionId?: string;
     destination?: FeishuDestination | null;

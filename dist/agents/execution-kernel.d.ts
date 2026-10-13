@@ -74,6 +74,7 @@ export interface ExecutionRecord {
     startedAt: string;
     finishedAt: string;
     executionAttempt?: number;
+    reviewCycleId?: string;
     events: ExecutionEvent[];
 }
 export declare function sanitizeExecutionEnv(extra?: Record<string, any>, allowlist?: string[]): Record<string, string>;
@@ -176,7 +177,7 @@ export declare function requestActiveAgentRunPause(input?: any): {
     matched: number;
     signalled: number;
 };
-export declare function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess, meta?: any): () => void;
+export declare function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess, meta?: any): (result?: any) => Promise<import("./agent-run-types").AgentRun>;
 export declare function terminateManagedChildProcess(child: ChildProcess): boolean;
 export declare function clearTaskCancellation(taskId: string): void;
 export declare function isTaskCancellationRequested(taskId: string): boolean;
@@ -237,9 +238,11 @@ export declare function runManagedCommand(input: {
     nativeSessionId?: string;
     worktreeId?: string;
     triggerType?: string;
+    workItemId?: string;
     parentRunId?: string;
     leaseOwnerId?: string;
     deferAgentRunFinalization?: boolean;
+    routineRunId?: string;
 }): Promise<any>;
 export declare function disposeManagedCommandRawOutput(result: any): {
     removed: boolean;

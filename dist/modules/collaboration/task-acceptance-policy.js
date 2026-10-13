@@ -44,6 +44,7 @@ exports.taskAcceptanceUsesIndependentReview = taskAcceptanceUsesIndependentRevie
 exports.taskAcceptanceReviewRounds = taskAcceptanceReviewRounds;
 exports.acceptanceModeForTask = acceptanceModeForTask;
 const crypto = __importStar(require("crypto"));
+const dispatch_profile_1 = require("../../agents/dispatch-profile");
 const test_agent_settings_1 = require("../system/test-agent-settings");
 const hardening_policy_1 = require("../../test-agent/hardening-policy");
 const SNAPSHOT_WORKFLOWS = new Set(["daily_dev", "project_main_agent", "requirement_epic"]);
@@ -156,7 +157,7 @@ function requiredChecks(level, interactive, route) {
 function taskNeedsAcceptancePolicy(task) {
     const workflow = String(task?.workflow_type || task?.workflowType || "").trim().toLowerCase();
     const assignType = String(task?.assign_type || task?.assignType || "").trim().toLowerCase();
-    return SNAPSHOT_WORKFLOWS.has(workflow)
+    return !!task?.dispatch_profile_snapshot || SNAPSHOT_WORKFLOWS.has(workflow)
         || ["group", "project"].includes(assignType)
         || task?.requires_code_changes === true || task?.requiresCodeChanges === true
         || task?.requires_verification === true || task?.requiresVerification === true
@@ -168,11 +169,12 @@ function buildTaskAcceptancePolicySnapshot(task, options = {}) {
     const settings = (0, test_agent_settings_1.loadTestAgentSettings)();
     const identity = taskIdentity(task);
     const classified = deriveLevel(task);
-    const route = routeFor(classified.level, settings.mode);
+    const frozenProfile = task?.dispatch_profile_snapshot || task?.task_spec?.dispatch_profile_snapshot;
+    const route = frozenProfile?.profile === "light" ? "main_agent_self_verification" : frozenProfile?.profile === "strict" ? "independent_test_agent" : routeFor(classified.level, settings.mode);
     const capturedAt = options.capturedAt || new Date().toISOString();
     const hardening = (0, hardening_policy_1.buildTestAgentHardeningPolicy)({ task, reviewPolicy: task?.test_agent_review_policy || verificationProfile(task) || null });
     const mode = route === "independent_test_agent" ? "test_agent" : "main_agent_self_verification";
-    const maxReviewRounds = route === "independent_test_agent" ? 3 : route === "main_agent_with_escalation" ? 2 : 1;
+    const maxReviewRounds = frozenProfile ? (0, dispatch_profile_1.reworkLimitForDispatchProfile)(frozenProfile.profile) + 1 : route === "independent_test_agent" ? 3 : route === "main_agent_with_escalation" ? 2 : 1;
     const core = {
         schema: "ccm-task-acceptance-policy-snapshot-v3",
         version: 3,
@@ -185,7 +187,7 @@ function buildTaskAcceptancePolicySnapshot(task, options = {}) {
         route,
         reasons: classified.reasons,
         requiredChecks: requiredChecks(classified.level, classified.interactive, route),
-        maxReworkRounds: classified.level === "strict" ? 3 : 1,
+        maxReworkRounds: frozenProfile ? (0, dispatch_profile_1.reworkLimitForDispatchProfile)(frozenProfile.profile) : classified.level === "strict" ? 3 : 1,
         maxReviewRounds,
         escalationAllowed: route === "main_agent_with_escalation",
         strategyMode: settings.mode,
@@ -292,10 +294,21 @@ function validateTaskAcceptanceEscalationReceipt(task, policy, receipt) {
 function taskAcceptanceUsesIndependentReview(task, policy) {
     return policy.mode === "test_agent" || validateTaskAcceptanceEscalationReceipt(task, policy, task?.acceptance_escalation).valid;
 }
+function boundedReviewRounds(value, fallback = 1) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed))
+        return fallback;
+    return Math.max(1, Math.min(3, Math.floor(parsed)));
+}
 function taskAcceptanceReviewRounds(task, policy) {
-    if (policy.schema === "ccm-task-acceptance-policy-snapshot-v3" && validateTaskAcceptanceEscalationReceipt(task, policy, task?.acceptance_escalation).valid)
-        return 2;
-    return Math.max(1, Math.min(3, Number(policy.max_review_rounds || 1)));
+    const dispatchProfile = (0, dispatch_profile_1.resolveDispatchProfileSnapshot)(task).profile;
+    const hasFrozenDispatchProfile = !!(task?.dispatch_profile_snapshot || task?.dispatchProfileSnapshot || task?.task_spec?.dispatch_profile_snapshot || task?.dispatch_profile || task?.dispatchProfile);
+    const profileLimit = hasFrozenDispatchProfile ? (0, dispatch_profile_1.reworkLimitForDispatchProfile)(dispatchProfile) : 3;
+    if (task?.dispatch_profile_snapshot || task?.task_spec?.dispatch_profile_snapshot)
+        return profileLimit + 1;
+    if (policy?.schema === "ccm-task-acceptance-policy-snapshot-v3" && validateTaskAcceptanceEscalationReceipt(task, policy, task?.acceptance_escalation).valid)
+        return dispatchProfile === "strict" ? profileLimit : Math.min(profileLimit, 2);
+    return Math.min(profileLimit, boundedReviewRounds(policy?.max_review_rounds, 1));
 }
 function acceptanceModeForTask(task) {
     const resolved = resolveTaskAcceptancePolicy(task);

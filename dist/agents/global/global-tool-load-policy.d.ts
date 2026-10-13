@@ -5,14 +5,7 @@ export declare function globalDiscoverableManagementTools(loadedToolNames?: stri
     canonicalName: string;
     server: string;
     description: string;
-    inputSchema: {
-        type: string;
-        additionalProperties: boolean;
-        required: string[];
-        properties: {
-            [k: string]: any;
-        };
-    };
+    inputSchema: any;
     loadPolicy: "search";
     authorized: boolean;
     connected: boolean;

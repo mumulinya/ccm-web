@@ -12,6 +12,50 @@ export declare function buildWorkspaceEditMcpServerConfig(context: Omit<Internal
         CCM_INTERNAL_MCP_AUDIT_FILE: string;
     };
 };
+export declare function handleWorkspaceEditMcpTool(context: InternalMcpTaskContext, name: string, args: any): Promise<{
+    success: boolean;
+    schema: string;
+    action: string;
+    path: string;
+    replacements: number;
+    beforeChecksum: string;
+    afterChecksum: string;
+    evidenceId: string;
+    repoStateIdentity: import("../system/unified-evidence-registry").RepoStateIdentity;
+    contentStored: boolean;
+} | {
+    success: boolean;
+    schema: string;
+    action: string;
+    path: string;
+    created: boolean;
+    beforeChecksum: string;
+    afterChecksum: string;
+    evidenceId: string;
+    repoStateIdentity: import("../system/unified-evidence-registry").RepoStateIdentity;
+    contentStored: boolean;
+} | {
+    success: boolean;
+    schema: string;
+    action: string;
+    source: string;
+    destination: string;
+    beforeChecksum: string;
+    afterChecksum: string;
+    evidenceId: string;
+    repoStateIdentity: import("../system/unified-evidence-registry").RepoStateIdentity;
+    contentStored: boolean;
+} | {
+    success: boolean;
+    schema: string;
+    action: string;
+    path: string;
+    beforeChecksum: string;
+    status: string;
+    evidenceId: string;
+    repoStateIdentity: import("../system/unified-evidence-registry").RepoStateIdentity;
+    contentStored: boolean;
+}>;
 export declare function workspaceEditMcpTools(): {
     name: string;
     description: string;

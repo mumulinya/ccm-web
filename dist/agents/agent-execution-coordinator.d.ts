@@ -13,6 +13,7 @@ export interface PersistentAgentExecutionInput extends AgentRunContext {
     requestId?: string;
     leaseOwnerId?: string;
     leaseTtlMs?: number;
+    routineRunId?: string;
 }
 export interface PersistentAgentExecutionResult {
     run: AgentRun;
@@ -22,9 +23,30 @@ export interface PersistentAgentExecutionResult {
     reason?: string;
     checkout?: any;
     budget?: any;
+    runtimeProbe?: any;
 }
+/** Governance inputs request wake-ups through the same coordination boundary. */
+export declare function requestPersistentAgentWake(input: any): {
+    wake: HeartbeatWakeRequest;
+    duplicate: boolean;
+    coalesced: boolean;
+    activeRun: AgentRun;
+};
+/** Call immediately before any Runtime side effect. A blocked projection is
+ * not a permit, and a resumed wake without a lease belongs to the processor. */
+export declare function assertPersistentExecutionLaunchAllowed(result: PersistentAgentExecutionResult): void;
 /** Synchronous path for process tracking, which cannot await resume inspection. */
 export declare function startPersistentAgentExecutionSync(input: PersistentAgentExecutionInput): PersistentAgentExecutionResult;
+/** Approval must never launch a second process while the original is alive. */
+export declare function continueApprovedDispatchScope(runId: string, requestId: string): Promise<{
+    mode: string;
+    reason: any;
+    wakeId?: undefined;
+} | {
+    mode: string;
+    wakeId: string;
+    reason?: undefined;
+}>;
 /**
  * The only supported composition point for a new persistent Agent execution.
  * Existing callers can migrate incrementally while the lower-level store remains
@@ -80,16 +102,19 @@ export declare function applyPersistentAgentManualAction(input: {
     activity: import("./agent-governance-types").AgentActivityEvent;
     run: AgentRun;
     lease?: undefined;
+    mode?: undefined;
 } | {
     action: "pause";
     activity: import("./agent-governance-types").AgentActivityEvent;
     run: AgentRun;
     lease?: undefined;
+    mode?: undefined;
 } | {
     action: "mark_recovery_required";
     activity: import("./agent-governance-types").AgentActivityEvent;
     run: AgentRun;
     lease?: undefined;
+    mode?: undefined;
 } | {
     action: "release_lease";
     activity: import("./agent-governance-types").AgentActivityEvent;
@@ -99,6 +124,7 @@ export declare function applyPersistentAgentManualAction(input: {
         reason: string;
         run: AgentRun;
     };
+    mode?: undefined;
 } | {
     run: AgentRun;
     wake: HeartbeatWakeRequest | null;
@@ -107,9 +133,16 @@ export declare function applyPersistentAgentManualAction(input: {
     reason?: string;
     checkout?: any;
     budget?: any;
+    runtimeProbe?: any;
     action: "resume" | "recover";
     activity: import("./agent-governance-types").AgentActivityEvent;
 } | {
+    action: "retry";
+    activity: import("./agent-governance-types").AgentActivityEvent;
+    run: AgentRun;
+    mode: string;
+    lease?: undefined;
+} | {
     run: AgentRun;
     wake: HeartbeatWakeRequest | null;
     lease: any;
@@ -117,6 +150,7 @@ export declare function applyPersistentAgentManualAction(input: {
     reason?: string;
     checkout?: any;
     budget?: any;
+    runtimeProbe?: any;
     action: "retry";
     activity: import("./agent-governance-types").AgentActivityEvent;
 } | {
@@ -127,6 +161,7 @@ export declare function applyPersistentAgentManualAction(input: {
     reason?: string;
     checkout?: any;
     budget?: any;
+    runtimeProbe?: any;
     action: "reassign";
     activity: import("./agent-governance-types").AgentActivityEvent;
 }>;

@@ -113,6 +113,7 @@ export type TaskAgentSession = {
     modelCapabilityCheckedAt?: string;
     modelIdentityHistory?: any[];
     providerContractId?: string;
+    nativeResumeEvidenceRef?: string;
     /**
      * The durable third-party conversation is scoped to the visible parent
      * conversation, target project, and runtime. Task records remain separate

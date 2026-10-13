@@ -6,6 +6,8 @@ export declare function requestGroupSourceInquiry(input: {
     projects?: string[];
     generation?: number;
     signal?: AbortSignal;
+    sourceRun?: any;
+    principal?: any;
 }): Promise<{
     answer: string;
     receipt: import("../../agents/source-inquiry-contract").CcmSourceInquiryReceiptV1;

@@ -14,8 +14,9 @@ export declare function createGlobalAgentHistoryRuntime(deps: any): {
             staleSyncCannotReviveDeletedSession: boolean;
         };
     };
-    mergeGlobalAgentMessages: (existing?: any[], incoming?: any[]) => any[];
+    mergeGlobalAgentMessages: (existing?: any[], incoming?: any[]) => any;
     loadGlobalAgentHistoryStore: () => any;
+    loadGlobalAgentHistoryPage: (query: any) => Promise<any>;
     syncGlobalAgentWebHistory: (payload: any) => any;
     createGlobalAgentConversationSession: (input?: any) => {
         createdAt: string;

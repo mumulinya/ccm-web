@@ -19,6 +19,8 @@ export declare function createAutomationDefinition(input: any): {
     attachments: any[];
     schedule: string;
     timezone: string;
+    catch_up_policy?: "skip" | "catch_up_once" | "catch_up_all";
+    concurrency_policy?: "allow_one" | "queue_one" | "parallel";
     execution_policy: import("../collaboration/task-workflow-model").TaskExecutionPolicy;
     notification_policy: any;
     metadata?: any;

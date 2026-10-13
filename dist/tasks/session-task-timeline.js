@@ -53,6 +53,7 @@ exports.readTaskContextHead = readTaskContextHead;
 exports.snapshotTaskContextForBoundary = snapshotTaskContextForBoundary;
 exports.projectPriorTaskSummaries = projectPriorTaskSummaries;
 exports.recordSessionTimelineMessage = recordSessionTimelineMessage;
+exports.recordSessionTimelineMessageReceipt = recordSessionTimelineMessageReceipt;
 exports.recordTaskContextBoundary = recordTaskContextBoundary;
 exports.runSessionTaskTimelineSelfTest = runSessionTaskTimelineSelfTest;
 const crypto = __importStar(require("crypto"));
@@ -187,7 +188,7 @@ function advanceTaskContext(db, taskId, span, event, reason, forceSnapshot) {
     const next = { ...context, timelineSpans, activeSpanId: span.status === "open" ? span.spanId : "", appliedCursors: cursors, latestCheckpointSequence: event.sequence, revision: Number(head.revision || 0) + 1, updatedAt: new Date().toISOString(), contentStored: false };
     (0, task_store_1.persistTaskContextProjection)(db, taskId, next, reason, event.eventId, forceSnapshot);
 }
-function appendInDb(db, input) {
+function appendInDb(db, input, materializeIndex = true) {
     const exactSessionId = text(input.exactSessionId, 300);
     const scopeId = text(input.scopeId, 200);
     if (!exactSessionId)
@@ -196,7 +197,7 @@ function appendInDb(db, input) {
     const idempotencyKey = text(input.idempotencyKey || eventId, 240);
     const existing = db.prepare("SELECT event_id FROM session_timeline_events WHERE event_id=? OR idempotency_key=? LIMIT 1").get(eventId, idempotencyKey);
     if (existing)
-        return readIndexInDb(db, input);
+        return materializeIndex ? readIndexInDb(db, input) : db.prepare('SELECT event_id AS eventId, sequence, checksum FROM session_timeline_events WHERE event_id=?').get(existing.event_id);
     const head = db.prepare("SELECT * FROM session_timeline_heads WHERE scope=? AND scope_id=? AND exact_session_id=?").get(input.scope, scopeId, exactSessionId);
     const identityIssues = [];
     if (input.taskId && input.type !== "task_started") {
@@ -251,7 +252,7 @@ function appendInDb(db, input) {
     db.prepare(`INSERT INTO task_context_outbox(outbox_id, dedupe_key, task_id, event_type, payload_json, status, attempts, created_at, content_stored)
     VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, 0) ON CONFLICT(dedupe_key) DO NOTHING`)
         .run(`outbox_${digest(outboxDedupe).slice(0, 24)}`, outboxDedupe, input.taskId || "", identityIssues.length ? "session_timeline.diagnostic" : "session_timeline.appended", stringify({ eventId, taskId: input.taskId || "", exactSessionId, sequence, checksum: event.checksum, ...(identityIssues.length ? { issues: identityIssues } : {}), contentStored: false }), timestamp);
-    return readIndexInDb(db, input);
+    return materializeIndex ? readIndexInDb(db, input) : { eventId, sequence, checksum: event.checksum };
 }
 function drainTaskContextOutbox(limit = 100) {
     const rows = (0, task_store_1.withSqliteTaskStore)(db => db.prepare("SELECT * FROM task_context_outbox WHERE status='pending' ORDER BY created_at ASC LIMIT ?").all(Math.max(1, limit)));
@@ -308,6 +309,24 @@ function persistTaskMutationWithTimelineAtomically(input) {
             const duplicateIndex = readIndexInDb(db, input);
             const duplicateHead = db.prepare("SELECT revision, checksum, active_span_id, projection_json FROM task_context_heads WHERE task_id=?").get(String(input.task.id));
             const duplicateContext = parse(duplicateHead?.projection_json, null);
+            if (input.repairProjectionOnReplay === true) {
+                if (String(duplicate.task_id) !== String(input.task.id)
+                    || input.expectedTaskRevision === undefined || Number(storedTask?.revision || 0) !== Number(input.expectedTaskRevision)) {
+                    throw new Error("任务投影修复身份或版本已变化");
+                }
+                // The authorized lifecycle mutation was already validated by its
+                // caller. Repair its projection without appending a second event.
+                (0, task_store_1.upsertTaskInSqliteTransaction)(db, input.task, Number(input.position ?? stored.position ?? 0), false);
+                const rebuilt = input.buildContext(input.task, duplicateContext);
+                const context = (0, task_store_1.persistTaskContextProjection)(db, input.task.id, { ...rebuilt,
+                    timelineSpans: duplicateContext?.timelineSpans || [], appliedCursors: duplicateContext?.appliedCursors || [],
+                    activeSpanId: duplicateHead?.active_span_id || "", revision: Number(duplicateHead?.revision || 0) + 1,
+                }, input.contextReason, String(duplicate.event_id), true);
+                return { task: { ...input.task, task_context: context, task_context_revision: context?.revision || 0,
+                        task_context_checksum: context?.checksum || "", active_timeline_span_id: context?.activeSpanId || "" },
+                    index: duplicateIndex, span: duplicateIndex.taskSpans.find(item => item.taskId === String(input.task.id)) || null,
+                    event: duplicateIndex.events.find(item => item.eventId === String(duplicate.event_id)) || null };
+            }
             return {
                 task: { ...storedTask, ...(duplicateContext ? { task_context: duplicateContext, task_context_revision: Number(duplicateHead.revision || 0), task_context_checksum: String(duplicateHead.checksum || ""), active_timeline_span_id: String(duplicateHead.active_span_id || "") } : {}) },
                 index: duplicateIndex,
@@ -661,6 +680,16 @@ function snapshotTaskContextForBoundary(taskId, reason = "compaction_boundary") 
 }
 function projectPriorTaskSummaries(index, currentTaskId) { return index.taskSpans.filter(span => span.taskId !== currentTaskId).map(span => ({ taskId: span.taskId, status: span.status, title: text(span.summary?.title, 300), goal: text(span.summary?.goal, 1000), result: text(span.summary?.result, 1000), evidenceIds: Array.isArray(span.summary?.evidenceIds) ? span.summary.evidenceIds.slice(0, 100) : [], startSequence: span.startSequence, endSequence: span.endSequence, spanChecksum: span.checksum, contentStored: false })); }
 function recordSessionTimelineMessage(input) { return appendSessionTimelineEvent({ exactSessionId: input.exactSessionId, scope: input.scope, scopeId: input.scopeId, type: input.role === "user" ? "user_message" : "assistant_message", eventId: `message:${text(input.messageId || `${input.role}:${input.timestamp || ""}`, 180)}`, taskId: input.taskId, timestamp: input.timestamp, payloadRef: input.messageId }); }
+/** Same durable append, identity checks and outbox; callers needing only an
+ * acknowledgement need not materialize the entire session after each write. */
+function recordSessionTimelineMessageReceipt(input) {
+    const result = (0, task_store_1.withImmediateTaskStoreTransaction)(db => appendInDb(db, {
+        ...input, type: input.role === 'user' ? 'user_message' : 'assistant_message',
+        eventId: `message:${text(input.messageId || `${input.role}:${input.timestamp || ''}`, 180)}`, payloadRef: input.messageId,
+    }, false));
+    drainTaskContextOutbox();
+    return result;
+}
 function recordTaskContextBoundary(input) {
     const boundaryRef = text(input.boundaryRef || `${input.type}:${Date.now()}`, 180);
     return appendSessionTimelineEvent({ ...input, eventId: `task_boundary:${text(input.taskId, 120)}:${input.type}:${digest(boundaryRef).slice(0, 20)}`,

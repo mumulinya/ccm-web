@@ -48,9 +48,14 @@ function publicData(value) {
     return allowed;
 }
 function writeEvent(res, event) {
+    // These are invalidation hints; clients recover authoritative snapshots on
+    // reconnect. Do not retain an unbounded queue for a stalled browser.
+    if (res.destroyed || res.writableLength > 256 * 1024) {
+        res.destroy();
+        throw new Error('runtime_event_client_backpressure');
+    }
     const id = "id" in event ? event.id : sequence;
-    res.write(`id: ${id}\n`);
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    res.write(`id: ${id}\ndata: ${JSON.stringify(event)}\n\n`);
 }
 function clientAccepts(client, topic) {
     return client.topics.has("*") || client.topics.has(topic);
@@ -107,7 +112,6 @@ function handleRuntimeEventsApi(pathname, req, res, parsed) {
     });
     res.write("retry: 3000\n\n");
     const client = { res, topics };
-    clients.add(client);
     const lastEventId = Number(req.headers["last-event-id"] || parsed?.query?.last_event_id || 0);
     if (Number.isFinite(lastEventId) && lastEventId > 0) {
         for (const event of recentEvents) {
@@ -116,6 +120,7 @@ function handleRuntimeEventsApi(pathname, req, res, parsed) {
         }
     }
     writeEvent(res, { type: "ready", at: new Date().toISOString(), data: { topics: [...topics] } });
+    clients.add(client);
     const heartbeat = setInterval(() => {
         try {
             writeEvent(res, { type: "heartbeat", at: new Date().toISOString(), data: {} });

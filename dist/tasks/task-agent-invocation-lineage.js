@@ -159,12 +159,12 @@ function processAlive(pid) {
     }
 }
 function assertIdentity(groupId, groupSessionId, taskAgentSessionId) {
-    if (!groupId || !groupSessionId.startsWith("gcs_") || !taskAgentSessionId.startsWith("tas_")) {
+    if (!require("../modules/collaboration/task-group-memory-identity").isAuthoritativeGroupMemorySession(groupId, groupSessionId) || !taskAgentSessionId.startsWith("tas_")) {
         throw new Error("task-agent invocation lineage requires groupId--gcs_*--tas_* identity");
     }
 }
 function assertGroupSessionIdentity(groupId, groupSessionId) {
-    if (!groupId || !groupSessionId.startsWith("gcs_")) {
+    if (!require("../modules/collaboration/task-group-memory-identity").isAuthoritativeGroupMemorySession(groupId, groupSessionId)) {
         throw new Error("task-agent invocation recovery requires groupId--gcs_* identity");
     }
 }

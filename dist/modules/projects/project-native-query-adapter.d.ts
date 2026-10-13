@@ -6,6 +6,11 @@ export declare function runProjectMainNativeQueryLoop(input: {
     userMessage: string;
     visibleTurnId: string;
     visibleAnchorMessageId?: string;
+    checkpointIdentity?: {
+        trace_id?: string;
+        attempt_id?: string;
+        finalMessageId?: string;
+    };
     loopBudget: any;
     signal?: AbortSignal;
     attempt?: number;

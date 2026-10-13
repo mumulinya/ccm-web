@@ -9,6 +9,8 @@ const group_memory_storage_1 = require("./group-memory-storage");
 const storage_1 = require("./storage");
 const group_session_execution_ledger_1 = require("./group-session-execution-ledger");
 const session_task_timeline_1 = require("../../tasks/session-task-timeline");
+const task_session_boundary_1 = require("./task-session-boundary");
+const task_session_model_context_1 = require("./task-session-model-context");
 function modelContextMessageContent(message) {
     const value = message?.content ?? message?.message?.content ?? message?.text ?? "";
     if (typeof value === "string")
@@ -67,6 +69,8 @@ function buildExactGroupSessionModelContextProjection(messagesInput, memory, opt
 function buildExactGroupSessionModelContextPacket(groupId, options = {}) {
     const id = String(groupId || "").trim();
     const groupSessionId = String(options.groupSessionId || options.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
+    if ((0, task_session_boundary_1.isPrivateTaskSessionId)(groupSessionId))
+        return (0, task_session_model_context_1.buildPrivateTaskModelContext)("group", id, groupSessionId, options.taskId);
     if (!id || !groupSessionId.startsWith("gcs_"))
         throw new Error("exact_group_session_required_for_model_context");
     return buildExactGroupSessionModelContextProjection((0, storage_1.getGroupMessages)(id, groupSessionId), (0, group_memory_storage_1.loadGroupMemory)(id, groupSessionId), {

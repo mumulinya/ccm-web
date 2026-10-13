@@ -38,6 +38,7 @@ exports.finalizeSharedRollingSessionMemory = finalizeSharedRollingSessionMemory;
 exports.validateCcmRollingSessionMemoryV1 = validateCcmRollingSessionMemoryV1;
 exports.selectRollingSessionMemoryForCompaction = selectRollingSessionMemoryForCompaction;
 exports.runRollingSessionMemoryExtraction = runRollingSessionMemoryExtraction;
+const performance_monitor_1 = require("./performance-monitor");
 const crypto = __importStar(require("crypto"));
 const unified_session_compaction_summary_1 = require("./unified-session-compaction-summary");
 function digest(value) {
@@ -130,7 +131,10 @@ function selectRollingSessionMemoryForCompaction(value, snapshot, requiredThroug
         requiredThroughIndex,
     });
 }
-async function runRollingSessionMemoryExtraction(input) {
+function runRollingSessionMemoryExtraction(...args) {
+    return (0, performance_monitor_1.measureAsyncPerformance)('memory.extraction', () => runRollingSessionMemoryExtractionMeasured(...args));
+}
+async function runRollingSessionMemoryExtractionMeasured(input) {
     const messages = Array.isArray(input.messages) ? input.messages : [];
     if (!messages.length)
         throw new Error("rolling session memory requires an authoritative transcript");

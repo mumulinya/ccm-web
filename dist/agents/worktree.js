@@ -40,6 +40,7 @@ exports.buildChildAgentWorktreeNotice = buildChildAgentWorktreeNotice;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
+const dispatch_workspace_policy_1 = require("./dispatch-workspace-policy");
 function runGit(cwd, args) {
     return String((0, child_process_1.execFileSync)("git", args, {
         cwd,
@@ -137,7 +138,8 @@ function createChildAgentWorktree(baseWorkDir, options = {}) {
     return { worktreePath, worktreeBranch, reused: false, baseHead, baseBranch };
 }
 function prepareChildAgentWorkDir(baseWorkDir, options = {}) {
-    const requestedMode = normalizeChildAgentIsolationMode(options.mode || options.isolation);
+    const workspacePolicy = (0, dispatch_workspace_policy_1.resolveDispatchWorkspaceMode)(baseWorkDir, options, normalizeChildAgentIsolationMode(options.mode || options.isolation));
+    const requestedMode = workspacePolicy.mode;
     const rawWorkDir = String(baseWorkDir || "").trim();
     const originalWorkDir = rawWorkDir ? path.resolve(rawWorkDir) : "";
     if (requestedMode !== "worktree") {
@@ -158,8 +160,8 @@ function prepareChildAgentWorkDir(baseWorkDir, options = {}) {
         };
     }
     catch (error) {
-        if (options.failClosed === true)
-            throw error;
+        if (workspacePolicy.failClosed)
+            throw Object.assign(error, { code: "CCM_DISPATCH_WORKTREE_REQUIRED" });
         return {
             mode: "shared",
             requestedMode,

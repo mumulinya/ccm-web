@@ -9,6 +9,7 @@ export declare function runGroupMainNativeQueryLoop(input: {
     visibleTurnId: string;
     visibleAnchorMessageId: string;
     recoveryAttempt?: number;
+    sourceInquiryContext?: any;
     signal?: AbortSignal;
     onDelta?: (delta: string, context?: NativeQueryDeltaContext) => void;
     onRetry?: (notice: any) => void;

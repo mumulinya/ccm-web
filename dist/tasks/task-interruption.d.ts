@@ -95,10 +95,16 @@ export declare function buildTaskInterruptionReceipt(input: {
     generation: number;
     schema: "ccm-task-interruption-receipt-v1";
     work_item_id: string;
-    recovery?: TaskRecoveryScheduleV1;
     plan_checksum: string;
+    recovery?: TaskRecoveryScheduleV1;
     recoverable: boolean;
     actor: string;
+    reconciliation?: {
+        action: "adopt_current_changes";
+        actor: string;
+        reconciled_at: string;
+        previous_workspace_checksum: string;
+    };
     receipt_id: string;
     reason_code: TaskInterruptionReason;
     checkpoint: string;
@@ -110,12 +116,6 @@ export declare function buildTaskInterruptionReceipt(input: {
     unresolved_tool_call_ids: string[];
     changed_file_count: number;
     process_termination_proven: boolean;
-    reconciliation?: {
-        action: "adopt_current_changes";
-        actor: string;
-        reconciled_at: string;
-        previous_workspace_checksum: string;
-    };
     task_agent_sessions: Array<{
         task_agent_session_id: string;
         native_session_id: string;
@@ -137,10 +137,16 @@ export declare function interruptTaskExecution(input: Parameters<typeof buildTas
         generation: number;
         schema: "ccm-task-interruption-receipt-v1";
         work_item_id: string;
-        recovery?: TaskRecoveryScheduleV1;
         plan_checksum: string;
+        recovery?: TaskRecoveryScheduleV1;
         recoverable: boolean;
         actor: string;
+        reconciliation?: {
+            action: "adopt_current_changes";
+            actor: string;
+            reconciled_at: string;
+            previous_workspace_checksum: string;
+        };
         receipt_id: string;
         reason_code: TaskInterruptionReason;
         checkpoint: string;
@@ -152,12 +158,6 @@ export declare function interruptTaskExecution(input: Parameters<typeof buildTas
         unresolved_tool_call_ids: string[];
         changed_file_count: number;
         process_termination_proven: boolean;
-        reconciliation?: {
-            action: "adopt_current_changes";
-            actor: string;
-            reconciled_at: string;
-            previous_workspace_checksum: string;
-        };
         task_agent_sessions: Array<{
             task_agent_session_id: string;
             native_session_id: string;
@@ -203,10 +203,16 @@ export declare function reconcileTaskInterruptionReceipt(task: any, input: {
     generation: number;
     schema: "ccm-task-interruption-receipt-v1";
     work_item_id: string;
-    recovery?: TaskRecoveryScheduleV1;
     plan_checksum: string;
+    recovery?: TaskRecoveryScheduleV1;
     recoverable: boolean;
     actor: string;
+    reconciliation?: {
+        action: "adopt_current_changes";
+        actor: string;
+        reconciled_at: string;
+        previous_workspace_checksum: string;
+    };
     receipt_id: string;
     reason_code: TaskInterruptionReason;
     checkpoint: string;
@@ -218,12 +224,6 @@ export declare function reconcileTaskInterruptionReceipt(task: any, input: {
     unresolved_tool_call_ids: string[];
     changed_file_count: number;
     process_termination_proven: boolean;
-    reconciliation?: {
-        action: "adopt_current_changes";
-        actor: string;
-        reconciled_at: string;
-        previous_workspace_checksum: string;
-    };
     task_agent_sessions: Array<{
         task_agent_session_id: string;
         native_session_id: string;

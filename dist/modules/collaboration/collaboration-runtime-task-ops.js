@@ -106,7 +106,7 @@ function retryRuntimeFailedTasks(ctx, options = {}) {
     }
     const results = candidates.map((task) => {
         const reason = options.reason || "执行通道恢复后批量重试";
-        const result = (0, collaboration_runtime_runtime_tools_1.retryTask)(task.id, ctx, reason, autoExecute);
+        const result = (0, collaboration_runtime_runtime_tools_1.retryTask)(task.id, ctx, reason, autoExecute, "", { automaticRecovery: true });
         return {
             task_id: task.id,
             title: task.title,

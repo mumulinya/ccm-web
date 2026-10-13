@@ -9,6 +9,7 @@ const workspace_model_result_projection_1 = require("../tools/workspace-model-re
 const context_budget_1 = require("../system/context-budget");
 const workspace_model_body_1 = require("../tools/workspace-model-body");
 const model_tool_attachments_1 = require("./model-tool-attachments");
+const global_source_model_content_1 = require("../system/global-source-model-content");
 // Only CCM runtime envelopes may be unwrapped. Business payloads can legally
 // contain output/result/modelOutput fields and must remain intact.
 function runtimeEnvelope(value) {
@@ -58,6 +59,8 @@ function executionModelToolResult(event) {
 }
 /** Global tools also return business observations, not just runtime rows. */
 function globalModelToolObservation(observation) {
+    if (observation?.schema === 'ccm-global-project-source-result-v1')
+        return (0, global_source_model_content_1.globalSourceModelPayload)(observation);
     if (runtimeEnvelope(observation))
         return modelToolBody(observation);
     if (!observation || typeof observation !== "object" || Array.isArray(observation))

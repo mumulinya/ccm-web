@@ -32,8 +32,15 @@ class ProjectConversationStreams {
         const start = () => {
             if (!res.headersSent)
                 res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
-            for (const frame of row.frames)
+            for (const frame of row.frames) {
+                if (res.destroyed || res.writableEnded)
+                    break;
+                if (res.writableLength > Math.min(this.maxBytes, 256 * 1024)) {
+                    res.destroy();
+                    break;
+                }
                 res.write(frame);
+            }
         };
         if (row.started)
             start();
@@ -41,6 +48,8 @@ class ProjectConversationStreams {
             res.end();
             return true;
         }
+        if (res.destroyed || res.writableEnded)
+            return true;
         row.listeners.add(res);
         const timer = setTimeout(() => {
             if (row.started || res.destroyed || res.writableEnded)
@@ -80,7 +89,7 @@ class ProjectConversationStreams {
                 }
                 if (!observer.headersSent)
                     observer.writeHead(res.statusCode, { "Content-Type": String(res.getHeader("Content-Type") || "text/event-stream"), "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
-                if (observer.writableLength > this.maxBytes) {
+                if (observer.writableLength > Math.min(this.maxBytes, 256 * 1024)) {
                     observer.destroy();
                     row.listeners.delete(observer);
                     continue;

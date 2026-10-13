@@ -7,6 +7,7 @@ export interface WorkflowDecision {
     needsEpicDecomposition: boolean;
     actionRequired: boolean;
     continuationKind: "new_task" | "supplement" | "revise_goal";
+    relatedTaskId?: string;
     readAction: "none" | "inspect_status" | "inspect_source";
     sourceReadDepth: "none" | "focused" | "broad";
     targetRefs: string[];

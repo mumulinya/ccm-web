@@ -4,6 +4,7 @@ exports.PROVIDER_SSE_JSON_INVALID_AFTER_BYTES = void 0;
 exports.parseSseJsonDocuments = parseSseJsonDocuments;
 exports.consumeSseJsonTextChunks = consumeSseJsonTextChunks;
 exports.runSseJsonParserSelfTest = runSseJsonParserSelfTest;
+const performance_monitor_1 = require("./performance-monitor");
 exports.PROVIDER_SSE_JSON_INVALID_AFTER_BYTES = "CCM_PROVIDER_SSE_JSON_INVALID_AFTER_BYTES";
 function invalidProviderJsonError(receivedBytes) {
     const error = new Error(`Provider 返回了无法解析的流式 JSON（已接收 ${Math.max(0, receivedBytes)} bytes）`);
@@ -61,10 +62,10 @@ async function consumeSseJsonTextChunks(chunks, onPayload) {
     const flush = () => {
         if (!dataLines.length)
             return;
-        const parsed = parseSseJsonDocuments(dataLines, receivedBytes);
+        const parsed = (0, performance_monitor_1.measurePerformance)('model.stream_json_processing', () => parseSseJsonDocuments(dataLines, receivedBytes));
         dataLines = [];
         for (const payload of parsed.payloads) {
-            onPayload(payload);
+            (0, performance_monitor_1.measurePerformance)('model.stream_payload_processing', () => onPayload(payload));
             payloadCount += 1;
         }
         done = parsed.done;
@@ -129,7 +130,7 @@ async function consumeSseJsonTextChunks(chunks, onPayload) {
     if (!sawDataLine && payloadCount === 0 && rawText.trim()) {
         const parsed = parseSseJsonDocuments([rawText], receivedBytes);
         for (const payload of parsed.payloads) {
-            onPayload(payload);
+            (0, performance_monitor_1.measurePerformance)('model.stream_payload_processing', () => onPayload(payload));
             payloadCount += 1;
         }
         done = parsed.done;

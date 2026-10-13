@@ -189,7 +189,7 @@ export declare function resumeTaskQueues(ctx: CollabCtx, options?: any): {
     manual_pending: number;
     skipped: number;
     total: number;
-    trace_backfilled: number;
+    trace_backfilled: any;
     manual_recovery: boolean;
     mixed_recovery: boolean;
     recovery_policy: string;

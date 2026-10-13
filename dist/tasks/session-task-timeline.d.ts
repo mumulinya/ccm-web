@@ -154,6 +154,7 @@ export declare function persistTaskMutationWithTimelineAtomically(input: {
     evidenceIds?: string[];
     contextReason: string;
     forceSnapshot?: boolean;
+    repairProjectionOnReplay?: boolean;
     buildContext: (task: any, previousContext: any | null) => any;
 }): {
     task: any;
@@ -338,6 +339,13 @@ export declare function recordSessionTimelineMessage(input: {
     taskId?: string;
     timestamp?: string;
 }): CcmSessionTaskIndexV1;
+/** Same durable append, identity checks and outbox; callers needing only an
+ * acknowledgement need not materialize the entire session after each write. */
+export declare function recordSessionTimelineMessageReceipt(input: Parameters<typeof recordSessionTimelineMessage>[0]): {
+    eventId: string;
+    sequence: number;
+    checksum: string;
+};
 export declare function recordTaskContextBoundary(input: {
     taskId: string;
     exactSessionId: string;

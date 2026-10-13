@@ -1,4 +1,4 @@
-export declare function startTaskAcceptance(task: any, root: string | Record<string, string>): void;
+export declare function startTaskAcceptance(task: any, root: string | Record<string, string>, projectId?: string): void;
 export declare function taskAcceptanceVerificationMetadata(taskId: string, project: string): {
     acceptanceContract?: undefined;
     acceptanceExecutions?: undefined;
@@ -11,7 +11,9 @@ export declare function taskAcceptanceVerificationMetadata(taskId: string, proje
     }[];
 };
 /** Called before any lifecycle/session mutation, not after setting done. */
-export declare function validateUnifiedTaskAcceptance(task: any, updates: any): string | null;
+export declare function validateUnifiedTaskAcceptance(task: any, updates: any, options?: {
+    developmentCycleSource?: string;
+}): string | null;
 export declare function unifiedTaskTerminalDecision(task: any, updates: any): {
     checksum: string;
     schema: string;

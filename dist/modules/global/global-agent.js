@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.postLocalSseOrJsonApi = exports.postLocalApi = exports.callLocalApi = exports.getRequestBaseUrl = exports.waitForGlobalAgentBridgeResult = exports.createGlobalAgentBridgeRequest = exports.saveGlobalAgentBridgeStore = exports.loadGlobalAgentBridgeStore = exports.buildGlobalAgentEventUi = exports.runGlobalModelRetrySelfTest = exports.callGlobalModelWithRetry = exports.callLlm = exports.hasExplicitGlobalWriteAuthorization = exports.inferLocalGlobalAction = exports.runGlobalAgentIntentSelfTest = void 0;
 exports.runGlobalAgentHistorySyncSelfTest = runGlobalAgentHistorySyncSelfTest;
+exports.loadGlobalAgentHistoryPage = loadGlobalAgentHistoryPage;
 exports.upsertGlobalAgentConversationTaskMessage = upsertGlobalAgentConversationTaskMessage;
 exports.deleteGlobalAgentConversationSession = deleteGlobalAgentConversationSession;
 exports.loadGlobalAgentHistoryStore = loadGlobalAgentHistoryStore;
@@ -169,6 +170,7 @@ function mergeGlobalAgentMessages(existing = [], incoming = []) {
 function loadGlobalAgentHistoryStore() {
     return globalAgentHistoryRuntime.loadGlobalAgentHistoryStore();
 }
+function loadGlobalAgentHistoryPage(query) { return globalAgentHistoryRuntime.loadGlobalAgentHistoryPage(query); }
 function syncGlobalAgentWebHistory(payload) {
     return globalAgentHistoryRuntime.syncGlobalAgentWebHistory(payload);
 }
@@ -539,6 +541,7 @@ function publicGlobalAgentRunSummary(run) {
         supervisor_id: run.supervisor_id || "",
         supervision_state: run.supervision_state || "",
         step_count: Array.isArray(run.steps) ? run.steps.length : 0,
+        source_access_count: require('../../system/global-source-model-content').countGlobalSourceAccess(run),
         pending_tool: run.pending_tool
             ? { name: run.pending_tool.name, risk: run.pending_tool.risk, signature: run.pending_tool.signature }
             : null,
@@ -583,6 +586,7 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         completed_at: run.completed_at,
         deadline_at: run.deadline_at,
         max_steps: run.max_steps,
+        source_access_count: require('../../system/global-source-model-content').countGlobalSourceAccess(run),
         steps,
         pending_tool: run.pending_tool,
         pending_plan: run.pending_plan || run.pendingPlan || null,

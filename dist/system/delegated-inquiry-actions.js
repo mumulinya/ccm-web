@@ -38,6 +38,7 @@ const crypto = __importStar(require("crypto"));
 const storage_1 = require("../modules/collaboration/storage");
 const delegated_inquiry_projections_1 = require("./delegated-inquiry-projections");
 const delegated_inquiry_recovery_1 = require("./delegated-inquiry-recovery");
+const runtime_events_1 = require("./runtime-events");
 function digest(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
@@ -56,13 +57,16 @@ async function performDelegatedInquiryAction(input) {
     const projection = (0, delegated_inquiry_projections_1.getDelegatedInquiryProjection)(input.inquiryId);
     if (!projection)
         throw Object.assign(new Error("协作记录不存在"), { code: "DELEGATED_INQUIRY_NOT_FOUND" });
-    if (!projection.availableActions.includes(input.action))
-        throw Object.assign(new Error("当前协作记录不允许执行该操作"), { code: "DELEGATED_INQUIRY_ACTION_NOT_ALLOWED" });
     const clarification = safeText(input.clarification, 2_000);
     if (input.action === "provide_clarification" && !clarification) {
         throw Object.assign(new Error("请先填写需要补充的信息"), { code: "DELEGATED_INQUIRY_CLARIFICATION_REQUIRED" });
     }
     const actionKey = `inq_action_${digest([input.inquiryId, input.revision, input.action, clarification]).slice(0, 28)}`;
+    if ((0, delegated_inquiry_projections_1.delegatedInquiryActionWasHandled)(input.inquiryId, actionKey))
+        return { projection, replayed: true,
+            ...(input.action === 'continue_with_current' || input.action === 'promote_to_development' ? { navigation: navigationFor(projection, input.action) } : {}) };
+    if (!projection.availableActions.includes(input.action))
+        throw Object.assign(new Error("当前协作记录不允许执行该操作"), { code: "DELEGATED_INQUIRY_ACTION_NOT_ALLOWED" });
     const claim = (0, delegated_inquiry_projections_1.updateDelegatedInquiryProjection)({
         inquiryId: input.inquiryId,
         expectedRevision: input.revision,
@@ -73,6 +77,9 @@ async function performDelegatedInquiryAction(input) {
     });
     if (claim.replayed)
         return { projection: claim.projection, replayed: true, ...(input.action === "continue_with_current" || input.action === "promote_to_development" ? { navigation: navigationFor(claim.projection, input.action) } : {}) };
+    (0, runtime_events_1.publishRuntimeEvent)('global', 'global.source_access_action', { inquiryId: projection.inquiryId, runId: projection.sourceRunId,
+        sourceMessageId: projection.sourceMessageId, action: input.action, revision: input.revision, idempotencyKey: actionKey,
+        actorType: input.principal?.kind || 'internal', actorId: String(input.principal?.userId || input.principal?.id || 'internal') });
     if (input.action === "continue_with_current" || input.action === "promote_to_development") {
         return { projection: claim.projection, replayed: false, navigation: navigationFor(claim.projection, input.action) };
     }
@@ -95,6 +102,8 @@ async function performDelegatedInquiryAction(input) {
                 if (!group)
                     throw Object.assign(new Error("目标群聊不存在"), { code: "DELEGATED_INQUIRY_TARGET_NOT_FOUND" });
                 return (0, delegated_inquiry_recovery_1.requestRecoverableGroupSourceInquiry)({
+                    projects: projection.requestedProjectIds,
+                    ...(projection.sourceRunId ? { sourceRun: require('../agents/global/global-agent-run-store').getGlobalAgentRun(projection.sourceRunId), principal: input.principal } : {}),
                     group,
                     exactSessionId: projection.sourceSessionId,
                     question,
@@ -109,6 +118,7 @@ async function performDelegatedInquiryAction(input) {
             status: result.receipt.sufficient ? "completed" : result.needsUserInput ? "needs_input" : "partial",
             evidenceCount: evidenceIds.length,
             evidenceIds,
+            evidenceRefs: result.planningEvidenceEntries,
             missingEvidenceSummaries: result.missingEvidenceSummaries,
             conclusion: result.answer || result.receipt.reason,
         });

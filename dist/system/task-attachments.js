@@ -39,6 +39,8 @@ exports.validateTaskUploadedFiles = validateTaskUploadedFiles;
 exports.renderTaskAttachmentContext = renderTaskAttachmentContext;
 exports.buildTaskAttachmentMutation = buildTaskAttachmentMutation;
 exports.parseRetainedAttachmentIds = parseRetainedAttachmentIds;
+const performance_monitor_1 = require("./performance-monitor");
+const readonly_performance_service_1 = require("./readonly-performance-service");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -55,8 +57,10 @@ function uniqueStrings(value) {
             .map(item => String(item || "").trim())
             .filter(Boolean))];
 }
-function checksumFile(file) {
-    return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+async function checksumFile(file) {
+    if ((await fs.promises.stat(file)).size > 256 * 1024)
+        return (await (0, readonly_performance_service_1.fingerprintFileOffThread)(file)).checksum;
+    return crypto.createHash("sha256").update(await fs.promises.readFile(file)).digest("hex");
 }
 function normalizedUploadPath(value) {
     const file = path.resolve(String(value || ""));
@@ -69,7 +73,16 @@ function looksLikeImage(name) {
     return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(path.extname(name).toLowerCase());
 }
 function imageSignatureMatches(file, name) {
-    const bytes = fs.readFileSync(file).subarray(0, 16);
+    const descriptor = fs.openSync(file, 'r');
+    const header = Buffer.alloc(16);
+    let count;
+    try {
+        count = fs.readSync(descriptor, header, 0, header.length, 0);
+    }
+    finally {
+        fs.closeSync(descriptor);
+    }
+    const bytes = header.subarray(0, count);
     const ext = path.extname(name).toLowerCase();
     if (ext === ".png")
         return bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
@@ -152,14 +165,15 @@ async function ingestSources(files, userText, urls = [], onlineDocumentFetcher, 
         decomposeRequirement: false,
     });
     const byId = new Map((ingestion.sources || []).map((source) => [String(source.id || ""), source]));
-    const attachments = (ingestion.attachments || []).map((attachment) => {
+    const attachments = [];
+    for (const attachment of ingestion.attachments || []) {
         const source = byId.get(String(attachment.id || ""));
-        return {
+        attachments.push({
             ...attachment,
-            checksum: source?.path && fs.existsSync(source.path) ? checksumFile(source.path) : "",
+            checksum: source?.path && fs.existsSync(source.path) ? await checksumFile(source.path) : "",
             created_at: new Date().toISOString(),
-        };
-    });
+        });
+    }
     return {
         attachments,
         contexts: (ingestion.sources || []).map(contextBlock),
@@ -167,7 +181,10 @@ async function ingestSources(files, userText, urls = [], onlineDocumentFetcher, 
         technical: ingestion.technical || null,
     };
 }
-async function buildTaskAttachmentMutation(input) {
+function buildTaskAttachmentMutation(...args) {
+    return (0, performance_monitor_1.measureAsyncPerformance)('attachments.context_preparation', () => buildTaskAttachmentMutationMeasured(...args));
+}
+async function buildTaskAttachmentMutationMeasured(input) {
     const files = Array.isArray(input.files) ? input.files : [];
     const currentAttachments = Array.isArray(input.currentAttachments) ? input.currentAttachments : [];
     const requestedRetainedIds = uniqueStrings(input.retainedIds);

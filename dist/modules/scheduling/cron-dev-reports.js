@@ -423,6 +423,15 @@ function buildAutoDevReportPreview(kind, dateKey, timezone = schedule_expression
 async function generateAndUpsertAutoDevReport(kind, dateKey = localDateKey(), options = {}) {
     const config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
     const timezone = (0, schedule_expression_1.normalizeCronTimezone)(options.timezone || config.timezone);
+    // Published historical snapshots are immutable unless an explicit rebuild is requested.
+    const previous = kind === "weekly"
+        ? (0, db_1.loadDevWeeklyReports)().find((item) => item.id === reportWeekRange(dateKey, timezone).id)
+        : (0, db_1.loadDevReports)().find((item) => item.date === dateKey);
+    const historical = kind === "weekly"
+        ? reportWeekRange(dateKey, timezone).end_key < localDateKey(new Date(), timezone)
+        : dateKey < localDateKey(new Date(), timezone);
+    if (historical && options.force !== true && previous?.generation_status === "generated" && previous?.ai_summary)
+        return previous;
     const events = (0, work_journal_1.syncWorkJournal)().events;
     const report = kind === "weekly"
         ? generateAutoDevWeeklyReport(dateKey, timezone, events)

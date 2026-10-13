@@ -2,6 +2,7 @@ import { type NativeToolResult } from './native-query-messages';
 import type { NativeQueryLoopInput } from './native-query-loop';
 import type { ProviderAgentTurn, ProviderToolCall } from '../system/provider-native-tools';
 export declare function createModelCheckpointRuntime(input: NativeQueryLoopInput, family: string): {
+    beforeExecute(calls: ProviderToolCall[]): void;
     forJson(next: any[]): any[];
     resume(execute: NativeQueryLoopInput["executeTools"]): Promise<any[]>;
     request(next: any[], index: number): any[];

@@ -177,6 +177,7 @@ async function authorizeProjectChildAgentStart(input) {
         .find((item) => item.approvalScope === "task" && item.operation === "workspace_edit_session"
         && String(item.approvalTaskKey || item.taskId) === approvalTaskKey
         && item.state === "approved" && Number(item.permissionPolicyRevision || 0) === Number(snapshot.revision || 0)
+        && (input.task.workflow_policy_snapshot?.approval !== "confirm_before_write" || item.decidedBy === "local-user")
         && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now())
         && (item.approvedProjectIds || []).includes(input.project)
         && JSON.stringify([...(item.approvedPaths || [])].sort()) === JSON.stringify(approvedPaths));

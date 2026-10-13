@@ -267,7 +267,8 @@ async function requestTaskPermission(context, input) {
     const identity = approvalScope === "task"
         ? hash([approvalTaskKey, "task-edit-approval", approvedProjectIds.sort(), approvedPaths.sort(), Number(input?.permissionPolicyRevision || 0)])
         : hash([effectiveTaskId, context.groupId, context.groupSessionId, context.project, context.projectSessionId, context.taskAgentSessionId, context.nativeSessionId, classified.operation, classified.command, classified.paths, classified.hosts]);
-    const existing = readStore().find(item => item.checksum === identity && !["expired", "consumed"].includes(item.state));
+    const existing = readStore().find(item => item.checksum === identity && !["expired", "consumed"].includes(item.state)
+        && !(input?.forceUserDecision === true && item.state === "approved" && item.decidedBy !== "local-user"));
     if (existing) {
         if (existing.state === "rejected") {
             const repeated = (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {

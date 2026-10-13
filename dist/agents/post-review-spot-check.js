@@ -242,6 +242,10 @@ async function runMainAgentPostReviewSpotCheck(input) {
                 project: String(item.project || ""),
                 agentType: "main-agent",
                 source: "post-review-spot-check",
+                // This is the already validated verification command from the signed
+                // TestAgent report, not another workspace-editing development agent.
+                scope: "test_agent",
+                scopeId: String(item.project || input.taskId || report.taskId || ""),
                 commandLabel: "完成前抽查",
                 title: "主 Agent 抽查 TestAgent 验证",
             });

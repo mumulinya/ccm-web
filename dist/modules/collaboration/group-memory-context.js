@@ -1954,6 +1954,7 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId, ta
 // ===== merged from group-memory-context-part-03-part-01.ts =====
 // Behavior-freeze module extracted mechanically from the former facade.
 function buildAgentMemoryContextBundle(groupId, targetProject, task = "", options = {}) {
+    require("./task-session-model-context").validatePrivateTaskGroupMemory(groupId, options);
     const project = (0, group_memory_shared_1.normalizeAgentMemoryProject)(targetProject);
     const groupSessionId = String(options.groupSessionId || options.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(groupId));
     const typedMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
@@ -2024,7 +2025,9 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         bundle.rendered_text = (0, group_memory_shared_1.compactPreserveLines)(rendered, Number(options.maxRenderedChars || 6000));
         return bundle;
     }
-    const allMessages = (0, storage_1.getGroupMessages)(groupId, groupSessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
+    const allMessages = require("./task-session-model-context").validatePrivateTaskGroupMemory(groupId, options)
+        ? require("./task-session-model-context").buildPrivateTaskModelContext("group", groupId, groupSessionId, String(options.taskId || options.task_id || options.task?.id || "")).sourceMessages
+        : (0, storage_1.getGroupMessages)(groupId, groupSessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
     const postTurnSummaryBackfill = (0, group_post_turn_summary_1.backfillGroupPostTurnSummaries)(groupId, groupSessionId, allMessages, { maxMessages: 500 });
     const postTurnSummaryLedger = postTurnSummaryBackfill.ledger || (0, group_post_turn_summary_1.readGroupPostTurnSummaries)(groupId, groupSessionId, { limit: 20 });
     const resumePreparation = prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages, (0, group_memory_storage_1.loadGroupMemory)(groupId, groupSessionId), {
@@ -3092,6 +3095,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
 // ===== merged from group-memory-context-part-03-part-02.ts =====
 // Behavior-freeze module extracted mechanically from the former facade.
 async function buildAgentMemoryContextBundleWithManifestSelection(groupId, targetProject, task = "", options = {}) {
+    if (require("./task-session-model-context").validatePrivateTaskGroupMemory(groupId, options))
+        return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
     const requestedGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
     const requireExactGroupSession = options.requireExactGroupSession === true || options.require_exact_group_session === true;
     if (requireExactGroupSession && !requestedGroupSessionId.startsWith("gcs_")) {

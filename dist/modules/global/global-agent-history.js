@@ -78,6 +78,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         "taskExperience",
         "files",
         "agenticRun",
+        'source_access_run_id', 'source_access_count',
         "agentic_run",
         "globalMission",
         "global_mission",
@@ -148,6 +149,7 @@ function createGlobalAgentHistoryRuntime(deps) {
             ? buildGlobalVisibleReplyContent({ value: rawContent, rawSource: item.technical_content || item.technicalContent || rawContent, fallback: "回复已整理，技术细节已放入技术详情。", max: 8000 })
             : { text: rawContent, technical_content: "" };
         const metadata = pickGlobalAgentHistoryMetadata(item);
+        Object.assign(metadata, require('../../system/global-source-history-binding').globalSourceHistoryBinding(item));
         if (role === "assistant" && visible.technical_content && !metadata.technical_content)
             metadata.technical_content = visible.technical_content;
         return {
@@ -160,8 +162,7 @@ function createGlobalAgentHistoryRuntime(deps) {
     function normalizeGlobalAgentMessages(messages = []) {
         return messages
             .map((item) => normalizeGlobalAgentMessage(item))
-            .filter(Boolean)
-            .slice(-GLOBAL_AGENT_HISTORY_LIMIT);
+            .filter(Boolean);
     }
     function globalAgentHistoryMessageKey(message) {
         return [
@@ -171,27 +172,10 @@ function createGlobalAgentHistoryRuntime(deps) {
         ].join("\u0001");
     }
     function mergeGlobalAgentMessages(existing = [], incoming = []) {
-        const seen = new Set();
-        const byKey = new Map();
         const candidates = [...(existing || []), ...(incoming || [])]
             .map((item) => normalizeGlobalAgentMessage(item))
             .filter(Boolean);
-        for (const message of candidates) {
-            const key = globalAgentHistoryMessageKey(message);
-            const previous = byKey.get(key);
-            byKey.set(key, previous ? { ...previous, ...pickGlobalAgentHistoryMetadata(message), role: previous.role, content: previous.content, timestamp: previous.timestamp } : message);
-        }
-        const merged = [];
-        for (const message of byKey.values()) {
-            const key = globalAgentHistoryMessageKey(message);
-            if (seen.has(key))
-                continue;
-            seen.add(key);
-            merged.push(message);
-        }
-        return merged
-            .sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")))
-            .slice(-GLOBAL_AGENT_HISTORY_LIMIT);
+        return require('../../system/global-history-message-identity').mergeGlobalHistoryMessageIdentities(candidates, pickGlobalAgentHistoryMetadata);
     }
     function runGlobalAgentHistorySyncSelfTest() {
         const timestamp = "2026-07-07T10:00:00.000Z";
@@ -294,6 +278,28 @@ function createGlobalAgentHistoryRuntime(deps) {
         }
         catch { }
         return { current_session_id: "", sessions: [] };
+    }
+    async function loadGlobalAgentHistoryPage(query) {
+        const service = require('../../system/readonly-performance-service');
+        for (const file of [GLOBAL_AGENT_HISTORY_FILE, `${GLOBAL_AGENT_HISTORY_FILE}.bak`]) {
+            if (!fs_1.default.existsSync(file))
+                continue;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const result = await service.readConversationJsonPageOffThread(file, query);
+                    const current = fs_1.default.statSync(file);
+                    if (`${current.dev}:${current.ino}:${current.mtimeMs}:${current.ctimeMs}:${current.size}` !== result.sourceVersion)
+                        continue;
+                    return { ...result.page, sessions: (result.page.sessions || []).map((session) => ({ ...session, messages: normalizeGlobalAgentMessages(session.messages || []) })) };
+                }
+                catch (error) {
+                    if (String(error?.message || '').includes('历史'))
+                        throw error;
+                }
+            }
+        }
+        // Legacy/corrupt-store fallback keeps its existing recovery semantics.
+        return require('../../system/conversation-history-page').projectGlobalHistoryPage(loadGlobalAgentHistoryStore(), query);
     }
     function deletedGlobalSessionIds(store) {
         return new Set((Array.isArray(store?.deleted_session_ids) ? store.deleted_session_ids : [])
@@ -559,11 +565,14 @@ function createGlobalAgentHistoryRuntime(deps) {
         if (deletedGlobalSessionIds(store).has(String(sessionId || "").trim()))
             return [];
         const existing = (store.sessions || []).find((item) => item.id === sessionId);
+        // This accessor feeds the existing Feishu model context. Full history is
+        // retained in the store and paged APIs; preserve its prior 80-message input
+        // window rather than sending the complete UI archive to the Provider.
         if (existing)
-            return normalizeGlobalAgentMessages(existing.messages || []);
+            return normalizeGlobalAgentMessages(existing.messages || []).slice(-GLOBAL_AGENT_HISTORY_LIMIT);
         if (String(sessionId || "").trim())
             return [];
-        return getBaseGlobalAgentMessages(store);
+        return getBaseGlobalAgentMessages(store).slice(-GLOBAL_AGENT_HISTORY_LIMIT);
     }
     function appendGlobalAgentConversationMessage(sessionId, role, content, source = "feishu", options = {}) {
         const store = loadGlobalAgentHistoryStore();
@@ -701,6 +710,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         runGlobalAgentHistorySyncSelfTest,
         mergeGlobalAgentMessages,
         loadGlobalAgentHistoryStore,
+        loadGlobalAgentHistoryPage,
         syncGlobalAgentWebHistory,
         createGlobalAgentConversationSession,
         deleteGlobalAgentConversationSession,

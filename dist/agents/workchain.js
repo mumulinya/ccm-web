@@ -1113,9 +1113,7 @@ function hasExecutableWorkEvidence(input, evidence) {
         || !!(summary.delivery_report || summary.deliveryReport);
 }
 function hasStrongWorkchainVerificationEvidence(evidence) {
-    return evidence.verification.length > 0 && evidence.verificationFailed.length === 0
-        || evidence.independentReview.length > 0
-        || evidence.acceptance.length > 0;
+    return require('./workchain-verification-evidence').strongWorkchainVerificationEvidence(evidence);
 }
 function workchainVerificationFailureText(item) {
     if (!item || typeof item !== "object")
@@ -2528,6 +2526,7 @@ function runMainAgentWorkchainSelfTest() {
     }, {
         files: [],
         verification: ["npm test"],
+        verificationFailed: [],
         acceptance: [],
         independentReview: [],
         receipts: 0,

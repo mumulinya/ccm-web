@@ -102,7 +102,7 @@ function projectProjectRows(rows) {
         name: redactGroupSessionIds(String(row?.name || "")),
         agent: redactGroupSessionIds(String(row?.agent || "")),
         platform: redactGroupSessionIds(String(row?.platform || "")),
-        source_access: "delegated_to_project_main_agent",
+        source_access: "controlled_direct_or_delegated_source_tools",
     }));
 }
 function projectGroupRows(rows) {
@@ -144,13 +144,15 @@ function projectGlobalAgentObservationForModel(toolName, observation) {
                 agent: redactGroupSessionIds(String(observation.config.agent || "")),
                 platform: redactGroupSessionIds(String(observation.config.platform || "")),
             } : undefined,
-            source_access: "delegated_to_project_main_agent",
-            memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_project_main_agent" },
+            source_access: "controlled_direct_or_delegated_source_tools",
+            memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_source_tools" },
         };
     if (name === "request_project_source_inquiry")
         return compactObservation(redactGroupSessionFields(observation));
     if (name === "request_group_source_inquiry")
         return compactObservation(redactGroupSessionFields(observation));
+    if (['list_project_sources', 'search_project_sources', 'read_project_sources'].includes(name))
+        return compactObservation(observation);
     if (name === "list_groups")
         return { success: observation.success !== false, groups: projectGroupRows(observation.groups) };
     if (name === "list_tasks")
@@ -279,6 +281,7 @@ function buildBoundedGlobalModelContext(context) {
 }
 async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
     const context = runtime.getContext ? await runtime.getContext(run) : {};
+    await require('../../system/global-source-access').hydrateGlobalSourceObservations(run);
     const boundaryValidation = runtime.verifyContextBoundary?.(context, run);
     if (boundaryValidation === false || (typeof boundaryValidation === "object" && boundaryValidation?.valid !== true)) {
         const issues = typeof boundaryValidation === "object" && Array.isArray(boundaryValidation?.issues) ? boundaryValidation.issues : ["context_boundary_rejected"];
@@ -311,7 +314,7 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
         sessionDirective: (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("global", "global", sessionId),
         roleSkillsPrompt: roleSkills.prompt,
     };
-    const sessionGuidance = [(0, main_agent_identity_1.buildGlobalMainSessionGuidance)(), (0, main_agent_identity_1.buildGlobalMainDynamicContext)(identityInput)].filter(Boolean).join("\n\n");
+    const sessionGuidance = [(0, main_agent_identity_1.buildGlobalMainSessionGuidance)(), (0, main_agent_identity_1.buildGlobalMainDynamicContext)(identityInput), require('../../system/global-source-model-content').GLOBAL_SOURCE_GUIDANCE].filter(Boolean).join("\n\n");
     const identityRules = (0, main_agent_identity_1.buildGlobalMainIdentityRules)(identityInput);
     const mcpPolicy = String(authorizedTools.policy_prompt || "").trim();
     const identitySystem = identityRules;
@@ -412,7 +415,7 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
         observations: run.steps.map(step => step.observation),
     });
     if (nativeMessages)
-        return nativeMessages;
+        return require('../../system/global-source-access').hydrateGlobalSourceMessages(nativeMessages, run);
     return (0, transient_model_content_1.attachTransientModelBlocks)([
         ...(0, native_session_transcript_1.splitNativeSystemSegments)({ identityRules: identitySystem, sessionGuidance, mcpPolicy, toolPromptLayout: authorizedTools.toolPromptLayout }),
         ...summaryMessages,

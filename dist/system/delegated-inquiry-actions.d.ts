@@ -5,6 +5,7 @@ export declare function performDelegatedInquiryAction(input: {
     action: CcmDelegatedInquiryActionV2;
     clarification?: string;
     signal?: AbortSignal;
+    principal?: any;
 }): Promise<{
     navigation?: {
         kind: string;

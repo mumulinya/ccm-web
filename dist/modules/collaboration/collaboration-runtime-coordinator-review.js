@@ -73,11 +73,13 @@ exports.buildGroupMainAgentInternalLoop = buildGroupMainAgentInternalLoop;
 exports.mainAgentPlanStepStatus = mainAgentPlanStepStatus;
 exports.buildUserVisiblePlanStep = buildUserVisiblePlanStep;
 exports.buildMainAgentPlanVerificationReminder = buildMainAgentPlanVerificationReminder;
+const rework_policy_1 = require("./rework-policy");
+const dispatch_rework_reservation_1 = require("./dispatch-rework-reservation");
+const dispatch_rework_evidence_1 = require("./dispatch-rework-evidence");
 const acceptance_contract_1 = require("../../agents/acceptance-contract");
 const acceptance_projection_service_1 = require("../../agents/acceptance-projection-service");
 // collaboration-runtime-coordinator-review.ts — merged from 2 part files (behavior-freeze merge).
-const rework_policy_1 = require("./rework-policy");
-const main_agent_self_verification_1 = require("./main-agent-self-verification");
+const rework_policy_2 = require("./rework-policy");
 const task_acceptance_policy_1 = require("./task-acceptance-policy");
 const fs = __importStar(require("fs"));
 const crypto = __importStar(require("crypto"));
@@ -166,19 +168,19 @@ async function runCoordinatorReviewLoop(input) {
             const projectInfo = config ? (0, db_1.getConfigInfo)(config.path).find((item) => item.name === name) || (0, db_1.getConfigInfo)(config.path)[0] : null;
             return {
                 name,
-                workDir: String(projectInfo?.workDir || ""),
+                workDir: projectInfo?.workDir ? require("../../agents/dispatch-acceptance-workspace")
+                    .resolveDispatchAcceptanceWorkspace(currentTask.id, name, String(projectInfo.workDir), input.groupId) : "",
                 verificationCommands: Array.isArray(projectConfigs?.[name]?.verification_commands) ? projectConfigs[name].verification_commands : [],
             };
         }).filter(item => item.workDir);
-        const selfReceipt = await (0, main_agent_self_verification_1.runMainAgentSelfVerification)({
-            task: currentTask,
-            policy: input.acceptancePolicy,
-            acceptanceCriteria: String(currentTask.acceptance_criteria || "").split(/\r?\n|；/).filter(Boolean),
-            changedFiles: actualFileChanges,
-            projects: verificationProjects,
-            workerOutputs: allOutputs,
-            workerReceipts: (Array.isArray(currentTask?.work_items) ? currentTask.work_items : []).map((item) => item?.lastReceipt).filter(Boolean),
-            sourceSnapshotChecksum: String(currentTask?.planning_source_evidence?.checksum || ""),
+        const light = currentTask.dispatch_profile_snapshot?.profile === "light";
+        if (light && verificationProjects.length !== 1)
+            throw Object.assign(new Error("轻量验收需要唯一项目工作区；请升级跨项目任务策略"), { code: "CCM_DISPATCH_POLICY_MISMATCH" });
+        const selfReceipt = await require("./dispatch-group-self-rework").runGroupDispatchSelfReview({
+            taskId: currentTask.id, projects: verificationProjects, policy: input.acceptancePolicy, light, outputs: allOutputs,
+            repair: (round, gaps) => (0, collaboration_runtime_cross_agent_runtime_1.processCrossAgents)(input.groupId, input.group, coordinator.project, "主 Agent 自验发现实际命令失败，继续原工作单修复：" + gaps.join("；"), verificationProjects.map(project => ({ project: project.name, targetName: project.name,
+                task: "修复实际验证缺口：" + gaps.join("；"), reason: gaps.join("；"), rework: true,
+                continuationOf: project.name, continuationStrategy: "same_worker_scratchpad", attempt: round + 1 })), input.configs, input.ctx, input.streamRes, round, seenMentions, input.executionOrder || "serial", "", currentTask.id),
         });
         const escalationDecision = (0, task_acceptance_policy_1.evaluateTaskAcceptanceEscalation)({
             task: currentTask,
@@ -208,7 +210,7 @@ async function runCoordinatorReviewLoop(input) {
         }
         const review = {
             ...selfReceipt,
-            mode: "main_agent_self_verification",
+            mode: light ? "quick_check" : "main_agent_self_verification",
             followUps: [],
             follow_ups: [],
             status: selfReceipt.canAccept ? "complete" : "needs_user",
@@ -231,7 +233,7 @@ async function runCoordinatorReviewLoop(input) {
                 main_agent_final_acceptance: {
                     schema: "ccm-main-agent-final-acceptance-v1",
                     accepted: review.status === "complete",
-                    mode: "main_agent_self_verification",
+                    mode: light ? "quick_check" : "main_agent_self_verification",
                     acceptance_policy_checksum: input.acceptancePolicy.checksum,
                     review_checksum: selfReceipt.checksum,
                     decided_at: new Date().toISOString(),
@@ -366,6 +368,14 @@ async function runCoordinatorReviewLoop(input) {
         const dispatchableReworkFollowUps = reworkFollowUps.filter((item) => !item.dispatchBlocked
             && String(item?.targetName || item?.project || "").trim()
             && String(item?.message || item?.task || "").trim());
+        if (reviewTask?.dispatch_profile_snapshot && dispatchableReworkFollowUps.some((item) => !item.reworkRoute?.requires_fresh_verifier && !item.testAgentHandoff && !item.test_agent_handoff && item.rework_kind !== "test_agent_review_recheck")) {
+            const latest = (0, db_1.loadTasks)().find((item) => item.id === reviewTask.id) || reviewTask;
+            const reservation = (0, dispatch_rework_reservation_1.reservePersistentAutomaticRework)(latest.id, dispatchableReworkFollowUps.map((item) => String(item.reason || item.summary || "验收缺口")), (0, dispatch_rework_evidence_1.captureDispatchReworkEvidenceSync)(latest));
+            if (!reservation.allowed) {
+                dispatchableReworkFollowUps.splice(0);
+                review.status = "needs_user";
+            }
+        }
         const blockedVerifierFollowUps = reworkFollowUps.filter((item) => item.dispatchBlocked);
         if (reworkFollowUps.length) {
             review.rework_routes = reworkFollowUps.map((item) => item.reworkRoute).filter(Boolean);
@@ -405,7 +415,7 @@ async function runCoordinatorReviewLoop(input) {
             review.status = "needs_user";
             // 与项目直派路径统一：返工轮次耗尽写入同一个结构化终态标记。
             if (input.taskId) {
-                (0, collaboration_runtime_runtime_tools_1.updateTask)(input.taskId, (0, rework_policy_1.buildReworkExhaustedUpdate)(gateReasons.join("；"), { path: "group_review" }));
+                (0, collaboration_runtime_runtime_tools_1.updateTask)(input.taskId, (0, rework_policy_2.buildReworkExhaustedUpdate)(gateReasons.join("；"), { path: "group_review", task: (0, db_1.loadTasks)().find(row => row.id === input.taskId) }));
             }
         }
         if (skippedRecheckReasons.length && input.taskId) {
@@ -661,8 +671,9 @@ async function executeTask(task, ctx) {
 function ensureTaskKernelExecution(task) {
     if (!task?.id)
         return null;
-    if ((0, execution_kernel_1.loadExecution)(task.id))
-        return (0, execution_kernel_1.loadExecution)(task.id);
+    const existing = (0, execution_kernel_1.loadExecution)(task.id);
+    if (existing && (!task.task_session_continuation_context || existing.reviewCycleId === task.review_cycle_id))
+        return existing;
     let project = String(task.target_project || "");
     if (task.assign_type === "group" && task.group_id) {
         const group = (0, storage_1.loadGroups)().find((item) => item.id === task.group_id);
@@ -690,7 +701,7 @@ function finalizeTaskKernel(task, execution, deliverySummary, state, message) {
             ? `检测到 ${boundaryViolations.length} 项越界写入，违规文件已在隔离工作区恢复，任务未交付`
             : `检测到 ${boundaryViolations.length} 项越界写入，任务已阻止交付并等待用户处理`;
     }
-    const records = (0, execution_kernel_1.listExecutions)({ taskId: task.id });
+    const records = (0, execution_kernel_1.listExecutions)({ taskId: task.id }).filter(record => !task.task_session_continuation_context || record.reviewCycleId === task.review_cycle_id);
     let rootGreen = null;
     for (const record of records) {
         if (state === "cancelled") {
@@ -829,7 +840,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                 if (queuedTask)
                     (0, collaboration_runtime_runtime_tools_1.updateTask)(queuedTask.id, { queue_position: index + 1, queue_state: "queued", task_run_id: queuedTask.task_run?.run_id || queuedId });
             });
-            if (!task || task.status === "done" || task.status === "cancelled" || task.status === "archived" || task.archived || task.deleted_at) {
+            if (!task || ["done", "completed", "cancelled", "archived"].includes(String(task.status || "")) || task.archived || task.deleted_at) {
                 (0, logs_1.addTaskLog)(taskId, "info", `跳过任务（不存在或已完成）`);
                 continue;
             }
@@ -889,6 +900,13 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                     },
                     ...(baseline ? { verification_executed: existingSummary.verification_executed || [] } : {}),
                 };
+                acceptedSummary.evidence_contract = require("./mission-evidence-contract").buildMissionEvidenceContract(acceptedSummary);
+                const waitingDelivery = require("./dispatch-task-delivery-confirmation").stageDispatchTaskDelivery(taskId, { receipt: task.receipt, result: task.result, report: task.final_report, fileChanges: task.file_changes, review: persistedReview }, acceptedSummary);
+                if (waitingDelivery) {
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingDelivery, "waiting_user", waitingDelivery.status_detail);
+                    await ctx.onTaskStatusChange?.(waitingDelivery, "waiting_user", waitingDelivery.status_detail);
+                    continue;
+                }
                 const acceptedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
                     status: "done",
                     acceptance_state: "accepted",
@@ -1111,10 +1129,12 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                     });
                     const priorRework = currentCoordinationTask?.workflow_meta?.coordination_dependency_rework || {};
                     const reworkRound = Math.max(0, Number(priorRework.round || 0));
-                    const maxReworkRounds = Math.min(5, Math.max(0, Number(priorRework.max_rounds ?? process.env.CCM_COORDINATION_DEPENDENCY_REWORK_MAX ?? 2)));
-                    const shouldRework = !coordinationAcceptance.accepted
+                    const maxReworkRounds = currentCoordinationTask.dispatch_profile_snapshot ? (0, rework_policy_1.automaticReworkLimit)(currentCoordinationTask) : Math.min(5, Math.max(0, Number(priorRework.max_rounds ?? process.env.CCM_COORDINATION_DEPENDENCY_REWORK_MAX ?? 2)));
+                    const eligibleForRework = !coordinationAcceptance.accepted
                         && !!currentCoordinationTask?.main_agent_self_verification
                         && reworkRound < maxReworkRounds;
+                    const reservation = eligibleForRework && currentCoordinationTask.dispatch_profile_snapshot ? (0, dispatch_rework_reservation_1.reservePersistentAutomaticRework)(currentCoordinationTask.id, [coordinationAcceptance.reason], (0, dispatch_rework_evidence_1.captureDispatchReworkEvidenceSync)(currentCoordinationTask)) : null;
+                    const shouldRework = eligibleForRework && (!reservation || reservation.allowed);
                     if (shouldRework) {
                         const nextRound = reworkRound + 1;
                         const reworkDetail = `群聊主 Agent 验收未通过，已返回 ${currentCoordinationTask.target_project} 进行第 ${nextRound}/${maxReworkRounds} 轮增量返工`;
@@ -1247,7 +1267,9 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                 // own TestAgent review and final-acceptance receipt; do not downgrade it
                 // into the legacy waiting branch merely because the status vocabulary
                 // differs.
-                const isCompleted = execution.status === "done" || execution.status === "completed";
+                const isCompleted = execution.status === "done" || execution.status === "completed"
+                    || (execution.status === "waiting_user" && !!task.dispatch_profile_snapshot
+                        && execution.mainAgentFinalAcceptance?.accepted === true && execution.review?.canAccept === true);
                 const projectMainReview = execution.review || execution.testAgent || execution.test_agent_review || null;
                 const projectMainFinalAcceptance = execution.main_agent_final_acceptance
                     || execution.mainAgentFinalAcceptance
@@ -1259,7 +1281,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         ...execution,
                         status: "done",
                         review: projectMainReview,
-                        test_agent_review: execution.test_agent_review || execution.testAgent || null,
+                        test_agent_review: execution.test_agent_review || execution.testAgent || (0, db_1.loadTasks)().find(row => row.id === taskId)?.test_agent_review || null,
                         main_agent_final_acceptance: projectMainFinalAcceptance,
                     };
                 }
@@ -1271,7 +1293,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                     if (projectMainFinalAcceptance?.accepted !== true || projectMainReview?.canAccept !== true)
                         return summary;
                     const gate = summary?.acceptance_gate || {};
-                    return {
+                    const promoted = {
                         ...summary,
                         accepted: true,
                         has_final_review: true,
@@ -1290,6 +1312,9 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             missing: [],
                         },
                     };
+                    // The compact mission contract must describe this authoritative verdict,
+                    // rather than the earlier legacy gate that was awaiting project review.
+                    return { ...promoted, evidence_contract: require("./mission-evidence-contract").buildMissionEvidenceContract(promoted) };
                 };
                 if (isCompleted) {
                     (0, logs_1.addTaskLog)(taskId, "info", `协调层已识别完成回执（status=${execution.status}），开始最终门禁`);
@@ -1316,7 +1341,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             file_changes: execution.fileChanges || null,
                             delivery_summary: deliverySummary,
                             reasoning_loop: deliverySummary.reasoning_loop,
-                            ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
+                            ...(0, rework_policy_2.buildReworkExhaustedUpdate)(detail, { path: "group_review", task: (0, db_1.loadTasks)().find(row => row.id === taskId) || task }),
                         }) || task;
                         settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                         (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
@@ -1348,7 +1373,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             file_changes: execution.fileChanges || null,
                             delivery_summary: finalizedDeliverySummary,
                             reasoning_loop: finalizedDeliverySummary.reasoning_loop,
-                            ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
+                            ...(0, rework_policy_2.buildReworkExhaustedUpdate)(detail, { path: "group_review", task: (0, db_1.loadTasks)().find(row => row.id === taskId) || task }),
                         }) || task;
                         settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                         (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
@@ -1359,6 +1384,13 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
                         continue;
                     }
+                    const waitingDelivery = require("./dispatch-task-delivery-confirmation").stageDispatchTaskDelivery(taskId, finalizedExecution, finalizedDeliverySummary);
+                    if (waitingDelivery) {
+                        (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingDelivery, "waiting_user", waitingDelivery.status_detail);
+                        finalizeTaskKernel(task, finalizedExecution, finalizedDeliverySummary, "reviewing", waitingDelivery.status_detail);
+                        await ctx.onTaskStatusChange?.(waitingDelivery, "waiting_user", waitingDelivery.status_detail);
+                        continue;
+                    }
                     const completedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
                         status: "done",
                         result: result.substring(0, 500),
@@ -1366,7 +1398,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         status_detail: execution.detail || "验收通过",
                         receipt: execution.receipt || null,
                         review: execution.review || execution.testAgent || execution.test_agent_review || null,
-                        test_agent_review: execution.test_agent_review || execution.testAgent || null,
+                        test_agent_review: execution.test_agent_review || execution.testAgent || (0, db_1.loadTasks)().find(row => row.id === taskId)?.test_agent_review || null,
                         main_agent_final_acceptance: projectMainFinalAcceptance || undefined,
                         file_changes: execution.fileChanges || null,
                         delivery_summary: finalizedDeliverySummary,
@@ -1427,7 +1459,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                                 file_changes: execution.fileChanges || null,
                                 delivery_summary: finalizedPromotedSummary,
                                 reasoning_loop: finalizedPromotedSummary.reasoning_loop,
-                                ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
+                                ...(0, rework_policy_2.buildReworkExhaustedUpdate)(detail, { path: "group_review", task: (0, db_1.loadTasks)().find(row => row.id === taskId) || task }),
                             }) || task;
                             settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                             (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
@@ -1436,6 +1468,13 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
                             await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
                             (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
+                            continue;
+                        }
+                        const waitingDelivery = require("./dispatch-task-delivery-confirmation").stageDispatchTaskDelivery(taskId, finalizedPromotedExecution, finalizedPromotedSummary);
+                        if (waitingDelivery) {
+                            (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingDelivery, "waiting_user", waitingDelivery.status_detail);
+                            finalizeTaskKernel(task, finalizedPromotedExecution, finalizedPromotedSummary, "reviewing", waitingDelivery.status_detail);
+                            await ctx.onTaskStatusChange?.(waitingDelivery, "waiting_user", waitingDelivery.status_detail);
                             continue;
                         }
                         const completedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
@@ -1507,6 +1546,12 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
             }
             catch (error) {
                 console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
+                const dispatchBlock = require("./dispatch-start-block").preserveDispatchStartBlock(taskId, error);
+                if (dispatchBlock) {
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(dispatchBlock.task, "blocked", dispatchBlock.summary);
+                    await ctx.onTaskStatusChange?.(dispatchBlock.task, "blocked", dispatchBlock.summary);
+                    continue;
+                }
                 if (String(error?.code || "") === "CCM_TASK_PAUSE_SAFE_BOUNDARY") {
                     const pausedTask = (0, db_1.loadTasks)().find((item) => item.id === taskId) || task;
                     (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
@@ -1733,7 +1778,7 @@ function resumeTaskQueues(ctx, options = {}) {
  */
 function reconcilePersistedStructuredAcceptances(ctx) {
     const reconciled = [];
-    for (const task of (0, db_1.loadTasks)()) {
+    for (const task of require('./task-startup-candidates').startupTaskCandidates()) {
         if (!task?.id || ["done", "cancelled", "archived"].includes(String(task.status || "")))
             continue;
         const review = task.test_agent_review || task.review || null;
@@ -1896,7 +1941,7 @@ function getTaskAgeMs(task, now = Date.now()) {
 }
 // ===== merged from collaboration-runtime-coordinator-review-part-02.ts =====
 function isWatchdogGapReworkCandidate(task, now = Date.now(), cooldownMs = collaboration_runtime_task_queue_1.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, maxCount = collaboration_runtime_task_queue_1.TASK_WATCHDOG_GAP_REWORK_MAX) {
-    if (!task?.auto_execute || task.status === "done" || (0, collaboration_runtime_task_queue_1.isTaskPaused)(task) || (0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(task) || isTaskQueuedInMemory(task.id))
+    if (!task?.auto_execute || ["done", "completed"].includes(String(task.status || "")) || (0, collaboration_runtime_task_queue_1.isTaskPaused)(task) || (0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(task) || isTaskQueuedInMemory(task.id))
         return false;
     if (!(0, collaboration_runtime_runtime_tools_1.hasDailyDevContinuationGaps)(task))
         return false;
@@ -1927,7 +1972,7 @@ function cleanupRuntimeDebt(options = {}) {
     const results = [];
     for (const item of candidates) {
         const task = (0, db_1.loadTasks)().find((entry) => entry.id === item.id);
-        if (!task || task.status === "done" || task.status === "cancelled" || task.status === "archived")
+        if (!task || ["done", "completed", "cancelled", "archived"].includes(String(task.status || "")))
             continue;
         const detail = item.debt_type === "stalled_in_progress"
             ? "运行治理中心清理：任务长时间处于执行中但没有活跃运行，已暂停等待用户处理"
