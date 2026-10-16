@@ -161,7 +161,8 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             }
             return [`【${targetName}】\n- 状态：cancelled\n- 摘要: 任务已被用户取消，本子 Agent 未派发`];
         }
-        return executeMentionJobImpl(mention, crossEnv);
+        const outputs = await executeMentionJobImpl(mention, crossEnv);
+        return require('../../review/cross-worker-review').reviewCrossWorker({ mention, env: crossEnv, outputs, execute: (repair) => executeMentionJobImpl(repair, crossEnv) });
     };
     const hasExplicitDependencies = uniqueMentions.some((mention) => typeof mention !== "string" && String(mention.dependsOn || "").trim());
     if (hasExplicitDependencies) {

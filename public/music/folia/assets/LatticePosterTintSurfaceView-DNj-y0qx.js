@@ -1,0 +1,1 @@
+import{x as e}from"./use-presence-BuFOqE_4.js";import{it as t}from"./bootstrap-BVGQOOwK.js";var n=e();function r(e){return(0,n.jsx)(`div`,{className:`flex h-full justify-center overflow-y-auto px-4 py-8`,children:(0,n.jsx)(`div`,{className:`w-full max-w-lg self-start rounded-2xl border border-current/10 p-6`,children:(0,n.jsx)(t,{...e})})})}export{r as default};

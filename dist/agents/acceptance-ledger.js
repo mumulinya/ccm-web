@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.acceptanceLedgerLocation = void 0;
 exports.readAcceptanceLedger = readAcceptanceLedger;
 exports.registerAcceptanceExecution = registerAcceptanceExecution;
 exports.beginAcceptanceVerification = beginAcceptanceVerification;
@@ -46,7 +47,9 @@ const atomic_json_file_1 = require("../core/atomic-json-file");
 const acceptance_contract_1 = require("./acceptance-contract");
 const acceptance_workspace_1 = require("./acceptance-workspace");
 const acceptance_ledger_cycle_1 = require("./acceptance-ledger-cycle");
-const location = (taskId) => path.join(process.env.CCM_ACCEPTANCE_STORE_DIR || path.join(process.env.CCM_TASK_STORE_DIR || utils_1.CCM_DIR, "acceptance"), `${(0, acceptance_contract_1.acceptanceHash)(taskId)}.json`);
+const acceptanceLedgerLocation = (taskId) => path.join(process.env.CCM_ACCEPTANCE_STORE_DIR || path.join(process.env.CCM_TASK_STORE_DIR || utils_1.CCM_DIR, "acceptance"), `${(0, acceptance_contract_1.acceptanceHash)(taskId)}.json`);
+exports.acceptanceLedgerLocation = acceptanceLedgerLocation;
+const location = exports.acceptanceLedgerLocation;
 function readAcceptanceLedger(taskId, contractChecksum = "") {
     const ledger = (0, atomic_json_file_1.readJsonWithBackup)(location(taskId), null);
     if (!contractChecksum || ledger?.contract.checksum === contractChecksum)
@@ -86,6 +89,8 @@ function beginAcceptanceVerification(taskId, executionId) {
         const current = (0, acceptance_workspace_1.captureAcceptanceSnapshot)(run.root, ledger.contract, run.projectId);
         if (current.error)
             throw new Error(`acceptance_snapshot_blocked:${current.error}`);
+        if (run.verificationSource && run.verificationConfigurationChecksum)
+            run.verificationHistory = [...(run.verificationHistory || []), { snapshot: run.verificationSource, configurationChecksum: run.verificationConfigurationChecksum }].slice(-4);
         run.verificationSource = current;
         (0, atomic_json_file_1.writeJsonAtomic)(location(taskId), ledger);
         return { taskId, executionId, contractChecksum: ledger.contract.checksum };

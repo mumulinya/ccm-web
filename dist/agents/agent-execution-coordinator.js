@@ -227,6 +227,8 @@ function createExecutionInTransaction(input, idempotencyKey) {
 }
 /** Synchronous path for process tracking, which cannot await resume inspection. */
 function startPersistentAgentExecutionSync(input) {
+    if (input.scope === 'review_agent' || (input.runId && (0, agent_run_store_1.getAgentRun)(input.runId)?.scope === 'review_agent'))
+        throw new Error('ReviewAgent 只能由代码审核服务启动');
     validate(input);
     const blockers = (0, agent_governance_store_1.listActiveBlockingDependencies)(input.taskId);
     if (blockers.length && input.triggerType !== "resume") {
@@ -307,6 +309,8 @@ async function continueApprovedDispatchScope(runId, requestId) {
  * available for legacy reconciliation and startup recovery.
  */
 async function startPersistentAgentExecution(input) {
+    if (input.scope === 'review_agent' || (input.runId && (0, agent_run_store_1.getAgentRun)(input.runId)?.scope === 'review_agent'))
+        throw new Error('ReviewAgent 只能由代码审核服务启动');
     const continuationParent = require("./task-session-runtime-parent").taskSessionRuntimeParent(input);
     if (continuationParent !== undefined)
         input = { ...input, parentRunId: continuationParent };
@@ -668,6 +672,8 @@ async function applyPersistentAgentManualAction(input) {
     const run = (0, agent_run_store_1.getAgentRun)(input.runId);
     if (!run)
         throw Object.assign(new Error("AgentRun 不存在"), { code: "CCM_RUN_NOT_FOUND" });
+    if (run.scope === 'review_agent')
+        return { action: input.action, ...require('../review/service').controlReviewRun(run.runId, input.action) };
     const activity = (0, agent_governance_store_1.recordManualAgentAction)({ runId: run.runId, taskId: run.taskId, traceId: run.traceId, action: input.action, actorId: input.actorId, idempotencyKey: input.idempotencyKey, payload: { reason: input.reason || "" } });
     if (input.action === "cancel")
         return { action: input.action, activity, run: cancelPersistentAgentExecution(run.runId, input.ownerId || "", input.reason || "人工取消 Run") };

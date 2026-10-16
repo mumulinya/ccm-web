@@ -46,7 +46,8 @@ if (process.argv.includes("--publish")) {
     || releaseManifest?.version !== packageInfo.version
     || releaseManifest?.tested !== true
     || !Array.isArray(releaseManifest?.test_evidence)
-    || releaseManifest.test_evidence.length < 4
+    || releaseManifest.test_evidence.length < 2
+    || !['win32', 'linux'].every(platform => releaseManifest.test_evidence.some(row => row.platform === platform && String(row.node).startsWith('24.')))
   ) {
     console.error("[CCM release] The release manifest has not passed the full platform matrix.");
     process.exit(1);

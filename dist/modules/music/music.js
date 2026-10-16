@@ -50,6 +50,8 @@ const bilibili_1 = require("./bilibili");
 const netease_1 = require("./netease");
 const douyin_1 = require("./douyin");
 const douyin_api_1 = require("./douyin-api");
+const api_1 = require("./folia/api");
+const candidates_1 = require("./folia/candidates");
 const unified_search_1 = require("./unified-search");
 const video_playback_api_1 = require("./video-playback-api");
 const media_interactions_1 = require("./media-interactions");
@@ -91,19 +93,9 @@ function publicPlaybackCommand(command) {
         } : undefined,
     };
 }
-function publicMusicCandidate(candidate) {
-    if (candidate?.source === "local") {
-        return { type: "local", track: { filename: candidate.filename || candidate.sourceId, title: candidate.title, artist: candidate.artist } };
-    }
-    if (candidate?.source === "netease") {
-        return { type: "netease", songId: candidate.sourceId, title: candidate.title, artist: candidate.artist, duration: candidate.duration };
-    }
-    if (candidate?.source === "douyin") {
-        return { type: "douyin", awemeId: candidate.sourceId, title: candidate.title, author: candidate.artist, duration: candidate.duration, pic: candidate.pic, shareUrl: candidate.shareUrl, downloadable: true, searchChannel: candidate.searchChannel || "mcp" };
-    }
-    return { type: "bilibili", bvid: candidate?.sourceId, title: candidate?.title, author: candidate?.artist, duration: candidate?.duration };
-}
 function handleMusicApi(pathname, req, res, parsed, ctx) {
+    if ((0, api_1.handleFoliaApi)(pathname, req, res))
+        return true;
     if ((0, memory_1.handleMusicMemoryApi)(pathname, req, res))
         return true;
     if (handleMusicApiPartA(pathname, req, res, parsed, ctx))
@@ -987,7 +979,7 @@ ${memoryContext.continuityText}`;
                         modelConfig: cfg,
                     });
                     (0, agent_1.writeSse)(res, { type: "decision", turn_id: turnId, decision: (0, playback_decision_1.publicMusicPlaybackDecision)(playbackDecision) });
-                    const resultRows = playbackDecision.candidates.map(publicMusicCandidate);
+                    const resultRows = playbackDecision.candidates.map(candidates_1.publicMusicCandidate);
                     (0, agent_1.writeSse)(res, { type: "candidate_results", turn_id: turnId, results: resultRows });
                     (0, agent_1.writeSse)(res, { type: "music_results", mode: playbackDecision.sourceMode, results: resultRows });
                     let command = null;
@@ -1176,7 +1168,7 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
                     aiAutoSelectEnabled: (0, db_1.loadMusicConfig)()?.aiAutoSelectEnabled !== false,
                     modelConfig: (0, state_1.loadMusicAgentConfig)(),
                 });
-                const rows = decision.candidates.map(publicMusicCandidate);
+                const rows = decision.candidates.map(candidates_1.publicMusicCandidate);
                 let command = null;
                 if (intent.action === "play" && decision.status === "resolved" && decision.selectedCandidate) {
                     command = (0, state_1.enqueueMusicRemoteCommand)({ type: "play", keyword: decision.searchQuery, request_text: message, mode: decision.sourceMode, source: "music-chat-compat", decision, origin: { source: "music-chat", sessionId: "music-singleton" } });

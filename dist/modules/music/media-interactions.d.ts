@@ -1,4 +1,6 @@
 export declare function musicInteractionIdentity(body: any): {
+    owner?: string;
+    accountEpoch?: number;
     v: 1;
     source: import("./search-results").MusicSource;
     sourceId: string;

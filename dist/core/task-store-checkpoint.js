@@ -96,9 +96,10 @@ function startTaskStoreCheckpoints() {
     (0, task_store_1.withSqliteTaskStore)(db => db.pragma('wal_autocheckpoint = 0'));
     (0, observability_database_1.getObservabilityDatabase)().pragma('wal_autocheckpoint = 0');
     lastVersion = '';
+    // Keep the first maintenance pass on the normal interval, so spawning the
+    // helper does not compete with recovery and the first interactive reads.
     timer = setInterval(() => void checkpointTaskStoreAsync(), 5000);
     timer.unref();
-    void checkpointTaskStoreAsync();
 }
 function stopTaskStoreCheckpoints() {
     if (timer)

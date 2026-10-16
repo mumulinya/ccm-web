@@ -42,6 +42,7 @@ exports.douyinVideoFile = douyinVideoFile;
 exports.getDouyinVideoAssetById = getDouyinVideoAssetById;
 exports.douyinVideoFileByAssetId = douyinVideoFileByAssetId;
 exports.listDouyinVideoAssets = listDouyinVideoAssets;
+const douyin_asset_store_1 = require("./video/douyin-asset-store");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -50,13 +51,17 @@ const util_1 = require("util");
 const utils_1 = require("../../core/utils");
 const douyin_mcp_bridge_1 = require("./douyin-mcp-bridge");
 const douyin_1 = require("./douyin");
-const music_persistence_1 = require("./music-persistence");
+const accounts_store_1 = require("./video/accounts-store");
+const douyin_browser_media_1 = require("./video/douyin-browser-media");
+const materialize_video_1 = require("./video/materialize-video");
+const douyin_asset_store_2 = require("./video/douyin-asset-store");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const ASSET_ROOT = path.resolve(utils_1.CCM_DIR, 'media', 'douyin', 'assets');
+function assetRoot() { return (0, douyin_asset_store_1.douyinOwnerDirectory)() ? path.join(ASSET_ROOT, (0, douyin_asset_store_1.douyinOwnerDirectory)()) : ASSET_ROOT; }
 const active = new Map();
 const controllers = new Map();
 function now() { return new Date().toISOString(); }
-function mediaKey(sourceId, kind) { return `douyin:${String(sourceId)}:${kind}`; }
+function mediaKey(sourceId, kind) { return (0, douyin_asset_store_1.douyinOwnerDirectory)() ? `douyin:${(0, douyin_asset_store_1.douyinOwnerDirectory)()}:${String(sourceId)}:${kind}` : `douyin:${String(sourceId)}:${kind}`; }
 function key(sourceId) { return mediaKey(sourceId, 'video'); }
 function idFor(sourceId) { return `dy_asset_${crypto.createHash('sha256').update(key(sourceId)).digest('hex').slice(0, 24)}`; }
 function douyinVideoAssetId(sourceId) { return idFor(assertId(sourceId)); }
@@ -74,14 +79,14 @@ function assertId(sourceId) {
     return id;
 }
 function assetFile(sourceId) {
-    const target = path.resolve(ASSET_ROOT, `${assertId(sourceId)}.mp4`);
-    if (!target.startsWith(`${ASSET_ROOT}${path.sep}`))
+    const target = path.resolve(assetRoot(), `${assertId(sourceId)}.mp4`);
+    if (!target.startsWith(`${assetRoot()}${path.sep}`))
         throw new Error('抖音视频路径不安全');
     return target;
 }
 function tempFile(sourceId, opId) {
-    const dir = path.resolve(ASSET_ROOT, 'staging', opId);
-    if (!dir.startsWith(`${ASSET_ROOT}${path.sep}`))
+    const dir = path.resolve(assetRoot(), 'staging', opId);
+    if (!dir.startsWith(`${assetRoot()}${path.sep}`))
         throw new Error('抖音临时路径不安全');
     fs.mkdirSync(dir, { recursive: true });
     return path.join(dir, `${assertId(sourceId)}.part.mp4`);
@@ -153,9 +158,10 @@ async function materialize(sourceId, opId, signal) {
     const assetId = idFor(id);
     let resolver = 'mcp';
     let stagedInput = '';
+    let alternatives = [];
     let remoteHeaders = {};
     try {
-        const previous = (0, music_persistence_1.findActiveDouyinOperation)(id, 'video');
+        const previous = (0, douyin_asset_store_2.findActiveDouyinOperation)(id, 'video');
         if (previous?.temp_path && fs.existsSync(previous.temp_path) && fs.statSync(previous.temp_path).size > 1024) {
             try {
                 const meta = await probe(previous.temp_path);
@@ -163,26 +169,38 @@ async function materialize(sourceId, opId, signal) {
                 fs.mkdirSync(path.dirname(target), { recursive: true });
                 remove(target);
                 fs.renameSync(previous.temp_path, target);
-                const row = (0, music_persistence_1.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status: 'ready', filePath: target, fileChecksum, fileSize: fs.statSync(target).size, durationSeconds: meta.duration, format: meta.format, resolver: previous.resolver || 'recovered', metadata: {} });
-                (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'ready', resolver: previous.resolver || 'recovered', checkpoint: 'ready', tempPath: '', assetId });
+                const row = (0, douyin_asset_store_2.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status: 'ready', filePath: target, fileChecksum, fileSize: fs.statSync(target).size, durationSeconds: meta.duration, format: meta.format, resolver: previous.resolver || 'recovered', metadata: {} });
+                (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'ready', resolver: previous.resolver || 'recovered', checkpoint: 'ready', tempPath: '', assetId });
                 return asVideoAsset(publicAsset(row, opId));
             }
             catch {
                 remove(previous.temp_path);
             }
         }
-        (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'resolving', resolver, checkpoint: 'resolving', tempPath: temp, assetId });
-        (0, music_persistence_1.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status: 'resolving', filePath: target, resolver, metadata: {} });
+        (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'resolving', resolver, checkpoint: 'resolving', tempPath: temp, assetId });
+        (0, douyin_asset_store_2.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status: 'resolving', filePath: target, resolver, metadata: {} });
         if (signal?.aborted)
             throw new Error('抖音视频下载已取消');
         try {
-            const result = await (0, douyin_mcp_bridge_1.douyinMcpDownloadVideo)(id, `coordinator/${opId}`, { signal });
-            stagedInput = String(result?.file_path || result?.filePath || '');
-            if (!(0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(stagedInput) || !fs.existsSync(stagedInput))
-                throw new Error('MCP 未返回有效视频文件');
+            if ((0, accounts_store_1.videoAccount)((0, accounts_store_1.videoOwner)(), 'douyin').status === 'authenticated') {
+                const result = await (0, douyin_browser_media_1.resolveDouyinBrowserMedia)(id, signal);
+                resolver = 'official-browser';
+                stagedInput = result.url;
+                alternatives = result.urls.slice(1);
+                remoteHeaders = result.headers;
+            }
+            else {
+                const result = await (0, douyin_mcp_bridge_1.douyinMcpDownloadVideo)(id, `coordinator/${opId}`, { signal });
+                stagedInput = String(result?.file_path || result?.filePath || '');
+                if (!(0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(stagedInput) || !fs.existsSync(stagedInput))
+                    throw new Error('MCP 未返回有效视频文件');
+            }
         }
         catch (mcpError) {
             if (signal?.aborted)
+                throw mcpError;
+            // 已登录的新视频链路直接报告官网结果，不再落到旧解析器反复请求登录。
+            if ((0, accounts_store_1.videoAccount)((0, accounts_store_1.videoOwner)(), 'douyin').status === 'authenticated')
                 throw mcpError;
             if (["login_required", "risk_controlled"].includes(String(mcpError?.douyinState || "")))
                 throw mcpError;
@@ -195,28 +213,36 @@ async function materialize(sourceId, opId, signal) {
         }
         if (signal?.aborted)
             throw new Error('抖音视频下载已取消');
-        (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'downloading', resolver, checkpoint: 'downloading', tempPath: temp, assetId });
-        const headers = typeof stagedInput === 'string' && /^https?:\/\//i.test(stagedInput)
-            ? Object.entries(remoteHeaders).map(([k, v]) => `${k}: ${String(v).replace(/[\r\n]/g, ' ')}`).join('\r\n') + '\r\n'
-            : '';
-        const inputArgs = headers ? ['-headers', headers, '-i', stagedInput] : ['-i', stagedInput];
-        await execFileAsync('ffmpeg', ['-nostdin', '-y', ...inputArgs, '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', temp], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal });
-        (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'validating', resolver, checkpoint: 'validating', tempPath: temp, assetId });
+        (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'downloading', resolver, checkpoint: 'downloading', tempPath: temp, assetId });
+        for (let attempt = 0;; attempt++) {
+            try {
+                await (0, materialize_video_1.materializeBrowserVideo)(stagedInput, temp, remoteHeaders, signal);
+                break;
+            }
+            catch (error) {
+                if (signal?.aborted || attempt >= 1 || !alternatives.length)
+                    throw error;
+                remove(temp);
+                stagedInput = alternatives.shift();
+            }
+        }
+        (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'validating', resolver, checkpoint: 'validating', tempPath: temp, assetId });
         const meta = await probe(temp);
         const fileChecksum = await checksum(temp);
         fs.mkdirSync(path.dirname(target), { recursive: true });
         remove(target);
         fs.renameSync(temp, target);
-        const row = (0, music_persistence_1.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status: 'ready', filePath: target, fileChecksum, fileSize: fs.statSync(target).size, durationSeconds: meta.duration, format: meta.format, resolver, metadata: {} });
-        (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'ready', resolver, checkpoint: 'ready', tempPath: '', assetId });
+        const row = (0, douyin_asset_store_2.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status: 'ready', filePath: target, fileChecksum, fileSize: fs.statSync(target).size, durationSeconds: meta.duration, format: meta.format, resolver, metadata: {} });
+        (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status: 'ready', resolver, checkpoint: 'ready', tempPath: '', assetId });
         return asVideoAsset(publicAsset(row, opId));
     }
     catch (error) {
+        (0, douyin_browser_media_1.clearDouyinMediaHints)((0, accounts_store_1.videoOwner)(), id);
         remove(temp);
         const cancelled = Boolean(signal?.aborted);
         const status = cancelled ? 'cancelled' : 'failed';
-        (0, music_persistence_1.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status, filePath: target, resolver, error: cleanError(error), metadata: {} });
-        (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status, resolver, checkpoint: status, tempPath: '', assetId, error: cleanError(error) });
+        (0, douyin_asset_store_2.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'video', status, filePath: target, resolver, error: cleanError(error), metadata: {} });
+        (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'video', status, resolver, checkpoint: status, tempPath: '', assetId, error: cleanError(error) });
         throw error;
     }
     finally {
@@ -227,17 +253,27 @@ async function materialize(sourceId, opId, signal) {
 }
 function getDouyinVideoAsset(sourceId) {
     const id = assertId(sourceId);
-    const row = (0, music_persistence_1.getDouyinAsset)(id, 'video');
+    const row = (0, douyin_asset_store_2.getDouyinAsset)(id, 'video');
     if (!row || row.status !== 'ready' || !row.file_path || !fs.existsSync(row.file_path))
         return null;
+    if (!validVideoAssetFile(id, row.file_path))
+        return null;
+    return asVideoAsset(publicAsset(row));
+}
+// 索引资产使用独立的 assets/<owner> 目录；不能误用 MCP 临时下载目录的校验器。
+function validVideoAssetFile(sourceId, file) {
     try {
-        if (!fs.statSync(row.file_path).isFile() || fs.statSync(row.file_path).size < 1024)
-            return null;
+        if (path.resolve(file) !== assetFile(sourceId))
+            return false;
+        for (let current = path.resolve(file); current !== path.dirname(current); current = path.dirname(current))
+            if (fs.lstatSync(current).isSymbolicLink())
+                return false;
+        const stat = fs.statSync(file);
+        return stat.isFile() && stat.size >= 1024;
     }
     catch {
-        return null;
+        return false;
     }
-    return asVideoAsset(publicAsset(row));
 }
 async function ensureDouyinVideoAsset(sourceId, options = {}) {
     const id = assertId(sourceId);
@@ -247,7 +283,7 @@ async function ensureDouyinVideoAsset(sourceId, options = {}) {
     const running = active.get(key(id));
     if (running)
         return running;
-    const previous = (0, music_persistence_1.findActiveDouyinOperation)(id, 'video');
+    const previous = (0, douyin_asset_store_2.findActiveDouyinOperation)(id, 'video');
     const opId = String(previous?.operation_id || operationId(id));
     const controller = options.signal ? null : new AbortController();
     const signal = options.signal || controller?.signal;
@@ -259,7 +295,7 @@ async function ensureDouyinVideoAsset(sourceId, options = {}) {
 }
 async function ensureDouyinAudioAsset(sourceId, options = {}) {
     const id = assertId(sourceId);
-    const cached = (0, music_persistence_1.getDouyinAsset)(id, 'audio');
+    const cached = (0, douyin_asset_store_2.getDouyinAsset)(id, 'audio');
     if (cached?.status === 'ready' && cached.file_path && fs.existsSync(cached.file_path))
         return { ...publicAsset({ ...cached, kind: 'audio' }), audioPath: cached.file_path };
     const activeKey = mediaKey(id, 'audio');
@@ -269,28 +305,28 @@ async function ensureDouyinAudioAsset(sourceId, options = {}) {
     const video = await ensureDouyinVideoAsset(id, options);
     const opId = `dy_op_${crypto.createHash('sha256').update(`${activeKey}:extract`).digest('hex').slice(0, 24)}`;
     const assetId = `dy_audio_${crypto.createHash('sha256').update(activeKey).digest('hex').slice(0, 24)}`;
-    const target = path.resolve(ASSET_ROOT, `${id}.mp3`);
-    const temp = path.resolve(ASSET_ROOT, 'staging', opId, `${id}.part.mp3`);
+    const target = path.resolve(assetRoot(), `${id}.mp3`);
+    const temp = path.resolve(assetRoot(), 'staging', opId, `${id}.part.mp3`);
     fs.mkdirSync(path.dirname(temp), { recursive: true });
     const controller = options.signal ? null : new AbortController();
     const signal = options.signal || controller?.signal;
     const promise = (async () => {
         try {
-            (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'audio', status: 'downloading', resolver: 'local-video', checkpoint: 'extracting', tempPath: temp, assetId });
+            (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'audio', status: 'downloading', resolver: 'local-video', checkpoint: 'extracting', tempPath: temp, assetId });
             await execFileAsync('ffmpeg', ['-nostdin', '-y', '-i', video.filePath, '-map', '0:a:0', '-vn', '-b:a', '192k', '-f', 'mp3', temp], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal });
             const meta = await probeAudio(temp);
             const fileChecksum = await checksum(temp);
             fs.mkdirSync(path.dirname(target), { recursive: true });
             remove(target);
             fs.renameSync(temp, target);
-            const row = (0, music_persistence_1.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'audio', status: 'ready', filePath: target, fileChecksum, fileSize: fs.statSync(target).size, durationSeconds: meta.duration, format: meta.format, resolver: 'local-video', metadata: {} });
-            (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'audio', status: 'ready', resolver: 'local-video', checkpoint: 'ready', tempPath: '', assetId });
+            const row = (0, douyin_asset_store_2.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'audio', status: 'ready', filePath: target, fileChecksum, fileSize: fs.statSync(target).size, durationSeconds: meta.duration, format: meta.format, resolver: 'local-video', metadata: {} });
+            (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'audio', status: 'ready', resolver: 'local-video', checkpoint: 'ready', tempPath: '', assetId });
             return { ...publicAsset({ ...row, kind: 'audio' }), audioPath: target };
         }
         catch (error) {
             remove(temp);
-            (0, music_persistence_1.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'audio', status: 'failed', filePath: target, resolver: 'local-video', error: cleanError(error), metadata: {} });
-            (0, music_persistence_1.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'audio', status: 'failed', resolver: 'local-video', checkpoint: 'failed', tempPath: '', assetId, error: cleanError(error) });
+            (0, douyin_asset_store_2.upsertDouyinAsset)({ assetId, sourceId: id, kind: 'audio', status: 'failed', filePath: target, resolver: 'local-video', error: cleanError(error), metadata: {} });
+            (0, douyin_asset_store_2.upsertDouyinOperation)({ operationId: opId, sourceId: id, kind: 'audio', status: 'failed', resolver: 'local-video', checkpoint: 'failed', tempPath: '', assetId, error: cleanError(error) });
             throw error;
         }
         finally {
@@ -307,7 +343,7 @@ async function ensureDouyinAudioAsset(sourceId, options = {}) {
 function cancelDouyinVideoAsset(sourceId) {
     const id = assertId(sourceId);
     controllers.get(key(id))?.abort();
-    const row = (0, music_persistence_1.getDouyinAsset)(id, 'video');
+    const row = (0, douyin_asset_store_2.getDouyinAsset)(id, 'video');
     if (!row)
         return null;
     if (!['ready', 'failed', 'cancelled'].includes(String(row.status))) {
@@ -317,15 +353,15 @@ function cancelDouyinVideoAsset(sourceId) {
         catch {
             return {};
         } })();
-        const updated = (0, music_persistence_1.upsertDouyinAsset)({
+        const updated = (0, douyin_asset_store_2.upsertDouyinAsset)({
             assetId: row.asset_id, sourceId: id, kind: 'video', status: 'cancelled',
             filePath: row.file_path || '', fileChecksum: row.file_checksum || '', fileSize: row.file_size || 0,
             durationSeconds: row.duration_seconds || 0, format: row.format || '', resolver: row.resolver || '', metadata,
             error: '抖音视频操作已取消',
         });
-        const operation = (0, music_persistence_1.findActiveDouyinOperation)(id, 'video');
+        const operation = (0, douyin_asset_store_2.findActiveDouyinOperation)(id, 'video');
         if (operation)
-            (0, music_persistence_1.upsertDouyinOperation)({
+            (0, douyin_asset_store_2.upsertDouyinOperation)({
                 operationId: operation.operation_id, sourceId: id, kind: 'video', status: 'cancelled',
                 resolver: operation.resolver || '', checkpoint: 'cancelled', tempPath: '', assetId: row.asset_id, error: '抖音视频操作已取消',
             });
@@ -335,23 +371,23 @@ function cancelDouyinVideoAsset(sourceId) {
 }
 function douyinVideoFile(sourceId) {
     const asset = getDouyinVideoAsset(sourceId);
-    if (!asset || !(0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(asset.filePath))
+    if (!asset)
         throw new Error('抖音本地视频尚未就绪');
     return asset.filePath;
 }
 function getDouyinVideoAssetById(assetId) {
-    const row = (0, music_persistence_1.getDouyinAssetById)(assetId);
+    const row = (0, douyin_asset_store_2.getDouyinAssetById)(assetId);
     if (!row || row.kind !== 'video')
         return null;
     return asVideoAsset(publicAsset(row));
 }
 function douyinVideoFileByAssetId(assetId) {
     const asset = getDouyinVideoAssetById(assetId);
-    if (!asset || asset.status !== 'ready' || !(0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(asset.filePath) || !fs.existsSync(asset.filePath))
+    if (!asset || asset.status !== 'ready' || !validVideoAssetFile(asset.sourceId, asset.filePath))
         throw new Error('抖音本地视频尚未就绪');
     return asset.filePath;
 }
 function listDouyinVideoAssets(limit = 200) {
-    return (0, music_persistence_1.listDouyinAssets)(limit).filter(row => row.kind === 'video').map(row => asVideoAsset(publicAsset(row))).filter(Boolean);
+    return (0, douyin_asset_store_2.listDouyinAssets)(limit).filter(row => row.kind === 'video').map(row => asVideoAsset(publicAsset(row))).filter(Boolean);
 }
 //# sourceMappingURL=douyin-media-coordinator.js.map

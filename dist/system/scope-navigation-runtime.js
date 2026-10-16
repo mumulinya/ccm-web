@@ -11,6 +11,7 @@ const crypto_1 = require("crypto");
 const cache_validation_budget_1 = require("./cache-validation-budget");
 const scope_navigation_execution_1 = require("./scope-navigation-execution");
 const scope_navigation_contract_1 = require("./scope-navigation-contract");
+const scope_navigation_validation_baseline_1 = require("./scope-navigation-validation-baseline");
 const alive = (pid) => { try {
     process.kill(pid, 0);
     return true;
@@ -121,6 +122,8 @@ async function runNextScopeNavigation(runtime, selectedKey) {
         try {
             prepared = runtime.prepare(job);
             configuration = runtime.config();
+            if (job.validationId)
+                (0, scope_navigation_validation_baseline_1.checkNavigationValidationRequest)(job.validationId, prepared, configuration, 'prepare');
             if (prepared.inputChecksum && prepared.inputChecksum !== job.inputChecksum)
                 throw staleError();
             job.inputDigest = prepared.snapshot.inputDigest;
@@ -151,6 +154,8 @@ async function runNextScopeNavigation(runtime, selectedKey) {
                 return { outcome: 'local_reuse', taskId: job.key };
             const beforeSend = () => {
                 const current = runtime.prepare(job);
+                if (job.validationId)
+                    (0, scope_navigation_validation_baseline_1.checkNavigationValidationRequest)(job.validationId, current, runtime.config(), 'before_send_or_commit');
                 if (current.inputChecksum && current.inputChecksum !== prepared.inputChecksum
                     || current.snapshot.inputDigest !== job.inputDigest || current.snapshot.prompt !== prepared.snapshot.prompt
                     || identityOf(runtime.config(), current) !== job.executionIdentity)
@@ -183,6 +188,8 @@ async function runNextScopeNavigation(runtime, selectedKey) {
         }
         catch (error) {
             if (error.code === 'CCM_SCOPE_NAVIGATION_SUPERSEDED') {
+                if (job.validationId && (0, cache_validation_budget_1.readCacheValidationRun)(job.validationId)?.metadata.baselinePolicy === 'stable-v1')
+                    (0, scope_navigation_validation_baseline_1.sealNavigationValidation)(job.validationId, 'input_or_target_changed', job.kind);
                 runtime.transaction(store => {
                     const saved = store.jobs.find((item) => item.key === job.key);
                     if (saved) {

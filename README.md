@@ -15,8 +15,8 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@mumulinya167/cc-web"><img src="https://img.shields.io/npm/v/@mumulinya167/cc-web" alt="npm version" /></a>
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933" alt="Node.js 20+" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D24-339933" alt="Node.js 24+" />
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="AGPL-3.0 License" />
   <img src="https://img.shields.io/badge/storage-local--first-0f766e" alt="Local first" />
   <img src="https://img.shields.io/badge/architecture-agentic--loop-8b5cf6" alt="Agentic Loop" />
 </p>
@@ -33,7 +33,7 @@ CCM 不是简单的单聊 Web 界面，而是一套从**需求结构化输入**�
 
 ## 快速开始
 
-> 运行要求：**Node.js 20 或更高版本**（推荐 LTS 版本）。
+> 运行要求：**Node.js 24 或更高版本**（推荐 LTS 版本）。
 
 ### 1. 安装与启动
 
@@ -83,10 +83,36 @@ ccm logs --follow     # 实时查看服务端轮转日志
 | **证据真实性与防重** | 只读失败有限重试（最多3次） + 真实哈希校验短路（file_unchanged） | 消除过度去重死锁，杜绝虚假文件命中，确保上下文证据真实 |
 | **Responses 原生保真** | reasoning/encrypted_content 完整回放 + 本地 Token 估算去重 | 原生思维链与加密项无损回放，修复本地 Token 虚增，严防跨域污染 |
 | **多 Agent 协作网络** | 全局 Agent + 群聊主 Agent + 项目主 Agent + 隔离项目 Worker | 明确角色职责边界：主 Agent 只读规划，子 Agent 隔离执行 |
+| **代码审查与多媒体工作台** | ReviewAgent + 阿里 ocr 代码审核闭环 + Folia 原生视频工作台 + 会话呈现重构 | 交付前自动化深度代码审查与安全阻断，沉浸式音视频工作台与丝滑长会话呈现 |
 | **模型缓存重构与分派档位** | 模型缓存全场景准入 + 三档派发（light/standard/strict） + 范围申请审批 + 虚拟化长列表 | 消除模型缓存击穿，任务风险分档秒级响应与严苛隔离验收兼顾，长会话极速流畅 |
 | **Agent运行治理与可靠性** | 四级身份解耦 + Heartbeat幂等唤醒合并 + 6维证据断点自愈 + 预算硬停与Secret安全注入 | 彻底杜绝并发重复启动，崩溃断电自愈恢复，密钥零泄漏，长效运行高稳定 |
 | **任务工作流与自动化** | 三级分派策略（直通/规划/编排）+ 任务会话工作台 + Crontab 自动化调度引擎 | 轻量任务免冗长规划秒级执行，重型开发强制独立验收，支持定时任务自动化 |
 | **企业协同与多端集成** | 飞书双向会话与自动化工作报告 + 多协议终端 PTY + 可互动桌宠 | 多端消息直通工作区，会话事实自动生成可信工作日报/周报 |
+
+---
+
+## 5.0.0 重大里程碑与版本演进
+
+在 5.0.0 跨代重大版本中，CCM 全面升级了多模态代码审查与阿里 OCR Agent 闭环（Code Review Agent & Ali Open Code Review）、Folia 原生多媒体流与沉浸式视频工作台（Folia Native Media Integration & Video Cinema Surface）、以及全会话呈现生命周期与附件流转重构（Conversation Presentation & Attachment Workflow）：
+
+### 1. ReviewAgent 与阿里 OCR 代码审核体系（Code Review Agent & Ali Open Code Review）
+- **多模型代码审查闭环**：确立「需求开发交付 → 代码审查（ReviewAgent / OCR） → 功能验收（TestAgent） → 主 Agent 最终验收」的工业级四阶段闭环。
+- **集成阿里 Open Code Review（ocr）引擎**：原生内置 `@alibaba-group/open-code-review`，支持对工作区和两个 Commit 差异进行精准 AST 级别语法与安全审查；支持配置与开发 Agent 完全独立的审查模型。
+- **三级代码审核门禁（Code Review Policy）**：
+  - **轻量档（light）**：执行真实本地静态检查（Secretlint 密钥敏感扫描、计划范围合规与测试完整性核验）。
+  - **标准档（standard）**：启用 ReviewAgent + 阿里 ocr，拦截所有 Critical/High 级别的安全漏洞与本地边界越权。
+  - **严格档（strict）**：全面启用 AI 深入审查与扫描器，阻断所有高危风险，强制合规方可进入功能验收。
+- **安全与隐私沙箱**：审查前自动脱敏上下文，排除 `.env` 与私钥，禁止直接暴露密码；支持在 Web 提交面板直接「审核本次提交」，支持断点恢复、误报反馈规则草案与管理员审计豁免。
+
+### 2. Folia 原生多媒体流与沉浸式视频工作台（Folia Native Media & Video Cinema Surface）
+- **Folia 原生架构无缝接入**：重构多媒体模块，深度集成 Folia 原生媒体框架与多平台流（B 站无头浏览器流式解析、抖音个人收藏与推荐列表、网易云等）。
+- **沉浸式 Cinema 剧院模式与视频工作台（Video Cinema Stage）**：新增专属视频主播放舞台（`MusicMainVideoStage.vue`）、全景视界布局、自适应全屏与画中画模式；支持视频无裁剪自适应与音画同步。
+- **智能预热与错误自愈**：引入视频队列智能预热（`useVideoQueuePrewarm`）、封面自动恢复与代理（`coverRecovery` / `lyric-proxy`）及 Navidrome 远程媒体源支持，打造丝滑无缝的多端流媒体体验。
+
+### 3. 会话全生命周期呈现与附件流转统一（Conversation Presentation & Attachment Workflow）
+- **对话组件架构重构**：全面重构 `ConversationMessageList.vue`、`ConversationMessageRow.vue` 与 `ConversationAttachments.vue`，实现消息卡片、流式输出、折叠状态与工具调用摘要的高度解耦与组件化。
+- **附件全链路闭环流转**：规范任务会话、群聊与项目主会话中的附件上传、受控截断、多格式预览与工作流卡片交互（`ConversationWorkflowStatus.vue`）。
+- **群聊与导航缓存稳定基线**：增强跨项目和群聊切换时的虚拟滚动锚定（`VirtualAnchor`）与历史消息按需分页加载，保障上千轮历史记录下的稳定流畅呈现。
 
 ---
 
@@ -546,7 +572,7 @@ ccm doctor
 
 ## License
 
-MIT
+AGPL-3.0
 
 ---
 
@@ -560,7 +586,7 @@ It is designed as a recoverable delivery workflow rather than a single chat page
 
 ### Quick start
 
-Node.js 20 or newer is required.
+Node.js 24 or newer is required.
 
 ```bash
 npm install -g @mumulinya167/cc-web@latest
@@ -699,4 +725,11 @@ When reporting an issue, include the CCM version, operating system, Node.js vers
 
 ### License
 
-MIT
+AGPL-3.0
+
+
+### Folia 音乐与视频工作区
+
+CCM 5.0.0 使用 AGPL-3.0，运行需要 Node 24。听音乐内嵌 Folia v0.7.18 完整网页播放器，提供本地、网易云、QQ、酷狗与 Navidrome 音源；看视频继续使用 B站和抖音链路。切换入口不会打断播放，开始播放另一类内容前会完成暂停交接。
+
+网页资源与音源 API 随 npm 安装。同源接口 /api/music/folia/source提供与运行版本对应的完整源码、锁文件和构建脚本，保留第三方许可与修改记录。真实登录和平台播放能力取决于对应账号及服务器。

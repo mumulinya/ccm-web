@@ -1,0 +1,20 @@
+type Session = {
+    nonce: string;
+    owner: string;
+    kind: string;
+    epoch: number;
+    runtime: any;
+    fresh: boolean;
+    busy: boolean;
+    pages: Map<string, any>;
+    cursors: Set<string>;
+    listener: any;
+    timer?: any;
+    used: number;
+    closed: boolean;
+};
+export declare function closeDouyinLibrarySessions(owner?: string): Promise<void>;
+export declare function acquireDouyinLibrarySession(owner: string, kind: string, cursor: string, refresh?: boolean): Promise<Session>;
+export declare function releaseDouyinLibrarySession(session: Session, discard?: boolean): Promise<void>;
+export declare function validDouyinCursor(owner: string, kind: string, token: string): string;
+export {};

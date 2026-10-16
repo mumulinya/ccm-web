@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateDouyinSettings = updateDouyinSettings;
+exports.getDouyinBrowserStorage = getDouyinBrowserStorage;
 exports.douyinVideoUrl = douyinVideoUrl;
 exports.startDouyinBrowserLogin = startDouyinBrowserLogin;
 exports.startDouyinLogin = startDouyinLogin;
@@ -55,6 +56,7 @@ const credential_store_1 = require("../../core/credential-store");
 const utils_1 = require("../../core/utils");
 const managed_process_tree_1 = require("../../system/managed-process-tree");
 const platform_http_1 = require("./platform-http");
+const accounts_store_1 = require("./video/accounts-store");
 const douyin_mcp_bridge_1 = require("./douyin-mcp-bridge");
 const DOUYIN_HOME = "https://www.douyin.com/";
 const DOUYIN_SEARCH_API = "https://open.douyin.com/dy_open_api/v2/search/video/";
@@ -86,7 +88,8 @@ function cleanText(value, limit = 200) {
     return String(value || "").replace(/<[^>]*>/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, limit);
 }
 function settings() {
-    const value = (0, db_1.loadMusicConfig)()?.douyin || {};
+    const shared = (0, db_1.loadMusicConfig)()?.douyin || {}, owner = (0, accounts_store_1.videoOwner)(), state = (0, accounts_store_1.videoAccount)(owner, 'douyin');
+    const value = owner === 'workspace' ? shared : { ...shared, browserStorageRef: state.status === 'authenticated' ? state.storageRef || '' : '', browserAuthenticatedAt: state.verifiedAt ? new Date(state.verifiedAt).toISOString() : '' };
     return {
         compatibilityEnabled: value.compatibilityEnabled !== false,
         mcpMode: ["auto", "on", "off"].includes(String(value.mcpMode)) ? String(value.mcpMode) : "auto",
@@ -164,6 +167,9 @@ function browserStorage(value = settings()) {
         return null;
     }
 }
+// Shared with the unified video account adapter so the settings-center login
+// keeps its verified browser session when personal lists are opened.
+function getDouyinBrowserStorage() { return browserStorage(settings()); }
 function hasAuthenticatedCookie(storage) {
     return Array.isArray(storage?.cookies) && storage.cookies.some((cookie) => DOUYIN_AUTH_COOKIE_NAMES.has(String(cookie?.name || "").toLowerCase()) && String(cookie?.value || ""));
 }
@@ -287,6 +293,8 @@ function failActiveLogin(message) {
     void active.browser?.close?.().catch(() => { });
 }
 async function startDouyinBrowserLogin() {
+    if ((0, accounts_store_1.videoOwner)() !== 'workspace')
+        return require('./video/account-login').startVideoLogin((0, accounts_store_1.videoOwner)(), 'douyin', false, true);
     const config = settings();
     if (!config.compatibilityEnabled)
         throw new Error("抖音浏览器兼容通道已关闭");
@@ -354,6 +362,8 @@ async function startDouyinBrowserLogin() {
  * Playwright login opens duplicate browser pages on some Windows hosts, so
  * it must not be selected for the user-facing login action. */
 async function startDouyinLogin() {
+    if ((0, accounts_store_1.videoOwner)() !== 'workspace')
+        return require('./video/account-login').startVideoLogin((0, accounts_store_1.videoOwner)(), 'douyin', false, true);
     if (!(0, douyin_mcp_bridge_1.douyinMcpStatus)().enabled)
         throw new Error("抖音 MCP 登录已关闭，请在设置中启用");
     return (0, douyin_mcp_bridge_1.startDouyinMcpLogin)();
@@ -368,6 +378,8 @@ function revokeDouyinBrowserLogin() {
     return douyinPlatformStatus();
 }
 async function revokeDouyinLogin() {
+    if ((0, accounts_store_1.videoOwner)() !== 'workspace')
+        return require('./video/account-login').logoutVideo((0, accounts_store_1.videoOwner)(), 'douyin');
     await (0, douyin_mcp_bridge_1.revokeDouyinMcpLogin)().catch(() => { });
     return revokeDouyinBrowserLogin();
 }

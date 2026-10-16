@@ -106,6 +106,7 @@ async function musicPlatformRequest(input) {
         try {
             const dispatcher = dispatcherForRequest();
             const response = await (0, undici_1.request)(current, {
+                signal: input.signal,
                 method: input.method || "GET",
                 headers: input.headers,
                 body: input.body,
@@ -146,6 +147,8 @@ async function musicPlatformRequest(input) {
             };
         }
         catch (rawError) {
+            if (input.signal?.aborted)
+                throw Object.assign(new Error('平台读取已取消'), { name: 'AbortError' });
             const error = classifyError(rawError);
             const retryable = error.status === "timeout"
                 || error.status === "unavailable"

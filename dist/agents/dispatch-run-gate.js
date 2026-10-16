@@ -44,6 +44,7 @@ const dispatch_workspace_policy_1 = require("./dispatch-workspace-policy");
 const path = __importStar(require("path"));
 /** Shared preflight for persisted tasks; synthetic maintenance runs have no TaskSpec. */
 function assertPersistentDispatchGate(input) {
+    require('../system/desktop-update-gate').assertDesktopExecutionAllowed(input.taskId);
     let task = (0, db_1.getTaskById)(input.taskId);
     if (!task)
         return;

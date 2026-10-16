@@ -1,1 +1,0 @@
-import{Yt as e}from"./index-BnOS8jVG.js";var t=e(`list-filter`,[[`path`,{d:`M2 5h20`,key:`1fs1ex`}],[`path`,{d:`M6 12h12`,key:`8npq4p`}],[`path`,{d:`M9 19h6`,key:`456am0`}]]);export{t};

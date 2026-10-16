@@ -1,4 +1,5 @@
 import type { BrowserActionSpec, BrowserCheckSpec, BrowserSessionComparisonOperator, HttpCheckSpec, HttpConcurrencyAssertionSpec, TestAgentOptions, TestAgentRequiredCheck, TestAgentStatus } from "./types-specs";
+import type { VerificationFailureObservation } from "./failure-observation";
 export interface NormalizedTestAgentWorkOrder {
     schema: "ccm-test-agent-work-order-v1";
     id: string;
@@ -45,7 +46,7 @@ export interface WorkOrderIssue {
     message: string;
     project?: string;
 }
-export interface CommandRunResult {
+export interface CommandRunResult extends VerificationFailureObservation {
     project: string;
     command: string;
     cwd: string;
@@ -60,7 +61,7 @@ export interface CommandRunResult {
     output: string;
     error?: string;
 }
-export interface DevServerResult {
+export interface DevServerResult extends VerificationFailureObservation {
     project: string;
     command: string;
     cwd: string;
@@ -210,7 +211,7 @@ export interface BrowserCheckExecutionIdentity {
     expectedRuns: number;
     evidence: "provider" | "synthetic_missing";
 }
-export interface BrowserCheckResult {
+export interface BrowserCheckResult extends VerificationFailureObservation {
     provider?: "playwright" | "mcp" | "none";
     project: string;
     name: string;
@@ -742,7 +743,7 @@ export interface HttpConcurrencyEvidence {
     aggregateAssertions: HttpAssertionResult[];
     requests: HttpConcurrentRequestResult[];
 }
-export interface HttpCheckResult {
+export interface HttpCheckResult extends VerificationFailureObservation {
     project: string;
     name?: string;
     url: string;

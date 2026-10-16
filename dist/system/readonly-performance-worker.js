@@ -101,7 +101,7 @@ worker_threads_1.parentPort?.on('message', async (input) => {
             const before = fs.statSync(input.file);
             const version = `${before.dev}:${before.ino}:${before.mtimeMs}:${before.ctimeMs}:${before.size}`;
             let cached = jsonCache.get(input.file);
-            if (!cached || cached.version !== version || Date.now() - cached.at > 5000) {
+            if (!cached || cached.version !== version || !cached.byTask) {
                 const parsed = JSON.parse(fs.readFileSync(input.file, 'utf8'));
                 const rows = Array.isArray(parsed) ? parsed : parsed?.runs;
                 const summaries = (Array.isArray(rows) ? rows : []).flatMap(raw => {
@@ -111,25 +111,32 @@ worker_threads_1.parentPort?.on('message', async (input) => {
                     const { execution_evidence, history, lease, ...summary } = row;
                     return [{ ...summary, evidence_count: execution_evidence.length }];
                 }).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-                const bytes = Buffer.byteLength(JSON.stringify(summaries));
-                cached = { version, at: Date.now(), bytes, data: summaries };
+                const byTask = new Map();
+                for (let rank = 0; rank < summaries.length; rank++) {
+                    const row = summaries[rank], entries = byTask.get(row.task_id) || [];
+                    entries.push({ row, rank });
+                    byTask.set(row.task_id, entries);
+                }
+                const bytes = Buffer.byteLength(JSON.stringify(summaries)) + summaries.length * 128
+                    + [...byTask.keys()].reduce((size, key) => size + Buffer.byteLength(key), 0);
+                cached = { version, at: Date.now(), bytes, data: summaries, byTask };
+                for (const [key, entry] of jsonCache)
+                    if (Date.now() - entry.at > 5000)
+                        jsonCache.delete(key);
                 jsonCache.delete(input.file);
                 while (jsonCache.size && (jsonCache.size >= 8 || [...jsonCache.values()].reduce((sum, item) => sum + item.bytes, 0) + bytes > JSON_CACHE_BYTES))
                     jsonCache.delete(jsonCache.keys().next().value);
                 if (bytes <= JSON_CACHE_BYTES)
                     jsonCache.set(input.file, cached);
             }
+            cached.at = Date.now();
             const after = fs.statSync(input.file);
             if (`${after.dev}:${after.ino}:${after.mtimeMs}:${after.ctimeMs}:${after.size}` !== version)
                 throw new Error('task_run_source_changed');
-            const selected = input.taskIds ? new Set(input.taskIds) : null;
-            const runs = cached.data.flatMap(row => {
-                if (selected && !selected.has(row.task_id))
-                    return [];
-                if (!selected)
-                    return [{ run_id: row.run_id, task_id: row.task_id, status: row.status, updated_at: row.updated_at }];
-                return [row];
-            });
+            const runs = input.taskIds
+                ? [...new Set(input.taskIds)].flatMap(id => cached.byTask.get(id) || [])
+                    .sort((a, b) => a.rank - b.rank).map(entry => entry.row)
+                : cached.data.map(row => ({ run_id: row.run_id, task_id: row.task_id, status: row.status, updated_at: row.updated_at }));
             worker_threads_1.parentPort?.postMessage({ id: input.id, result: { sourceVersion: version, runs } });
             return;
         }

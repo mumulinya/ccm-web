@@ -39,9 +39,11 @@ exports.isCacheValidationControlError = isCacheValidationControlError;
 exports.createCacheValidationRun = createCacheValidationRun;
 exports.readCacheValidationRun = readCacheValidationRun;
 exports.updateCacheValidationMetadata = updateCacheValidationMetadata;
+exports.mutateCacheValidationMetadata = mutateCacheValidationMetadata;
 exports.activeCacheValidationRun = activeCacheValidationRun;
 exports.cacheValidationForSession = cacheValidationForSession;
 exports.renewCacheValidationRun = renewCacheValidationRun;
+exports.claimCacheValidationRecovery = claimCacheValidationRecovery;
 exports.resumeCacheValidationRun = resumeCacheValidationRun;
 exports.finishCacheValidationRun = finishCacheValidationRun;
 exports.cacheValidationBackgroundDeferred = cacheValidationBackgroundDeferred;
@@ -142,8 +144,11 @@ function createCacheValidationRun(input) {
 }
 function readCacheValidationRun(id) { return read().runs[id]; }
 function updateCacheValidationMetadata(id, metadata) {
+    return mutateCacheValidationMetadata(id, previous => ({ ...previous, ...metadata }));
+}
+function mutateCacheValidationMetadata(id, update) {
     return transaction(store => { const run = store.runs[id]; if (!run)
-        throw error('CCM_CACHE_VALIDATION_NOT_FOUND'); run.metadata = { ...run.metadata, ...metadata }; return run; });
+        throw error('CCM_CACHE_VALIDATION_NOT_FOUND'); run.metadata = update(run.metadata); return run; });
 }
 function activeCacheValidationRun() { const store = read(); return store.activeId && store.runs[store.activeId]?.leaseUntil <= Date.now() ? transaction(active) : active(store); }
 function cacheValidationForSession(sessionId) { return Object.values(read().runs).filter(run => run.sessionId === sessionId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]; }
@@ -151,11 +156,32 @@ function renewCacheValidationRun(id) {
     return transaction(store => { const run = active(store); if (run?.id !== id || run.controllerPid !== process.pid)
         throw error('CCM_CACHE_VALIDATION_NOT_ACTIVE'); run.leaseUntil = Date.now() + LEASE_MS; return run; });
 }
+/** Atomically own recovery cleanup before examining a dead controller's baseline. */
+function claimCacheValidationRecovery(id) {
+    return transaction(store => {
+        const current = active(store), run = store.runs[id];
+        if (!run || run.status === 'completed' || run.metadata.validationSealed || run.used >= run.limit || current && current.id !== id)
+            throw error('CCM_CACHE_VALIDATION_CANNOT_RESUME');
+        if (run.controllerPid && run.controllerPid !== process.pid) {
+            try {
+                process.kill(run.controllerPid, 0);
+                throw error('CCM_CACHE_VALIDATION_CONTROLLER_ACTIVE');
+            }
+            catch (e) {
+                if (e.code !== 'ESRCH')
+                    throw e;
+            }
+        }
+        run.controllerPid = process.pid;
+        run.leaseUntil = Date.now() + LEASE_MS;
+        return run;
+    });
+}
 function resumeCacheValidationRun(id) {
     return transaction(store => {
         const current = active(store);
         const run = store.runs[id];
-        if (!run || run.status === 'completed' || run.used >= run.limit || current && current.id !== id)
+        if (!run || run.status === 'completed' || run.metadata.validationSealed || run.used >= run.limit || current && current.id !== id)
             throw error('CCM_CACHE_VALIDATION_CANNOT_RESUME');
         if (current?.controllerPid && current.controllerPid !== process.pid) {
             try {

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleMusicDetailApi = handleMusicDetailApi;
 const utils_1 = require("../../core/utils");
+const context_1 = require("./folia/context");
 const media_detail_1 = require("./media-detail");
 const media_preview_1 = require("./media-preview");
 const media_errors_1 = require("./media-errors");
@@ -17,13 +18,13 @@ function handleMusicDetailApi(pathname, req, res) {
     let raw = '';
     req.on('data', b => { raw += b; if (Buffer.byteLength(raw) > 16384)
         req.destroy(); });
-    req.on('end', async () => { try {
+    req.on('end', (0, context_1.bindFoliaRequest)(req, async () => { try {
         const body = JSON.parse(raw || '{}');
         (0, utils_1.sendJson)(res, pathname.endsWith('/detail') ? { success: true, detail: await (0, media_detail_1.readMusicDetailResilient)(body) } : { success: true, preview: (0, media_preview_1.createMusicPreview)(body) });
     }
     catch (e) {
         (0, utils_1.sendJson)(res, { success: false, error: (0, media_errors_1.publicMediaError)(e), errorKind: e?.category }, 400);
-    } });
+    } }));
     return true;
 }
 //# sourceMappingURL=media-detail-api.js.map

@@ -1,30 +1,1552 @@
 {
   "schema": "ccm-release-artifact-manifest-v1",
   "package_name": "@mumulinya167/cc-web",
-  "version": "2.0.14",
-  "tarball": "mumulinya167-cc-web-2.0.14.tgz",
-  "tarball_sha256": "579faf4f2b49d9fe37c7a86657279e604fd0875544f8839949a5b37e69706ab9",
+  "version": "5.0.0",
+  "tarball": "mumulinya167-cc-web-5.0.0.tgz",
+  "tarball_sha256": "068ef40d9cccf38bf01bfd259db62fd6ac4a5ec3aaa29a34bbdfb28be88d678c",
   "sbom": "sbom.cdx.json",
-  "sbom_sha256": "f9e561fed7c95dded7d2654b8383e10ba755fb990c2f534a7e72df1328b71207",
+  "sbom_sha256": "62da6597210f9a5488ab9b6fb0f2e3df445450439a96034a4a12191216474173",
   "pet_assets": {
     "package_name": "@mumulinya167/ccm-pet-assets",
-    "version": "2.0.14",
-    "tarball": "mumulinya167-ccm-pet-assets-2.0.14.tgz",
-    "tarball_sha256": "992770ed5ed2294bc43004de1e3b035ed536f4c0bb929a45f4696541a82bc82f",
-    "compressed_bytes": 17496934,
-    "unpacked_bytes": 20882079,
+    "version": "5.0.0",
+    "tarball": "mumulinya167-ccm-pet-assets-5.0.0.tgz",
+    "tarball_sha256": "753d19bbde6212ceac37b96395f6aeb86b673f7b7173df29ba35df4c5b65166a",
+    "compressed_bytes": 17496900,
+    "unpacked_bytes": 20882059,
     "entries": 178
   },
   "budgets": {
-    "compressed_bytes": 20971520,
-    "unpacked_bytes": 36700160,
-    "entries": 950
+    "compressed_bytes": 150994944,
+    "unpacked_bytes": 201326592,
+    "entries": 1500
   },
   "actual": {
-    "compressed_bytes": 11882324,
-    "unpacked_bytes": 35543540,
-    "entries": 942
+    "compressed_bytes": 134030035,
+    "unpacked_bytes": 168122883,
+    "entries": 1365
   },
+  "module_fold": {
+    "schema": "ccm-release-module-fold-v1",
+    "folded": 209,
+    "modules": [
+      {
+        "module": "agents/acceptance-git-audit.js",
+        "owner": "agents/acceptance-workspace.js",
+        "directOwner": "agents/acceptance-workspace.js",
+        "checksum": "6303a2dbc78507627b3ed98bd9ded265575b47292f3e853146ffe72c7321df44",
+        "originalOwnerChecksum": "52f3f4b3ff0e57715256b3e48b6665480e4a369b1972adc8db41905ab7c242b0"
+      },
+      {
+        "module": "agents/agent-execution-idempotency.js",
+        "owner": "agents/agent-execution-coordinator.js",
+        "directOwner": "agents/agent-execution-coordinator.js",
+        "checksum": "f685647b9ba4088ceec4be530f0b7e898a5a6ae59ed6f7c4d23c48f3591c37a0",
+        "originalOwnerChecksum": "89727e6613711b5c5a71a5e048bd5a105e9cf161ef3a9bce1307b27ff54ab4cb"
+      },
+      {
+        "module": "agents/agent-heartbeat-types.js",
+        "owner": "agents/agent-heartbeat-coordinator.js",
+        "directOwner": "agents/agent-heartbeat-coordinator.js",
+        "checksum": "2fbf018efecab6d23651561ceb218110a6120d74cfdae777480b8245d6685a8b",
+        "originalOwnerChecksum": "fd54fceeebc7296ddd1574bb4beff79f277d3838d65b4284c0ab44c225c3df98"
+      },
+      {
+        "module": "agents/native-session-presence.js",
+        "owner": "agents/agent-runtime-adapter.js",
+        "directOwner": "agents/agent-runtime-adapter.js",
+        "checksum": "e8d06ecec3e24b4dc80f9d07eb558911635e8bc1805c9e1f2c03709eec55b9ba",
+        "originalOwnerChecksum": "6b0986cc590d5de74d46b866a2237acd8b46115d8949d64ba30d3f9d46434913"
+      },
+      {
+        "module": "agents/conversation-event-reader.js",
+        "owner": "agents/conversation-event-journal.js",
+        "directOwner": "agents/conversation-event-journal.js",
+        "checksum": "dd9643ec8d95a50f5f57419d50c4811beb663e61197c955e58a985b1e26069a4",
+        "originalOwnerChecksum": "136bbce64df403399cd82a7acd374281e5fced277cdf295a774e51e76d2ff4ec"
+      },
+      {
+        "module": "agents/conversation-startup-recovery.js",
+        "owner": "agents/conversation-turn-control.js",
+        "directOwner": "agents/conversation-turn-control.js",
+        "checksum": "e19697acd59d2e4582fb5849a595daeb35acec95ba56ef617da1580a288f2474",
+        "originalOwnerChecksum": "ce763965624017a3e39b60597ef75e115017f65d66e957fcc97f207463394d25"
+      },
+      {
+        "module": "agents/project-queued-turn-request.js",
+        "owner": "agents/conversation-turn-control.js",
+        "directOwner": "agents/conversation-turn-control.js",
+        "checksum": "64da2a1748694c0ab2f9d343e4d62c6a35db0c7f5b0ddcdfa8dd78cea1b6335d",
+        "originalOwnerChecksum": "ce763965624017a3e39b60597ef75e115017f65d66e957fcc97f207463394d25"
+      },
+      {
+        "module": "agents/scope-expansion.js",
+        "owner": "agents/dispatch-scope-service.js",
+        "directOwner": "agents/dispatch-scope-service.js",
+        "checksum": "62fb9ea9d739ff56ef071eb5296302b08f4c1999c4420cd0f06e5c32af75929f",
+        "originalOwnerChecksum": "aeddc041403a6220698fba9cef872d054086cfee2c0f741e494ae50145ebbb17"
+      },
+      {
+        "module": "agents/task-development-execution-cycle.js",
+        "owner": "agents/execution-kernel.js",
+        "directOwner": "agents/execution-kernel.js",
+        "checksum": "4fcdf09991f130e6093a9b369f6b41bf04aa9491e277e71418604ff0e6fd18d1",
+        "originalOwnerChecksum": "8645ff4a887bab133cdf3e59cdefddb2211e9104eea73e737873e727b0f04f50"
+      },
+      {
+        "module": "agents/global/transcript-ingestion-merge.js",
+        "owner": "agents/global/memory.js",
+        "directOwner": "agents/global/memory.js",
+        "checksum": "83a09fc8df00a6691558b175e4b0354d0d5c825910867ecd377e4edccca8bbe7",
+        "originalOwnerChecksum": "a4da8a90bfb3aef6a889daadf7348bd70e0bf8f0b407b3c288b91b1561b70e5d"
+      },
+      {
+        "module": "system/model-visible-measurement-privacy.js",
+        "owner": "agents/global/memory.js",
+        "directOwner": "agents/global/memory.js",
+        "checksum": "baab90fdd662919a8225da22ba87556ff3eb1612425e6d14a99adca5aae60c7b",
+        "originalOwnerChecksum": "a4da8a90bfb3aef6a889daadf7348bd70e0bf8f0b407b3c288b91b1561b70e5d"
+      },
+      {
+        "module": "agents/conversational-reply-style.js",
+        "owner": "agents/main-agent-identity.js",
+        "directOwner": "agents/main-agent-identity.js",
+        "checksum": "80dcfc2a7ba06f984442655a843a672778458f6f95e7ef6f0cb8aa4fd02dfe47",
+        "originalOwnerChecksum": "6408c46af581114aecb27689653684426061df0dbe1b881e238b74b57f18c97e"
+      },
+      {
+        "module": "agents/native-tool-catalog.js",
+        "owner": "agents/native-query-loop.js",
+        "directOwner": "agents/native-query-loop.js",
+        "checksum": "6fb924230f362b80849b0f78562872d2c4b0b426c9ebd00310d62341e1daf106",
+        "originalOwnerChecksum": "9a4673262a0a3119928ebdf3c86a0149638dfc08d0f2f2a26c074bc503871448"
+      },
+      {
+        "module": "agents/native-tool-repeat-policy.js",
+        "owner": "agents/native-query-loop.js",
+        "directOwner": "agents/native-query-loop.js",
+        "checksum": "ff9125f8192f78721c64338a2f3cd57740c006e091b93efbb778e29ec8b203df",
+        "originalOwnerChecksum": "9a4673262a0a3119928ebdf3c86a0149638dfc08d0f2f2a26c074bc503871448"
+      },
+      {
+        "module": "system/final-context-projection.js",
+        "owner": "agents/native-query-loop.js",
+        "directOwner": "agents/native-query-loop.js",
+        "checksum": "8bd15cd40b7399c4f783db634d22789b743caf85957ec3362f7395b91a695a88",
+        "originalOwnerChecksum": "9a4673262a0a3119928ebdf3c86a0149638dfc08d0f2f2a26c074bc503871448"
+      },
+      {
+        "module": "system/provider-cache-stable-tools.js",
+        "owner": "agents/native-query-loop.js",
+        "directOwner": "agents/native-query-loop.js",
+        "checksum": "4cb305d07a0c968b229ed492ffe65948ee5f19e434e618bbef16716ef93f9b7a",
+        "originalOwnerChecksum": "9a4673262a0a3119928ebdf3c86a0149638dfc08d0f2f2a26c074bc503871448"
+      },
+      {
+        "module": "system/tool-result-projection.js",
+        "owner": "agents/native-query-loop.js",
+        "directOwner": "system/final-context-projection.js",
+        "checksum": "7d583a52609d6d8ab69767c039e94b12bfa8fe6253e71acbd139fb6e828baf04",
+        "originalOwnerChecksum": "9a4673262a0a3119928ebdf3c86a0149638dfc08d0f2f2a26c074bc503871448"
+      },
+      {
+        "module": "agents/compiled-execution-plan.js",
+        "owner": "agents/plan-dispatch-contract.js",
+        "directOwner": "agents/plan-dispatch-contract.js",
+        "checksum": "4eb2d223bdfc0af028dfd628dd1b1cb6d4375b3804a2abd29dc119e211478adb",
+        "originalOwnerChecksum": "95b6fbd4112014b828e6fb3669f95a2cdb4610cc79036c06aaa1c8beb3bbdd19"
+      },
+      {
+        "module": "agents/group-runner-assignment.js",
+        "owner": "agents/runner.js",
+        "directOwner": "agents/runner.js",
+        "checksum": "4e27fbcaebbb171051e5de2a7f08fdff28129213fa102cd4c114844284003d97",
+        "originalOwnerChecksum": "b5376e017cb4d77128d5b3237eafca3e78550b6c7032c214a56b30bb4f42f224"
+      },
+      {
+        "module": "test-agent/optimization-projection.js",
+        "owner": "agents/user-workflow-projection.js",
+        "directOwner": "agents/user-workflow-projection.js",
+        "checksum": "739833f31006b96a832bae907e7e58b0d9ef4498c85f07d83b1461a8df292bf5",
+        "originalOwnerChecksum": "db0b760eb20109cabd301f5ea441b90747b3b1a92ad2ea63224a22ad15986d00"
+      },
+      {
+        "module": "agents/workchain-verification-evidence.js",
+        "owner": "agents/workchain.js",
+        "directOwner": "agents/workchain.js",
+        "checksum": "1208fd119ae0c55fe3ba9c52dabc2c37091cea8bd6b96de299470c246c020bf6",
+        "originalOwnerChecksum": "9a55b5374e8e3253503068d754dfde793c43223278d0a7f444e1322e4082bd73"
+      },
+      {
+        "module": "core/task-store-index-maintenance.js",
+        "owner": "core/task-store.js",
+        "directOwner": "core/task-store.js",
+        "checksum": "c8fa12d86a187b9808fc85b1a0bbde0ed313058492a6ac53079221ad3812d0e7",
+        "originalOwnerChecksum": "e591d3c2203ffab5385abbc8aeef3b940c4c30519ca3961282698c783d140a0d"
+      },
+      {
+        "module": "core/task-store-legacy-import.js",
+        "owner": "core/task-store.js",
+        "directOwner": "core/task-store.js",
+        "checksum": "68cb1eecccb338773af8a920370a5c8c148fc58f5e56c8657d97c7b75a73782d",
+        "originalOwnerChecksum": "e591d3c2203ffab5385abbc8aeef3b940c4c30519ca3961282698c783d140a0d"
+      },
+      {
+        "module": "agents/dispatch-memory-receipt.js",
+        "owner": "modules/collaboration/agent-receipts.js",
+        "directOwner": "modules/collaboration/agent-receipts.js",
+        "checksum": "fc467001725351e3acf6cbe6351ce22f1b6d1221d24fd32fa69290b51204b479",
+        "originalOwnerChecksum": "a483bba84cc9bf402053107be48a9b3204c09bb4e5ff18a8640812ab7a0aa73c"
+      },
+      {
+        "module": "agents/receipt-json.js",
+        "owner": "modules/collaboration/agent-receipts.js",
+        "directOwner": "modules/collaboration/agent-receipts.js",
+        "checksum": "a2c93fd58ffa536dbf9df13d85e2b6506964271fc0a80ff2c8f37c32eb217c50",
+        "originalOwnerChecksum": "a483bba84cc9bf402053107be48a9b3204c09bb4e5ff18a8640812ab7a0aa73c"
+      },
+      {
+        "module": "agents/dispatch-work-order-template.js",
+        "owner": "modules/collaboration/collaboration-coordination-ux.js",
+        "directOwner": "modules/collaboration/collaboration-coordination-ux.js",
+        "checksum": "e8a7c25c03e7be0ea514df01db293f91bcdd98b71078e53298655d34afd172bb",
+        "originalOwnerChecksum": "616e43d4f6389c4d71aa3df80fdf80f739852a993ed62c208437ee470179c045"
+      },
+      {
+        "module": "modules/collaboration/collaboration-agent-parallel-dispatch.js",
+        "owner": "modules/collaboration/collaboration-cross-agents.js",
+        "directOwner": "modules/collaboration/collaboration-cross-agents.js",
+        "checksum": "e43d62d0ddcaef6995f5d6a7b219100538fe43f5343968e168aad7bcc9ddcbf2",
+        "originalOwnerChecksum": "50d9288b2c3ecd7f31e98e7b91a05c139489291989b022ff2ec981d6e25ee2f7"
+      },
+      {
+        "module": "modules/collaboration/collaboration-cross-agents-helpers.js",
+        "owner": "modules/collaboration/collaboration-cross-agents.js",
+        "directOwner": "modules/collaboration/collaboration-cross-agents.js",
+        "checksum": "0bad98fe1979c3326e8674e9e37a8c63b99903e1ed877b2d2b5cd759fa90f3f7",
+        "originalOwnerChecksum": "50d9288b2c3ecd7f31e98e7b91a05c139489291989b022ff2ec981d6e25ee2f7"
+      },
+      {
+        "module": "modules/collaboration/task-plan-detail.js",
+        "owner": "modules/collaboration/collaboration-routes.js",
+        "directOwner": "modules/collaboration/collaboration-routes.js",
+        "checksum": "7fcb2113067efd0629ca183ba448c620d4bca977f9fa1fca604ac6e30c5d6c4d",
+        "originalOwnerChecksum": "81d174d9babb800cb6345c38c0294a4e16d46670ef003b5ea0ae611c0ce2d7ae"
+      },
+      {
+        "module": "agents/runtime-edit-capability.js",
+        "owner": "modules/collaboration/collaboration-runtime-runtime-tools.js",
+        "directOwner": "modules/collaboration/collaboration-runtime-runtime-tools.js",
+        "checksum": "f6a00e500e9dc9c3ffcf4559460185a32f2191aa0f2919f9b2a320a327caba82",
+        "originalOwnerChecksum": "7c928da79cc3082054f24e74feb96c8d754462d0fbfe6356648282854b6aae45"
+      },
+      {
+        "module": "modules/collaboration/task-global-history-messages.js",
+        "owner": "modules/collaboration/collaboration-runtime-runtime-tools.js",
+        "directOwner": "modules/collaboration/collaboration-runtime-runtime-tools.js",
+        "checksum": "c70e1a24a39af1f34b66caa6e16354af3e31e7d8a8279651ac10678ca6fed222",
+        "originalOwnerChecksum": "7c928da79cc3082054f24e74feb96c8d754462d0fbfe6356648282854b6aae45"
+      },
+      {
+        "module": "modules/collaboration/dispatch-records.js",
+        "owner": "modules/collaboration/collaboration-task-card.js",
+        "directOwner": "modules/collaboration/collaboration-task-card.js",
+        "checksum": "beb767f1f510b2b6cd14d353fc386842e394d0c985257144ba45c927a39a0afe",
+        "originalOwnerChecksum": "748d72feb2594473c489f07644281697e6fcab65b1b44ebf6f8668ed6842f900"
+      },
+      {
+        "module": "agents/dispatch-receipt-workspace.js",
+        "owner": "modules/collaboration/collaboration-task-executor.js",
+        "directOwner": "modules/collaboration/collaboration-task-executor.js",
+        "checksum": "fd19e082a50f214a2e76e8bc0f73045537604fb74bd6214f368d3bf41cb7fb95",
+        "originalOwnerChecksum": "76a15ca58f071f93e7b6817dbb4e9122f9211037dc95f0a2558676afe64b890b"
+      },
+      {
+        "module": "modules/collaboration/task-blocked-acceptance.js",
+        "owner": "modules/collaboration/collaboration-task-service.js",
+        "directOwner": "modules/collaboration/collaboration-task-service.js",
+        "checksum": "cb78e4a203c36878402845ec39404b52f86c35611a60005098f44198a3470cef",
+        "originalOwnerChecksum": "27aa14f2d40b1bae0d0d0cd922eee5f919ccf4fde235a5a3ccf6eedccb897cc1"
+      },
+      {
+        "module": "modules/collaboration/task-intake-legacy-replay.js",
+        "owner": "modules/collaboration/collaboration-task-service.js",
+        "directOwner": "modules/collaboration/collaboration-task-service.js",
+        "checksum": "9736fc583d0734f322f59976ebe2ef907a02d1372cf1fbeeb9350982bcf2773f",
+        "originalOwnerChecksum": "27aa14f2d40b1bae0d0d0cd922eee5f919ccf4fde235a5a3ccf6eedccb897cc1"
+      },
+      {
+        "module": "system/task-transition-ledger.js",
+        "owner": "modules/collaboration/collaboration-task-service.js",
+        "directOwner": "modules/collaboration/collaboration-task-service.js",
+        "checksum": "bb05bfa993f4ec527dfefa3c76bb1bd417bc91386941e2cf4ebccb511841f8cb",
+        "originalOwnerChecksum": "27aa14f2d40b1bae0d0d0cd922eee5f919ccf4fde235a5a3ccf6eedccb897cc1"
+      },
+      {
+        "module": "modules/collaboration/group-clarification-attach.js",
+        "owner": "modules/collaboration/group-live-routes.js",
+        "directOwner": "modules/collaboration/group-live-routes.js",
+        "checksum": "55912580d9876a7b4a5f4a2a243b41665dfd5079de9b1cadb2557fc93efbcfe5",
+        "originalOwnerChecksum": "5664e3a7436de41d6900dda1be2c654a3c16136f8b8dd527adcebddd5dc1186f"
+      },
+      {
+        "module": "modules/collaboration/group-model-recovery.js",
+        "owner": "modules/collaboration/group-live-routes.js",
+        "directOwner": "modules/collaboration/group-live-routes.js",
+        "checksum": "1c0594388391821e53dc7468992cba91ee2d7851032fe0a0b787160320eb21a8",
+        "originalOwnerChecksum": "5664e3a7436de41d6900dda1be2c654a3c16136f8b8dd527adcebddd5dc1186f"
+      },
+      {
+        "module": "modules/collaboration/group-runtime-memory-admission.js",
+        "owner": "modules/collaboration/group-memory-context.js",
+        "directOwner": "modules/collaboration/group-memory-context.js",
+        "checksum": "4625e9f3ecd5348a739014112c290ba08a799e17e1b40ad8c9be6b1ce67e6d82",
+        "originalOwnerChecksum": "e3565c3fd4a6a1680fb4617e98ca5461efb00a5d379d1234879848261846ac81"
+      },
+      {
+        "module": "system/provider-cache-breakpoint-encoding.js",
+        "owner": "modules/collaboration/group-orchestrator-llm-client.js",
+        "directOwner": "modules/collaboration/group-orchestrator-llm-client.js",
+        "checksum": "4fc4090288f71b503ad083dfb4224de179a05d3b3651ce16629f2190530e24d6",
+        "originalOwnerChecksum": "db9d5677e8d312a8e9a8bff3b254ee9095fed43fb6ccb3ba2454ca6397887c6b"
+      },
+      {
+        "module": "system/provider-reasoning-summary-capability.js",
+        "owner": "modules/collaboration/group-orchestrator-llm-client.js",
+        "directOwner": "modules/collaboration/group-orchestrator-llm-client.js",
+        "checksum": "89d4af5df3ae7deee7393e0fbbe62bff48ac5e867d96cf45e70d9e78cd06b8ae",
+        "originalOwnerChecksum": "db9d5677e8d312a8e9a8bff3b254ee9095fed43fb6ccb3ba2454ca6397887c6b"
+      },
+      {
+        "module": "system/provider-stream-activity.js",
+        "owner": "modules/collaboration/group-orchestrator-llm-client.js",
+        "directOwner": "modules/collaboration/group-orchestrator-llm-client.js",
+        "checksum": "ead1189c9dcfbe34fccd9a939dcb7e4353483d50a09258803e639cb0a09714d1",
+        "originalOwnerChecksum": "db9d5677e8d312a8e9a8bff3b254ee9095fed43fb6ccb3ba2454ca6397887c6b"
+      },
+      {
+        "module": "modules/collaboration/group-main-shared-files-tool.js",
+        "owner": "modules/collaboration/group-orchestrator-llm.js",
+        "directOwner": "modules/collaboration/group-orchestrator-llm.js",
+        "checksum": "fff755b1f7c81061d659005c4bf62b05fe7e00008a942376af4f8ed21ac3ead8",
+        "originalOwnerChecksum": "1daada1bc6929d2f01682cbb907e51b98a5a4afbc1802d8057cd26b7e372d2ae"
+      },
+      {
+        "module": "modules/collaboration/group-prior-plan-context.js",
+        "owner": "modules/collaboration/group-orchestrator-llm.js",
+        "directOwner": "modules/collaboration/group-orchestrator-llm.js",
+        "checksum": "fa3eb3a3a13230b2a06c88609e7770f2b03161b86f944fe6b048edf4fafd1e61",
+        "originalOwnerChecksum": "1daada1bc6929d2f01682cbb907e51b98a5a4afbc1802d8057cd26b7e372d2ae"
+      },
+      {
+        "module": "modules/collaboration/group-source-evidence-receipt.js",
+        "owner": "modules/collaboration/group-orchestrator-llm.js",
+        "directOwner": "modules/collaboration/group-orchestrator-llm.js",
+        "checksum": "938ae27f508673d7fe3704066b26b5773f3f08cff3b53f3882cda9ef84caaecd",
+        "originalOwnerChecksum": "1daada1bc6929d2f01682cbb907e51b98a5a4afbc1802d8057cd26b7e372d2ae"
+      },
+      {
+        "module": "modules/collaboration/group-orchestrator-failure.js",
+        "owner": "modules/collaboration/group-orchestrator-routing.js",
+        "directOwner": "modules/collaboration/group-orchestrator-routing.js",
+        "checksum": "7496f41cd2cbfe9a8705ca8905600a8836e3e57f48fafcf9a6b1d053637c3f12",
+        "originalOwnerChecksum": "02c043d4649bf27d9954bbe39801d60022569f114b67b50ec581b960a0d1a212"
+      },
+      {
+        "module": "system/model-cache-diagnostics-query.js",
+        "owner": "modules/collaboration/session-cache-diagnostics-api.js",
+        "directOwner": "modules/collaboration/session-cache-diagnostics-api.js",
+        "checksum": "bc0c654100d07656fc3f9a5c79b24b81a3c71c76bcef64a4630e00f8d5b90fe9",
+        "originalOwnerChecksum": "0474123bea34cda9fd63c53412f8aa214dda8179f2994d337b125d8d0998cc2e"
+      },
+      {
+        "module": "modules/collaboration/task-intake-request-identity.js",
+        "owner": "modules/collaboration/task-intake-preview-route.js",
+        "directOwner": "modules/collaboration/task-intake-preview-route.js",
+        "checksum": "9fde18e931586617871e80b2ffaf50d4eb7ca2435ef82f93eea3081f93878a3c",
+        "originalOwnerChecksum": "f7d44ea24d4901583792787381b86a5a2737caa8b6e413409dd70f680f5bfcef"
+      },
+      {
+        "module": "modules/collaboration/task-replay-cursor.js",
+        "owner": "modules/collaboration/task-replay.js",
+        "directOwner": "modules/collaboration/task-replay.js",
+        "checksum": "181fea3faa2e258ac06cd747c52f54eafb18be92ed7e6fa73d700081baa470b7",
+        "originalOwnerChecksum": "979bfc9d56fed58b8abe7c0465def77c1d6ae1373a3bb06a9b9abb2f194f14ea"
+      },
+      {
+        "module": "modules/collaboration/task-replay-delivery.js",
+        "owner": "modules/collaboration/task-replay.js",
+        "directOwner": "modules/collaboration/task-replay.js",
+        "checksum": "269e02d9863c1a11d2b639f7ce7fb2a40f17c37cbc5ccf3b84d537a4e751f9ca",
+        "originalOwnerChecksum": "979bfc9d56fed58b8abe7c0465def77c1d6ae1373a3bb06a9b9abb2f194f14ea"
+      },
+      {
+        "module": "modules/collaboration/task-replay-presentation.js",
+        "owner": "modules/collaboration/task-replay.js",
+        "directOwner": "modules/collaboration/task-replay.js",
+        "checksum": "67051ba1b37359e90c76743dbec18ee7cea2d3dd8c1ac9ecf38122183973dfab",
+        "originalOwnerChecksum": "979bfc9d56fed58b8abe7c0465def77c1d6ae1373a3bb06a9b9abb2f194f14ea"
+      },
+      {
+        "module": "modules/collaboration/task-session-model-history.js",
+        "owner": "modules/collaboration/task-session-model-context.js",
+        "directOwner": "modules/collaboration/task-session-model-context.js",
+        "checksum": "717b9dd0f8e4c4bb5478991ed27289b4a5c45ab6fe239045f63ab829f7adf640",
+        "originalOwnerChecksum": "bf63035c820476acb153adf1aa02a6664539cab8a4112dcd9babb25bbf2293b8"
+      },
+      {
+        "module": "system/global-history-message-identity.js",
+        "owner": "modules/global/global-agent-history.js",
+        "directOwner": "modules/global/global-agent-history.js",
+        "checksum": "4a41875f0acee14a2d1c773eaa472ed7fa2305f97c9d6a514894c63310420c00",
+        "originalOwnerChecksum": "b8470e7f3267a7bf5e7bf6ea4af85f984dfae9600837c68a52d89f5d45580a3e"
+      },
+      {
+        "module": "modules/global/global-agent-direct-dispatch.js",
+        "owner": "modules/global/global-agent.js",
+        "directOwner": "modules/global/global-agent.js",
+        "checksum": "86bce7dd453a40ef6befabccb3c8372c44c16a13e436a1962e7dee7e5661060a",
+        "originalOwnerChecksum": "75f4066baf0438954480bcc0a77e1c1c1f1cd4f9a105e04adfa8a4230c1c5a7a"
+      },
+      {
+        "module": "modules/global/global-agent-feishu-actions.js",
+        "owner": "modules/global/global-agent.js",
+        "directOwner": "modules/global/global-agent.js",
+        "checksum": "2d75fe4d2e0c222e2658350b8964d8901e16650cb61c5e70608ba9bfa4c1278a",
+        "originalOwnerChecksum": "75f4066baf0438954480bcc0a77e1c1c1f1cd4f9a105e04adfa8a4230c1c5a7a"
+      },
+      {
+        "module": "modules/global/global-agent-local-intent.js",
+        "owner": "modules/global/global-agent.js",
+        "directOwner": "modules/global/global-agent.js",
+        "checksum": "3f0988ea269dca45c0f2bcc7b49494828e131c8d4244acb81dc5288f7dab333b",
+        "originalOwnerChecksum": "75f4066baf0438954480bcc0a77e1c1c1f1cd4f9a105e04adfa8a4230c1c5a7a"
+      },
+      {
+        "module": "modules/global/global-agent-status.js",
+        "owner": "modules/global/global-agent.js",
+        "directOwner": "modules/global/global-agent.js",
+        "checksum": "b894e485bd9f38368b2684a840958dd1ad09d1e024fb4b3ca9affa31b2a17d49",
+        "originalOwnerChecksum": "75f4066baf0438954480bcc0a77e1c1c1f1cd4f9a105e04adfa8a4230c1c5a7a"
+      },
+      {
+        "module": "modules/global/global-agent-test-agent-relay.js",
+        "owner": "modules/global/global-agent.js",
+        "directOwner": "modules/global/global-agent.js",
+        "checksum": "d88e236b6456be24cdfb66b92fa6a0b54169d76cf9d081819849e9a04dc71c8b",
+        "originalOwnerChecksum": "75f4066baf0438954480bcc0a77e1c1c1f1cd4f9a105e04adfa8a4230c1c5a7a"
+      },
+      {
+        "module": "modules/music/video/materialize-video.js",
+        "owner": "modules/music/douyin-media-coordinator.js",
+        "directOwner": "modules/music/douyin-media-coordinator.js",
+        "checksum": "5649fde4683c600ade07f37341c63a43cce817ee67a7cc2985fd71be875c898b",
+        "originalOwnerChecksum": "2a18e636e227461e9bd02e9938fcfa12cbff3857d246f863b4c6c48b165133f6"
+      },
+      {
+        "module": "modules/music/folia/cover-reader.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/cover.js",
+        "checksum": "060f6d344d265bee990cf721ea8cc3155b84307a7d7a056f48b119f72f9694bb",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/cover.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "5469a45f9142b6258e1bfd8c271bb11ffc3e31570569b6a47e27bc0cfefbf1c9",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/library.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "480eb569b26dc3850d14ae555e38ae56f49a6d7df9a441694a83225b6bbf7f05",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/local-assets.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "301394f89dfcfccb37f3c77a392840af13117f0ab87fb8ece5718caf4ad34c6a",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/native-local-state.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/library.js",
+        "checksum": "f8adcb07185bbcf7ea2f2aadc14ab173e4bc87d1555aeed1329a5fec3405f6b1",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/navidrome-settings.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "8e0dc1850969be717940751ebe3ecb9301eeceff7873783245b005c343ede37b",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/provider-status.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "3d6bc2fe0f91c5bb2a83ce1b267fab47f5c597ef5b6ec8425ee240019af2871f",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/song-metadata.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/library.js",
+        "checksum": "2604d1d6d414bb5a9279ba5aedd305abc051c13ad35f81ce3fdc6ea2530d8f42",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/video-library.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/library.js",
+        "checksum": "19a92d9a0221ba211e2c47891ecef7f48c030481d901b3fdb98b120e22d8891c",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/video/api.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "17acb28007d6a3a996628b1f7c1a0f0dac769587f0b521b5e6bde307f366ae04",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/video/local-library.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/video/api.js",
+        "checksum": "e479483bb550e7bca1aa3fa4519125eb8fb9f14dcb99388dca128fcd5c439067",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/video/personal-reference.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/video/api.js",
+        "checksum": "9b52cf8912c4e0fe12330ec1d80fcecee7a3bf056d7c92c0769ef9143698d094",
+        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+      },
+      {
+        "module": "modules/music/folia/lyric-proxy.js",
+        "owner": "modules/music/folia/auxiliary.js",
+        "directOwner": "modules/music/folia/auxiliary.js",
+        "checksum": "4f2e37c40cc12539b00bb0fc5260f7fd898dd3f9caaa800f5c2bcaecc4f82555",
+        "originalOwnerChecksum": "20496f627795620458c0d616b7600e3bc3e6e857efe9a24d54baf5fce11e5643"
+      },
+      {
+        "module": "modules/music/catalog-track-identity.js",
+        "owner": "modules/music/music-catalog.js",
+        "directOwner": "modules/music/music-catalog.js",
+        "checksum": "d6bf983e0aaebd3363f3383d6e52eb8994330a4b386a0fe9c1284728cbe2e680",
+        "originalOwnerChecksum": "85d9f685eacc9e0dae8470895bf907ad8004cdeafa199915596dfbcdf9581154"
+      },
+      {
+        "module": "modules/music/video/media-task-scheduler.js",
+        "owner": "modules/music/stream-playback-sessions.js",
+        "directOwner": "modules/music/stream-playback-sessions.js",
+        "checksum": "7ae74b0041549677f348cd87b44f78bb3d46b483460803b0e2414a1a3a69013e",
+        "originalOwnerChecksum": "7afd44b06a4a9b9175be1435e6e8cf2daaf7a7bbb6ca216e5a8e3428fd998802"
+      },
+      {
+        "module": "modules/music/video/session-events.js",
+        "owner": "modules/music/stream-playback-sessions.js",
+        "directOwner": "modules/music/stream-playback-sessions.js",
+        "checksum": "5ca69dc7e5671ebe9a884c5eb2430704172835bd5ee93a9a7b372bc500294fbd",
+        "originalOwnerChecksum": "7afd44b06a4a9b9175be1435e6e8cf2daaf7a7bbb6ca216e5a8e3428fd998802"
+      },
+      {
+        "module": "modules/music/video/session-persistence.js",
+        "owner": "modules/music/stream-playback-sessions.js",
+        "directOwner": "modules/music/stream-playback-sessions.js",
+        "checksum": "631eb90d12f65f8c6d059cd0216f85b10b84024eefd1ebfbedfa5e4f74f22d4d",
+        "originalOwnerChecksum": "7afd44b06a4a9b9175be1435e6e8cf2daaf7a7bbb6ca216e5a8e3428fd998802"
+      },
+      {
+        "module": "modules/music/video/stream-compatibility.js",
+        "owner": "modules/music/stream-playback-sessions.js",
+        "directOwner": "modules/music/stream-playback-sessions.js",
+        "checksum": "22ccfa2f510edc6098d317244a42e9186d8028a74b28b0d897d1419191202a7d",
+        "originalOwnerChecksum": "7afd44b06a4a9b9175be1435e6e8cf2daaf7a7bbb6ca216e5a8e3428fd998802"
+      },
+      {
+        "module": "modules/music/video/douyin-library.js",
+        "owner": "modules/music/video/library.js",
+        "directOwner": "modules/music/video/library.js",
+        "checksum": "2d4f2d09002618d381a37ae6341b6322ffd05ca354868a2460e765d02f29bdae",
+        "originalOwnerChecksum": "c0a09e85e651430124b61ffd9e6a15cc3fcb442a3ac4bf3704f9a51f5fdd0c12"
+      },
+      {
+        "module": "agents/project-acceptance-plan.js",
+        "owner": "modules/projects/project-main-agent.js",
+        "directOwner": "modules/projects/project-main-agent.js",
+        "checksum": "7a79c720c679665c8a5e55d377abadf8c6945f81a9c54cfcbc36d7739ac9ea8c",
+        "originalOwnerChecksum": "7ccabdb1ae23b0d3291c38898d1eb28f96f6db0071be64e00a06e56d105d7d86"
+      },
+      {
+        "module": "modules/projects/dispatch-plan-diagnostics.js",
+        "owner": "modules/projects/project-main-agent.js",
+        "directOwner": "modules/projects/project-main-agent.js",
+        "checksum": "3624d023513cce652ebda73d762325a6bdf1509e5f7e73a75ce1ccc536a2d3fe",
+        "originalOwnerChecksum": "7ccabdb1ae23b0d3291c38898d1eb28f96f6db0071be64e00a06e56d105d7d86"
+      },
+      {
+        "module": "system/plan-inheritance.js",
+        "owner": "modules/projects/project-main-agent.js",
+        "directOwner": "modules/projects/project-main-agent.js",
+        "checksum": "3af414fe6a7c125d95b2d9cdd1455e9e413c8bdad86fea432086a893a7893d3e",
+        "originalOwnerChecksum": "7ccabdb1ae23b0d3291c38898d1eb28f96f6db0071be64e00a06e56d105d7d86"
+      },
+      {
+        "module": "integrations/cc-connect-feishu-runtime-config.js",
+        "owner": "modules/projects/projects.js",
+        "directOwner": "modules/projects/projects.js",
+        "checksum": "fb3ca22fd1e40e86443dc2ed369a0f396e1c3580675f6343449657c9c854ebad",
+        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+      },
+      {
+        "module": "modules/projects/managed-process-query.js",
+        "owner": "modules/projects/projects.js",
+        "directOwner": "modules/projects/projects.js",
+        "checksum": "406dce4d8a5a157629688aa2c07a9e2be96ed7ece2a7ea3f472ca4c5f079d569",
+        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+      },
+      {
+        "module": "modules/projects/project-folders.js",
+        "owner": "modules/projects/projects.js",
+        "directOwner": "modules/projects/projects.js",
+        "checksum": "0dc200ef20d04d53b2bac19cf7422acd1251c05aeb2bc9bc08eaece406a5d4f6",
+        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+      },
+      {
+        "module": "modules/projects/project-orphan-removal.js",
+        "owner": "modules/projects/projects.js",
+        "directOwner": "modules/projects/projects.js",
+        "checksum": "5f7c98cd54f298f1f92c08d2a141b9ecf1da3ce96b73dfe8244f0cebc6a34312",
+        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+      },
+      {
+        "module": "modules/scheduling/work-journal.js",
+        "owner": "modules/scheduling/cron-dev-reports.js",
+        "directOwner": "modules/scheduling/cron-dev-reports.js",
+        "checksum": "0da589bf3be00f899b501315fe15cea7c7bc1a95e19ed9ad7cf54264732b536b",
+        "originalOwnerChecksum": "8cfef042893e87f09344ad229d2a537f4a072b14ef5c740d9cc23881665c2983"
+      },
+      {
+        "module": "modules/scheduling/work-report-ai.js",
+        "owner": "modules/scheduling/cron-dev-reports.js",
+        "directOwner": "modules/scheduling/cron-dev-reports.js",
+        "checksum": "cb35b553562da65230cf7772d15c8a7734f80093f219d788783f6fe9a5c62eee",
+        "originalOwnerChecksum": "8cfef042893e87f09344ad229d2a537f4a072b14ef5c740d9cc23881665c2983"
+      },
+      {
+        "module": "modules/search/conversation-search-builder.js",
+        "owner": "modules/search/conversation-search-index.js",
+        "directOwner": "modules/search/conversation-search-index.js",
+        "checksum": "f47e6a03735a97461de32f848c840159f92c670560e688b2003c8c0ec7c22b15",
+        "originalOwnerChecksum": "1d8e76d9560c73f6285694f0399d182bfd7e358932c5b4040629dce1594f7659"
+      },
+      {
+        "module": "modules/system/agent-command-resolution-async.js",
+        "owner": "modules/system/agent-provider-settings.js",
+        "directOwner": "modules/system/agent-provider-settings.js",
+        "checksum": "ffb152d311ecb9d52e862ffd53ec6264f1443942bc12b6e8bf961a52deb7bd75",
+        "originalOwnerChecksum": "c13ac250a5f1e4fdc5176d185ae7b23e5ae17514a7ef27c63b72c8c5e0f3f27f"
+      },
+      {
+        "module": "modules/system/cc-switch-provider.js",
+        "owner": "modules/system/agent-provider-settings.js",
+        "directOwner": "modules/system/agent-provider-settings.js",
+        "checksum": "39903b0a7308cf7efead63d2cf5ffef9f4833e59637c058faee2a49b7500bdf8",
+        "originalOwnerChecksum": "c13ac250a5f1e4fdc5176d185ae7b23e5ae17514a7ef27c63b72c8c5e0f3f27f"
+      },
+      {
+        "module": "modules/system/development-agent-auth-evidence.js",
+        "owner": "modules/system/agent-provider-settings.js",
+        "directOwner": "modules/system/agent-provider-settings.js",
+        "checksum": "5d43717f7df8225900b774761cbbdcc182b39c32999d779bc499514b1de99c54",
+        "originalOwnerChecksum": "c13ac250a5f1e4fdc5176d185ae7b23e5ae17514a7ef27c63b72c8c5e0f3f27f"
+      },
+      {
+        "module": "modules/tools/marketplace-transactions.js",
+        "owner": "modules/tools/marketplace.js",
+        "directOwner": "modules/tools/marketplace.js",
+        "checksum": "2c904df6e832bb805fc586b720fe3881c6626cd3227031e05b7e3888df55f775",
+        "originalOwnerChecksum": "1fc14f926c46ea6160f33fa346c4f8bdd90333be1303aa8f43b927945bab73d2"
+      },
+      {
+        "module": "system/performance-provider-cache-metrics.js",
+        "owner": "modules/tools/tools.js",
+        "directOwner": "modules/tools/tools.js",
+        "checksum": "c8f3bdcad84caec9f49dc93b8aacf0e3be40ca29ae438341efe3ec119a0979e2",
+        "originalOwnerChecksum": "49a28452f25c5c56db85a0501b825efae7907d9e69d430778be3c7fa35ee6609"
+      },
+      {
+        "module": "agents/dispatch-tool-loop-result.js",
+        "owner": "server-agent-runner.js",
+        "directOwner": "server-agent-runner-support.js",
+        "checksum": "87850c2225ca15235b5670e9d6f40b2683a53fd75b7b5689393c817ca2ebbd5c",
+        "originalOwnerChecksum": "b0ba94e8a632c4f9cf1772639e735f130d8e668e2014315d2f44552cb2a784ba"
+      },
+      {
+        "module": "agents/managed-process-preflight.js",
+        "owner": "server-agent-runner.js",
+        "directOwner": "server-agent-runner.js",
+        "checksum": "01517baced010ceea0ec4bab6fa47a2dfe0a28ee6b2e1b15988235ff7997e765",
+        "originalOwnerChecksum": "b0ba94e8a632c4f9cf1772639e735f130d8e668e2014315d2f44552cb2a784ba"
+      },
+      {
+        "module": "server-agent-runner-support.js",
+        "owner": "server-agent-runner.js",
+        "directOwner": "server-agent-runner.js",
+        "checksum": "52ad572c5b32487252a9d0e96548ad5a64870f61ff2106b69e20ac845ff5c108",
+        "originalOwnerChecksum": "b0ba94e8a632c4f9cf1772639e735f130d8e668e2014315d2f44552cb2a784ba"
+      },
+      {
+        "module": "agents/agent-consistency-recovery.js",
+        "owner": "server.js",
+        "directOwner": "server-bootstrap.js",
+        "checksum": "d9ec95ef98dabfb37a110e9e4c5dbddc038a52e8cdc8f1047cb2fe499e55fa18",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "agents/agent-routine-recovery.js",
+        "owner": "server.js",
+        "directOwner": "server-bootstrap.js",
+        "checksum": "a107fd1db0ee9ca8add8dd5546962768c0acb8ede0132fbaca8dc1f181bc3829",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "agents/agent-run-supervisor.js",
+        "owner": "server.js",
+        "directOwner": "server-bootstrap.js",
+        "checksum": "bc4b083e15b2255639fa691991df88b8d196db159e0d5dd008a7c3bec0b3d6ac",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "agents/agent-supervisor-candidates.js",
+        "owner": "server.js",
+        "directOwner": "agents/agent-run-supervisor.js",
+        "checksum": "47e0d896895695820bb40581b69b1116466ba1558dcb56b1a809416b9bd5de69",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "agents/clarification-answer-validation.js",
+        "owner": "server.js",
+        "directOwner": "modules/tools/slash-command-conversations.js",
+        "checksum": "90eea6680685d0fb02d21603542b676559ec88b33ca84fa0b8187301fff46130",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "agents/project-worker-semantic-ack.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "f210c0564e66780efb7777a0df724da3c4f4881166770d5bb3c8b06ffee454de",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "core/server-instance-lock.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "99a23f4f93708ff6161d3707a71b0dcbd7ebfac44c5ff49b20d20340db838bca",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "core/task-workbench-query.js",
+        "owner": "server.js",
+        "directOwner": "modules/collaboration/task-workbench-routes.js",
+        "checksum": "e6ef061c8ef190446cb7715569517269737947c0ab5919d928fe995558a19c6d",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "core/task-workbench-read-version.js",
+        "owner": "server.js",
+        "directOwner": "core/task-workbench-query.js",
+        "checksum": "dd5893eebb8482363de57984311d728e928484cd046092af66bd455255f47f3a",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-acceptance-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "c52d6138ef925cee9c588aac49eb4568f1265e6b21a58caed941f101f3762f80",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-permission-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "932192d1bfdb2a5b5a399a6e50800b1268a5c9d4b4125cd4fd59807f4879636a",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-recovery-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "5ac78c9a54d2306843d43ef9297f90ed917e76964fb7ddbaa06fd92d7461188d",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-session-controls.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "d2f343376eaf31cdc23758c1a26daf47a31d80ee6a322629594e27fcdca87ca4",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-session-message-routing.js",
+        "owner": "server.js",
+        "directOwner": "modules/collaboration/task-session-routes.js",
+        "checksum": "cf5f24982034db15642aba30e77a106148316780477bd03789c5178681a6cc3a",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-session-message-validation.js",
+        "owner": "server.js",
+        "directOwner": "modules/collaboration/task-session-routes.js",
+        "checksum": "b3b870d1f8487624eda9d6bb043f957d7f6823217d79f132128a55eaeec2b010",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-session-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "db41e4df54a5b83fea0564633f74fe189956642a14910e47e7e559dbbe588823",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/collaboration/task-workbench-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "42b748a92bc049198748b8ace118683db8b02a88df8972b6bb309e850f6f97a3",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/knowledge/knowledge-model-startup.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "ca9adbdfbe5c1218b64f5704949ee835ff5a9dd4b371e4a04e003865d888cc04",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/agent.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "5793c76bf7763e8acd8b51ec1d44b4b2cba4fcda7cd3c36b202f5e9508175ead",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/cover.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "3bf52c04d05802b5506a4f8ea37b4f36bf5c54eb53509d9642904af2a937cb17",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/douyin-api.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "230b45125ec7a070fd879d93a3f80e960533b5c8efa0db2e68b26a0518449af6",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/douyin-music-agent.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "03c8854d821f7c1f93a033e22adeb9b0325f477047640185785cf23cb1f17c72",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/download-jobs.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "249e95638cc2c8d8aa882435280735f6bcf038b33dd72271a6c89ad2ab4d87cf",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/duplicates.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "459e5faf0a6d736b6c357b5066559354c100d8847d8cb8010fa84154fd25fbb8",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/folia/candidates.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "ba8f4f059a0e3f1a6a6416ba301210c158bc2c5bcb33bf006b1051ffccd24806",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/folia/embedding-security.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/folia/static.js",
+        "checksum": "2e0b1ee7ee51c0e6e2c7b44717b1bbd529bdd5e13d6a120f046c4c419590d61e",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/folia/search.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/playback-decision.js",
+        "checksum": "750b26da140eca1817e37f9b02354eeab03efd4b9f72d517bdef2161cc567914",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/folia/static.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "606981e716e9ca215979220b5bd6fa81471a359b46b2d6a7fea42570a984681a",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/music.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "0d4833053e11039195913b4404be1822c6f866fd0b769a5968f945286c235754",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/playback-decision.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "6e9683cff3333d2d54ea588ca3be2465a96d4dd2e9ce8735827c5265b1f02eda",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/unified-search.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "8ba7b96279569ed1f5e74bef68ee6e309086c8f97be6dcd110eec57a474f09d6",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/video-playback-api.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "e1123731b6898cb7c1c1e4bc19ac4fcd3424a1e8c558167747bce3a2a74ea1bd",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/music/weather.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/music.js",
+        "checksum": "2b1d9ae25118625417db1066308c89a01d3eca292bd6c8a58e3102264d2cfc76",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/projects/dispatch-delivery-gate.js",
+        "owner": "server.js",
+        "directOwner": "modules/projects/project-worker-delivery.js",
+        "checksum": "e1a687b57649c68d3cdae156094fcf868c5b7ecdf4e9d957544417c06e10ed50",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/projects/project-conversation-stream.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "bcb9be4dcbdcc86ea13be06e52446f4c32832feafe7728914dfa58afcbd71a91",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/projects/project-feishu-turn-queue.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "07d54c9a167af9373f4137f91954d316fb9ba0b9529248fb9b18d0e5b72e51c4",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/projects/project-main-turn-complete.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "198e1772be0c21ce033de2a560a2ac05390ea9cac54a1d3ab3178487ebe791a8",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/projects/project-session-dispatch-lifetime.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "8524eb6b843f4ae57ad3fdcd4333b2820ab120e9a0585ba12f5690bf91c6e18d",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/projects/project-worker-delivery.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "40aa1b05c5e36aebfcd8bf1fb95cdec20ae0b20059166709887ff8af6df02e80",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/scheduling/automation-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "665798211686a68633f61d44f22c668e12cde1ac31c39db01c85095dd7171b72",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/search/conversation-search.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "0c894db266d3b5cc3d03b248be746348748e13177fd59c98b11d401fe026c131",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/system/navigation-config.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "0c70cedcf78a70fb9a10f880632efda0e1663a729c2940734f538ebbf9500785",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/system/usability.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "10dfeb15a65e4258f2e231e8c100b714ec3c17843a15958640c1998abb720fef",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/tools/shared-files-api.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "048eab2bfe49193bc17cdb50b811a3e05ad9baca9a97566be4bd11b084f8dfc1",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/tools/slash-command-conversations.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "3c8683a2037d20603464414b7ecbbd37d8ec13572d561f81f9d1e12347d4ebcd",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "modules/tools/slash-commands.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "3b13fde6bf77b9655d57e2d19da925114dc757936c657cc58d205ac178faae68",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "server-bootstrap.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "b1a3c56136d9ad8a12f7b371c8afbf59c70a0cc0886cb62c5480281c1f27a60f",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "server-pet-activity.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "7f04ee7b1635cebaab997a684b272a56e15625c251936866e0d17fe3a1823f6f",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/agent-communication-api.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "5e7c68d8f4cb386dc49be78f5beae83ecbc83917c5ce462337d0dcbd1c0d7704",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/attachment-reference-registry.js",
+        "owner": "server.js",
+        "directOwner": "system/cleanup-center.js",
+        "checksum": "055c25d8aedd451e75b762efc624aaf40e714973dfe2f215f69cf5158029d020",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/automation-session-bindings-api.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "e44697d994949969a9bb3aa91ac7676aa42a3b06001a3f2ddbf840f2f568c7aa",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/cleanup-center.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "8eb768e1f4112624c071a3a18470e87282eea287d60f51400c3e7b86a3a51546",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/code-intelligence-api.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "95b0115d602bd602c73570e892ecf57e005caf45a4646e1f613611fa349b356f",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/delegated-inquiry-actions.js",
+        "owner": "server.js",
+        "directOwner": "system/delegated-inquiry-projections-api.js",
+        "checksum": "27a34f7fc7a841327ed092b7383fc9e7f1c1cb03bf7ecaa5575af282f9d1ab20",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/delegated-inquiry-projections-api.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "5187b8947508b126e29412bf3db897a386f1fce150b20fe14ba6eb63859553e2",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/event-file-diff.js",
+        "owner": "server.js",
+        "directOwner": "system/user-visible-agent-events-api.js",
+        "checksum": "ff487b627271c5e40de86115b9e5a70b7e4d6efce86b509955f306a4bdc4c166",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/event-file-source.js",
+        "owner": "server.js",
+        "directOwner": "system/user-visible-agent-events-api.js",
+        "checksum": "e99f89d6dbbdf6ed34d2d9835d119bc629c7b5ab3e842e435adca89dad0f055f",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/pet-agent-milestones.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "bffe726cb92a142c6a4d3de8b89d82a8be2fb7839fdd360f4c8f32326d15c4ed",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/runtime-schema-policy.js",
+        "owner": "server.js",
+        "directOwner": "system/cleanup-center.js",
+        "checksum": "7593911422a23a05dfed6a9937693227280bb2745c16130bc0bfe90afa763e1f",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/scope-instruction-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "26a01511c5456ee73dbdf01cdf25fcdb7d6cb2ffc190bd51dcd45339cea12fc1",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/session-compaction-hook-routes.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "134d9439e171a045532e88213d77984778cb36ab94f4f7b24c31e2694eb0566a",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/session-compaction-hooks.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "83a9cbb971afbb404e5a49ae80223b12d6c57da3b91388ca204eed614a9fd3ab",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/task-list-preparation.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "38c67d35ca788b8f16fd4dc29b3ebba3dd3f6ffdee0956ffdf831f2e68db0551",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/unified-agent-turn-state.js",
+        "owner": "server.js",
+        "directOwner": "system/user-visible-agent-events-api.js",
+        "checksum": "27321cb7379febdade46e2454d4601a1ef90088d248aadf1628624f4a21a17da",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/user-visible-agent-events-api.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "9e7520775a3ac306e502d051f5afa844ca5450051bf6f56bf2d28b373297202a",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "tools/tool-call-loop.js",
+        "owner": "server.js",
+        "directOwner": "server.js",
+        "checksum": "e60b5548ee9a5236c9cef2e43689aa2d2e90ae351e6cc6519467887c364d9914",
+        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+      },
+      {
+        "module": "system/scope-navigation-validation-report.js",
+        "owner": "system/cache-validation-report.js",
+        "directOwner": "system/cache-validation-report.js",
+        "checksum": "5b48a81fecdd2d48e019fdc82b244634a82f304e9cb0daed876e270cbd87f4f4",
+        "originalOwnerChecksum": "15e8a5c061cb06cdde40096f22bc205028c1cbf4f6852002684cd6c1d2dbbc69"
+      },
+      {
+        "module": "system/adaptive-index-budget.js",
+        "owner": "system/code-intelligence.js",
+        "directOwner": "system/code-intelligence.js",
+        "checksum": "6de407872186ed9029fc3eacd977f068caf470eb835e0ee74e9306667d6e3a4a",
+        "originalOwnerChecksum": "b54d76ef907187ac1017d2f005681c9a1827b1024591a4061dc763b1ac530b26"
+      },
+      {
+        "module": "system/lsp-client.js",
+        "owner": "system/code-intelligence.js",
+        "directOwner": "system/code-intelligence.js",
+        "checksum": "a5e5a6b86f29afbeeb08d06862db360b8210d876e2c6f4780a0173fe75da8fbe",
+        "originalOwnerChecksum": "b54d76ef907187ac1017d2f005681c9a1827b1024591a4061dc763b1ac530b26"
+      },
+      {
+        "module": "system/managed-language-servers.js",
+        "owner": "system/code-intelligence.js",
+        "directOwner": "system/code-intelligence.js",
+        "checksum": "a86cb3985bb10603a48b9f3666c07f0117010e2012bf2c3db6cad7506e121eaf",
+        "originalOwnerChecksum": "b54d76ef907187ac1017d2f005681c9a1827b1024591a4061dc763b1ac530b26"
+      },
+      {
+        "module": "system/source-evidence-metadata.js",
+        "owner": "system/delegated-inquiry-projections.js",
+        "directOwner": "system/delegated-inquiry-projections.js",
+        "checksum": "a52f11622d5a96bafe00ae8ceb195eed3b1c24c08a15fd49e6ff244270d109bf",
+        "originalOwnerChecksum": "bec142b7cf0a4774dcf884ffaeed5222be5a563926f0bfd13fa6997dcddddb87"
+      },
+      {
+        "module": "system/acceptance-performance-metrics.js",
+        "owner": "system/metrics-performance-summary.js",
+        "directOwner": "system/metrics-performance-summary.js",
+        "checksum": "9099b39ee08aea78adcb92cca07baf559179ef0f930b835d58f74665072a16ae",
+        "originalOwnerChecksum": "7fcea02ccf532795ffd9c4c339b2b6d3a4e7b9ae6bd3327637e77cff49378973"
+      },
+      {
+        "module": "system/cache-adaptive-tuning.js",
+        "owner": "system/provider-cache-scope-metrics.js",
+        "directOwner": "system/provider-cache-scope-metrics.js",
+        "checksum": "e324ed376d7e9110aac2cdb1ef4edd8ffac6e212fa0ce5955cbeb3cb26651539",
+        "originalOwnerChecksum": "f839432d167d5b2b4934cc7bab964b0270c47d61f81210c42937e397ac730404"
+      },
+      {
+        "module": "system/provider-cache-strategy.js",
+        "owner": "system/provider-context-cache-adapters.js",
+        "directOwner": "system/provider-context-cache-adapters.js",
+        "checksum": "3d795ae8ea893b966d78a0dbd821c647bd36f748a0f11352e4445b7ef5293940",
+        "originalOwnerChecksum": "194d250dcd689fda3bce21bcfd3cdffcd4d0fe236153407a07a422170790ce0a"
+      },
+      {
+        "module": "system/context-cache-message-snapshot.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "915e6acd1cb30324cbd0abcc60f81ce04de7d3aa7b36c4d62e64c4027cd14c17",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/model-cache-eligibility.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "3ec1f16ecbddd1be63d2f6dadb127d3444d1f4ba9f73ebe45f94e107426654a1",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/provider-cache-diagnostics.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "0efb960b9765f825501390405f6920568bb8685b4ebb79239a58dad0e9b104f1",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/provider-cache-prompt-segments.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "1ccb8a4c0b9add639f6a8e17ed06a8d5ea3fbd30edaa1edd0183e184c7341047",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/provider-cache-public-profile.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "608a22b3337523b2ebfab2f5da2f7019b590cb76a896e73a7d644d6af6754a3c",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/provider-local-materialization-cache.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "98c2dd13c0bab81ac931d2fc54df2cb6d1489046049e69fc580f85091828d549",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/provider-prefix-classification.js",
+        "owner": "system/provider-neutral-context-cache.js",
+        "directOwner": "system/provider-neutral-context-cache.js",
+        "checksum": "1c0bfe80822d9ceaf0f4878829fded452405b669cd4de6b1c2f6c8d858d90953",
+        "originalOwnerChecksum": "d81f4b6605be5df259ad84b27835e1ac5cca7aabbb02dca6e7f19bd63846d9fb"
+      },
+      {
+        "module": "system/provider-prefix-layers.js",
+        "owner": "system/provider-request-diagnostics.js",
+        "directOwner": "system/provider-wire-evidence.js",
+        "checksum": "e76f9ac885d2b6f77d068be52cd8abb009e84494aef0031ea840f8ec5d438250",
+        "originalOwnerChecksum": "39d01ad4ee9639f817ce59aa709de047cc253ff16f36b583a39f86962b5506e7"
+      },
+      {
+        "module": "system/provider-request-cache-fields.js",
+        "owner": "system/provider-request-diagnostics.js",
+        "directOwner": "system/provider-request-diagnostics.js",
+        "checksum": "26f432f0f0ef277b9ba9344c9d2b4d00a58639876e8038908bf77e2d5377000e",
+        "originalOwnerChecksum": "39d01ad4ee9639f817ce59aa709de047cc253ff16f36b583a39f86962b5506e7"
+      },
+      {
+        "module": "system/provider-wire-evidence.js",
+        "owner": "system/provider-request-diagnostics.js",
+        "directOwner": "system/provider-request-diagnostics.js",
+        "checksum": "4ccf7b5ab37b4ffa32670f15cab5cc8e170fdda25b4b53378c8e1d301d61e3bb",
+        "originalOwnerChecksum": "39d01ad4ee9639f817ce59aa709de047cc253ff16f36b583a39f86962b5506e7"
+      },
+      {
+        "module": "system/task-run-read-index-cache.js",
+        "owner": "system/readonly-performance-service.js",
+        "directOwner": "system/readonly-performance-service.js",
+        "checksum": "b30cc08dd587e305a7c1553f81ca38c57387f772332f607b322b0df4080662fa",
+        "originalOwnerChecksum": "ac6955e384693dc5570f024206f6b334f19fcc15e801fea42317e25e40e81048"
+      },
+      {
+        "module": "system/readonly-document-parser.js",
+        "owner": "system/readonly-performance-worker.js",
+        "directOwner": "system/readonly-performance-worker.js",
+        "checksum": "8ad2c7d525228e405b5eb63f1896794e900938145131e4691e10a26a06508ce5",
+        "originalOwnerChecksum": "d7ba56b124e9f66a827462ac171a288e23277771cc460dda40fee7af2c4031ea"
+      },
+      {
+        "module": "system/scope-instruction-model-catalog.js",
+        "owner": "system/scope-instructions.js",
+        "directOwner": "system/scope-instructions.js",
+        "checksum": "6b251e5a5c9910d9d96bbacf33ba0c16f7bccb6ced364a1b7cef26d88ccb8168",
+        "originalOwnerChecksum": "19bd00f381f92dcf0061a4675036eaa12080a8eea7db6f20afce3568e98261ea"
+      },
+      {
+        "module": "system/scope-navigation-source.js",
+        "owner": "system/scope-instructions.js",
+        "directOwner": "system/scope-instructions.js",
+        "checksum": "e9820e65ccb270aa1b0b723289a9659c8954bfbf47afa58de45d471861440784",
+        "originalOwnerChecksum": "19bd00f381f92dcf0061a4675036eaa12080a8eea7db6f20afce3568e98261ea"
+      },
+      {
+        "module": "system/task-aware-session-projection.js",
+        "owner": "system/session-model-context.js",
+        "directOwner": "system/session-model-context.js",
+        "checksum": "b1da22ed3943949e2a8e48cd2e08f954e9cad259c9d57a0e3d278df8e0b347e9",
+        "originalOwnerChecksum": "f8581f102969aaa600ccf73fbc033ecdae96bee8a3bfd6aea382ff9222b9bc6a"
+      },
+      {
+        "module": "system/unified-session-compaction-state.js",
+        "owner": "system/unified-session-compaction.js",
+        "directOwner": "system/unified-session-compaction.js",
+        "checksum": "db4a1de643577b5a0715786d12d9baba854fe73b6d2a39fdb0d2e41e7b845205",
+        "originalOwnerChecksum": "bc22694be89fa0170abb1dde03f468899d04ff51c5f3af4819c2a7db09b4a651"
+      },
+      {
+        "module": "system/completion-summary.js",
+        "owner": "system/user-visible-agent-events.js",
+        "directOwner": "system/user-visible-agent-events.js",
+        "checksum": "bda3e918a41241f8697a9f5e239907addca1c239be2dac9a315993ac89af302c",
+        "originalOwnerChecksum": "fb0ebc9dc5cd864cfd8ea63b17ec5d5ceee5faaf4d53a00cfeac1901bde6ad1c"
+      },
+      {
+        "module": "system/ephemeral-assistant-text.js",
+        "owner": "system/user-visible-agent-events.js",
+        "directOwner": "system/user-visible-agent-events.js",
+        "checksum": "46135f9c67b66e1a0c74c967e6e108376ba8f937b5dd6fb533ec7b9286ae9c3b",
+        "originalOwnerChecksum": "fb0ebc9dc5cd864cfd8ea63b17ec5d5ceee5faaf4d53a00cfeac1901bde6ad1c"
+      },
+      {
+        "module": "agents/session-contamination-detector.js",
+        "owner": "tasks/task-recovery-context.js",
+        "directOwner": "tasks/task-recovery-context.js",
+        "checksum": "7d0ae2c29beef545b4fdd9ac143bc3adcf75136aea11b5e0e9ca8da6a3495459",
+        "originalOwnerChecksum": "41c43e526a0923bad1b2c705cd5d62b85079a700ef28b4c9f54b56a4837a6689"
+      },
+      {
+        "module": "test-agent/isolation-execution-gate.js",
+        "owner": "test-agent/agent.js",
+        "directOwner": "test-agent/agent.js",
+        "checksum": "d5a2be5c467f83118995358cb79ccefd3fe095615bb1bee2e8095b0cfc241c61",
+        "originalOwnerChecksum": "e912c01c743a397af0dfe1be63a33d66a84e57d82b6d868883e4ef0a6eaebaac"
+      },
+      {
+        "module": "test-agent/verification-telemetry.js",
+        "owner": "test-agent/agent.js",
+        "directOwner": "test-agent/agent.js",
+        "checksum": "0e18df5a9c577205647a7dbdaf6a0e22c96e2240c01557047777e8ec14a0732a",
+        "originalOwnerChecksum": "e912c01c743a397af0dfe1be63a33d66a84e57d82b6d868883e4ef0a6eaebaac"
+      },
+      {
+        "module": "test-agent/browser/accessibility-assertions.js",
+        "owner": "test-agent/browser/playwright-provider.js",
+        "directOwner": "test-agent/browser/playwright-provider.js",
+        "checksum": "7648c96e3b021b424003076e785538e050808a47d6c6bb22fe78c22c69fbdad8",
+        "originalOwnerChecksum": "7d9a2a16744996cdf2d06f6a365e6865bdb0806a84a0c48bafe1064bea0930e1"
+      },
+      {
+        "module": "test-agent/contract/examples.js",
+        "owner": "test-agent/contract/index.js",
+        "directOwner": "test-agent/contract/index.js",
+        "checksum": "7ac896ac0c961b4990a48b5fdbba5755d64bd2a3b3be4fa79fe5b41afcfa7f3a",
+        "originalOwnerChecksum": "010f468b20c457ac3039002f06f4f6a522b2ffb1cbe84648f55472ff71814914"
+      },
+      {
+        "module": "test-agent/agent-profile.js",
+        "owner": "test-agent/index.js",
+        "directOwner": "test-agent/index.js",
+        "checksum": "3c7f849d2c6cd98b88514f4c4a3a95f0c44db4a7449d18e23bbae0af3a2f33e2",
+        "originalOwnerChecksum": "9c4dffee163366dde97bc2f45bf271c7c860ae6a4defded4a6f18699bdbc03ee"
+      },
+      {
+        "module": "test-agent/types-report.js",
+        "owner": "test-agent/index.js",
+        "directOwner": "test-agent/types.js",
+        "checksum": "fca87601f4886af8920250e87d3c8316fa86dc9beebe49921269b548bb6e175b",
+        "originalOwnerChecksum": "9c4dffee163366dde97bc2f45bf271c7c860ae6a4defded4a6f18699bdbc03ee"
+      },
+      {
+        "module": "test-agent/types-results.js",
+        "owner": "test-agent/index.js",
+        "directOwner": "test-agent/types.js",
+        "checksum": "fa6957579a5eaa90c5f0d53a23233262c544af80a39050e2f180883ceab8c3ce",
+        "originalOwnerChecksum": "9c4dffee163366dde97bc2f45bf271c7c860ae6a4defded4a6f18699bdbc03ee"
+      },
+      {
+        "module": "test-agent/types-specs.js",
+        "owner": "test-agent/index.js",
+        "directOwner": "test-agent/types.js",
+        "checksum": "d434c72490d12558a2f3cafb1b445702e2e923c408cb29c624277bd5feca42fd",
+        "originalOwnerChecksum": "9c4dffee163366dde97bc2f45bf271c7c860ae6a4defded4a6f18699bdbc03ee"
+      },
+      {
+        "module": "test-agent/types.js",
+        "owner": "test-agent/index.js",
+        "directOwner": "test-agent/index.js",
+        "checksum": "cc7f673cf8bff72a8cc3179bbf87f7ffbce12d5b7b696052afcb6279ad231171",
+        "originalOwnerChecksum": "9c4dffee163366dde97bc2f45bf271c7c860ae6a4defded4a6f18699bdbc03ee"
+      },
+      {
+        "module": "tools/tool-search-index.js",
+        "owner": "tools/main-agent-tool-runtime.js",
+        "directOwner": "tools/main-agent-tool-runtime.js",
+        "checksum": "0b589f45590dca43d20551bee1a6edd571bee82a190fdee99642338ec8254424",
+        "originalOwnerChecksum": "37527cf139438dc1a4fcba9b90b17d9355670160900a533142688cc20481fe5d"
+      },
+      {
+        "module": "tools/workspace-read-budget.js",
+        "owner": "tools/main-agent-tool-runtime.js",
+        "directOwner": "tools/main-agent-tool-runtime.js",
+        "checksum": "d68dfc2b31a55421d1fd745f9a2ddae9932cb7479c20266e5b9807d57065cac7",
+        "originalOwnerChecksum": "37527cf139438dc1a4fcba9b90b17d9355670160900a533142688cc20481fe5d"
+      },
+      {
+        "module": "tools/mcp-remote-client.js",
+        "owner": "tools/tool-manager.js",
+        "directOwner": "tools/tool-manager.js",
+        "checksum": "80181e57e7ad8c82588c06acdd3e1c6d49bf78b960717e0ce058d5104dc30817",
+        "originalOwnerChecksum": "2cd4f690d6dc04720756c61f7e55e99fad59de21e16bf5459385510ebe62d361"
+      },
+      {
+        "module": "tools/html-to-light-markdown.js",
+        "owner": "tools/web-notebook-tools.js",
+        "directOwner": "tools/web-notebook-tools.js",
+        "checksum": "720ade9b7bd8eda8e0e3ab1a49e387736481ce63b4c2332ed96c2cf95abdda1d",
+        "originalOwnerChecksum": "4ca7ab178c011f5ff0cc4bba06554bad92492345b667c3f339c8a776b1b29e3a"
+      },
+      {
+        "module": "tools/workspace-directory-model-body.js",
+        "owner": "tools/workspace-model-result-projection.js",
+        "directOwner": "tools/workspace-model-result-projection.js",
+        "checksum": "b35055ef89fb5b21558ca41cc807d70971b7b24faf3f87ce9b8a69f53398fc33",
+        "originalOwnerChecksum": "d70e14f58da114242e75c3bc0362b0dac9a7f50ef8718e1016b049aa363e8203"
+      },
+      {
+        "module": "tools/readonly-inspection-sandbox.js",
+        "owner": "tools/workspace-readonly-analysis.js",
+        "directOwner": "tools/workspace-readonly-analysis.js",
+        "checksum": "e3360f4167e28fb7db078ad23b94b8bac6e2913045d136f01994e2da64d92a9d",
+        "originalOwnerChecksum": "97a9a12938eaabfd529a4a0a4ec5d864ab24babb43595809d398d87884e26962"
+      },
+      {
+        "module": "tools/workspace-file-context-read.js",
+        "owner": "tools/workspace-readonly-tools.js",
+        "directOwner": "tools/workspace-readonly-tools.js",
+        "checksum": "e20392bcb12b749d590a38fadb16e2f79212a96316273d55e2f093c00e6b05e6",
+        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+      },
+      {
+        "module": "tools/workspace-file-metadata.js",
+        "owner": "tools/workspace-readonly-tools.js",
+        "directOwner": "tools/workspace-readonly-tools.js",
+        "checksum": "653d16d9718450fd42d359cba7a4e2338396ac2ce3d44af350d6b9e34a149fb1",
+        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+      },
+      {
+        "module": "tools/workspace-json-fields.js",
+        "owner": "tools/workspace-readonly-tools.js",
+        "directOwner": "tools/workspace-readonly-tools.js",
+        "checksum": "5ab0fc755ab8bcc243ab5906886068493da8415cc8af3c33ce2066093caab9dc",
+        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+      },
+      {
+        "module": "tools/workspace-read-media.js",
+        "owner": "tools/workspace-readonly-tools.js",
+        "directOwner": "tools/workspace-readonly-tools.js",
+        "checksum": "be305cad438052f5263645c05912102c6a5dc2a4411fa143d1a841972ab985d7",
+        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+      },
+      {
+        "module": "tools/workspace-search-runtime.js",
+        "owner": "tools/workspace-readonly-tools.js",
+        "directOwner": "tools/workspace-readonly-tools.js",
+        "checksum": "1d1fc8f22c9d305650d9530dd91673ac8111abf40b8d98da77586d04617f65fe",
+        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+      }
+    ],
+    "entryProtectionSources": [
+      "ccm-package/bin/agent-runner.ps1",
+      "ccm-package/bin/ccm.js",
+      "ccm-package/bin/legacy-project-cli.js",
+      "ccm-package/bin/postinstall.js",
+      "ccm-package/bin/prepublish-guard.js",
+      "ccm-package/bin/runtime-home.js",
+      "ccm-package/bin/service-runtime.js",
+      "ccm-package/bin/setup.js",
+      "ccm-package/bin/update-runtime.js",
+      "ccm-package/pet/assets/generated/_20260205173102_68_1463-c4e9/pet.json",
+      "ccm-package/pet/assets/yuexinmiao1/pet.json",
+      "ccm-package/pet/main.js",
+      "ccm-package/pet/package-lock.json",
+      "ccm-package/pet/package.json",
+      "ccm-package/pet/preload.js",
+      "ccm-package/pet/renderer/pet.js",
+      "scripts/attest-release-matrix.mjs",
+      "scripts/authenticated-music-release-selftest.mjs",
+      "scripts/authenticated-release-command.mjs",
+      "scripts/build-pet-assets-package.mjs",
+      "scripts/build-release-artifact.mjs",
+      "scripts/cli-release-selftest.mjs",
+      "scripts/cli-service-lifecycle-v2-selftest.mjs",
+      "scripts/clipboard-attachments-selftest.mjs",
+      "scripts/conversation-client-boundaries-selftest.mjs",
+      "scripts/douyin-mcp-bridge-selftest.mjs",
+      "scripts/fetch-web-mcp-selftest.mjs",
+      "scripts/fixtures/runtime-tool-e2e-mcp-server.mjs",
+      "scripts/group-coordination-mcp-selftest.mjs",
+      "scripts/helpers/release-fold-chains.mjs",
+      "scripts/internal-mcp-catalog-selftest.mjs",
+      "scripts/internal-mcp-render-regression.mjs",
+      "scripts/internal-workflow-mcp-selftest.mjs",
+      "scripts/live-douyin-mcp-probe.mjs",
+      "scripts/mcp-windows-shellless-launch-selftest.mjs",
+      "scripts/node-pty-cross-platform-release-selftest.mjs",
+      "scripts/npm-installed-package-selftest.mjs",
+      "scripts/npm-package-install-release-selftest.mjs",
+      "scripts/npm-readme-release-selftest.mjs",
+      "scripts/package-update-transaction-selftest.mjs",
+      "scripts/prepare-release-stage.mjs",
+      "scripts/release-acceptance-framework-selftest.mjs",
+      "scripts/release-live-acceptance.mjs",
+      "scripts/runtime-path-integrity-selftest.mjs",
+      "scripts/runtime-tool-real-cli-e2e.mjs",
+      "scripts/sync-douyin-mcp.mjs",
+      "scripts/sync-folia-package.mjs",
+      "scripts/sync-review-package.mjs",
+      "scripts/third-party-memory-mcp-hydration-selftest.mjs",
+      "scripts/validate-release-manifests.mjs"
+    ]
+  },
+  "stage_package": "D:\\ccm-workbench\\release-artifacts\\5.0.0\\stage-z5Q3xs\\ccm-package",
   "executable_entries": [
     "package/bin/ccm.js",
     "package/bin/legacy-project-cli.js",
@@ -33,5 +1555,5 @@
     "package/bin/setup.js"
   ],
   "tested": false,
-  "created_at": "2026-08-31T11:07:25.240Z"
+  "created_at": "2026-10-16T03:42:46.841Z"
 }

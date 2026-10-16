@@ -52,5 +52,20 @@ export declare function parseGitStatus(output: string): any[];
 export declare function parseNumstat(output: string): Map<string, FileStats>;
 export declare function buildGitStatusSummary(files: any[]): any;
 export declare function validatePatchPaths(patchText: string): string[];
+export declare function commitPreviewAsync(workDir: string, requestedFiles: any[], project?: string): Promise<{
+    checksum: string;
+    snapshot: import("./git-workspace-runtime").GitWorkspaceSnapshotV2 & {
+        status_raw: string;
+    };
+    schema: string;
+    files: any[];
+    requestedFiles: string[];
+    outsideStaged: any[];
+    conflicts: any[];
+    blocked: boolean;
+    warnings: string[];
+    workspace_snapshot_checksum: string;
+    file_evidence: any[];
+}>;
 export declare function handleGitApi(pathname: string, req: any, res: any, parsed: any): boolean;
 export {};

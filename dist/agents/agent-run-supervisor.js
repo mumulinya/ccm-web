@@ -44,6 +44,8 @@ async function scanSupervisor(options = {}) {
                 batchStarted = perf_hooks_1.performance.now();
             }
             const run = (0, agent_run_store_1.getAgentRun)(id);
+            if (run?.scope === 'review_agent')
+                continue; // Review jobs resume their immutable input through the review runner.
             if (!run)
                 continue;
             if (["succeeded", "failed", "cancelled", "recovering"].includes(run.status))

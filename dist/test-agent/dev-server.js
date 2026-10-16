@@ -8,6 +8,7 @@ const shared_1 = require("./browser/shared");
 const isolation_1 = require("./isolation");
 const side_effect_policy_1 = require("./side-effect-policy");
 const user_visible_progress_1 = require("./user-visible-progress");
+const failure_observation_1 = require("./failure-observation");
 function browserChecksRequested(workOrder) {
     if ((0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors", "http", "api"))
         return true;
@@ -33,9 +34,11 @@ async function probeUrl(url, timeoutMs = 3000) {
         clearTimeout(timer);
     }
 }
-async function waitForUrl(url, timeoutMs) {
+async function waitForUrl(url, timeoutMs, stopped = () => false) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+        if (stopped())
+            return false;
         if (await probeUrl(url, 2500))
             return true;
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -67,7 +70,7 @@ async function startProjectServer(project, maxOutputChars, policyContext = null)
     if (urlPolicy && !urlPolicy.allowed) {
         const startedAt = (0, utils_1.nowIso)();
         return {
-            result: { project: project.name, command: project.devServerCommand || "", cwd: project.workDir, url, status: "failed", startedAt, error: `副作用安全门阻止访问目标 URL：${urlPolicy.reason}` },
+            result: { project: project.name, command: project.devServerCommand || "", cwd: project.workDir, url, status: "failed", startedAt, failure_code: "service_target_denied", failure_stage: "safety_gate", failure_kind: "permission", error: `副作用安全门阻止访问目标 URL：${urlPolicy.reason}` },
             stop: () => { },
         };
     }
@@ -80,21 +83,21 @@ async function startProjectServer(project, maxOutputChars, policyContext = null)
     const command = project.devServerCommand;
     if (!command) {
         return {
-            result: { project: project.name, command: "", cwd: project.workDir, url, status: "failed", startedAt, error: "Target URL is not reachable and no dev server command was provided." },
+            result: { project: project.name, command: "", cwd: project.workDir, url, status: "failed", startedAt, failure_code: "service_not_ready", failure_stage: "service_ready", failure_kind: "environment", error: "Target URL is not reachable and no dev server command was provided." },
             stop: () => { },
         };
     }
     const commandPolicy = policyContext ? (0, side_effect_policy_1.evaluateTestAgentCommandSideEffect)(command, { ...policyContext, project }) : null;
     if (commandPolicy && !commandPolicy.allowed) {
         return {
-            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: `副作用安全门阻止启动开发服务器：${commandPolicy.reason}` },
+            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, failure_code: "service_start_denied", failure_stage: "safety_gate", failure_kind: "permission", error: `副作用安全门阻止启动开发服务器：${commandPolicy.reason}` },
             stop: () => { },
         };
     }
     const invocation = (0, utils_1.verificationCommandInvocation)(command);
     if (invocation.error) {
         return {
-            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: invocation.error },
+            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, failure_code: "service_command_invalid", failure_stage: "safety_gate", failure_kind: "criteria_conflict", error: invocation.error },
             stop: () => { },
         };
     }
@@ -108,16 +111,18 @@ async function startProjectServer(project, maxOutputChars, policyContext = null)
     child.stdout?.on("data", chunk => { output = (0, utils_1.appendLimited)(output, chunk, maxOutputChars); });
     child.stderr?.on("data", chunk => { output = (0, utils_1.appendLimited)(output, chunk, maxOutputChars); });
     let exitError = "";
+    let startFailure = {};
+    child.on("error", (error) => { startFailure = (0, failure_observation_1.processStartFailure)(error.code); exitError = error.message; });
     child.on("exit", code => {
         if (code !== null && code !== 0)
             exitError = `Dev server exited with code ${code}.`;
     });
-    const ready = await waitForUrl(url, project.startupTimeoutMs);
+    const ready = await waitForUrl(url, project.startupTimeoutMs, () => !!exitError);
     if (!ready) {
         const error = exitError || `Dev server did not become reachable at ${url} within ${project.startupTimeoutMs}ms.`;
         stopProcessTree(child);
         return {
-            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: (0, utils_1.redactTestAgentSensitiveText)(error, Object.values(project.env)), output: (0, utils_1.compactText)((0, utils_1.redactTestAgentSensitiveText)(output, Object.values(project.env)), maxOutputChars) },
+            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, failure_code: "service_not_ready", failure_stage: "service_ready", failure_kind: "environment", ...startFailure, error: (0, utils_1.redactTestAgentSensitiveText)(error, Object.values(project.env)), output: (0, utils_1.compactText)((0, utils_1.redactTestAgentSensitiveText)(output, Object.values(project.env)), maxOutputChars) },
             stop: () => { },
         };
     }

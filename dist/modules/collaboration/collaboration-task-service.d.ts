@@ -121,7 +121,7 @@ export declare function looksLikeTaskContinuation(message: string): boolean;
 export declare function hasStructuredTaskAcceptanceEvidence(task: any, updates?: any): boolean;
 export declare function validateTaskTerminalTransition(task: any, updates?: any, options?: {
     developmentCycleSource?: string;
-}): string;
+}): any;
 export declare function buildTaskTerminalDecisionV2(task: any, updates?: any): any;
 export declare function updateTask(id: string, updates: any, options?: {
     allowCancelledRecovery?: boolean;

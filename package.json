@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "4.3.0",
+  "version": "5.0.0",
   "description": "本地优先的多 Agent 协作与自动开发工作区，集成任务编排、记忆上下文、MCP/Skill、TestAgent、Git、飞书、知识库和终端",
   "main": "dist/server.js",
   "bin": {
@@ -51,7 +51,11 @@
     "douyin-mcp/",
     "templates/skills/*/SKILL.md",
     "templates/skills/*/references/",
-    "README.md"
+    "README.md",
+    "public/music/folia/",
+    "source/",
+    "dist/**/*.cjs",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "start": "node dist/server.js",
@@ -94,9 +98,9 @@
   "bugs": {
     "url": "https://github.com/mumulinya/ccm-web/issues"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
@@ -104,7 +108,7 @@
     "@modelcontextprotocol/server-filesystem": "2026.7.10",
     "@napi-rs/canvas": "0.1.80",
     "@vscode/ripgrep": "1.18.0",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "13.0.3",
     "busboy": "1.6.0",
     "cc-connect": "^1.4.1",
     "js-tiktoken": "1.0.21",
@@ -116,9 +120,16 @@
     "sharp": "0.34.5",
     "typescript": "6.0.3",
     "undici": "^6.21.3",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "secretlint": "10.2.2",
+    "@secretlint/secretlint-rule-preset-recommend": "10.2.2",
+    "@neteasecloudmusicapienhanced/api": "4.40.1",
+    "@yakult-green-tea/qq-music-api": "3.1.4",
+    "kugoumusicapi": "https://github.com/MakcRe/KuGouMusicApi/archive/refs/tags/v1.6.0.tar.gz",
+    "qrcode": "^1.5.4"
   },
   "optionalDependencies": {
-    "node-pty": "1.2.0-beta.14"
+    "node-pty": "1.2.0-beta.14",
+    "@alibaba-group/open-code-review": "1.12.13"
   }
 }

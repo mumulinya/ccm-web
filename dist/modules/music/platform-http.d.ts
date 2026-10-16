@@ -14,6 +14,7 @@ export declare function musicPlatformRequest(input: {
     maxBytes?: number;
     retries?: number;
     allowedHosts?: string[];
+    signal?: AbortSignal;
 }): Promise<{
     status: "success";
     statusCode: number;

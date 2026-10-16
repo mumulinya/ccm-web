@@ -152,6 +152,12 @@ export declare function regenerateScopeInstruction(documentIdValue: string, expe
     sourceCount: number;
 };
 export declare function runScopeInstructionGeneration(taskId?: string): Promise<any>;
+/** Read-only summary at the formal generation seam; no source body is exposed. */
+export declare function readScopeInstructionGenerationValidationBaseline(taskId: string): any;
+/** Controlled automatic check, limited to the caller's isolated validation store. */
+export declare function queueScopeInstructionValidationRefresh(documentId: string): CcmScopeInstructionCatalogEntryV1 & {
+    sourceCount: number;
+};
 export declare function initializeScopeInstructions(input?: {
     projects?: string[];
     groups?: any[];

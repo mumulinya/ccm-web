@@ -30,6 +30,7 @@ export declare function authorizeTerminalCommandExecution(commandValue: any, cwd
     confirmed?: undefined;
 };
 export declare function stopAllTerminalRuns(): Promise<void>;
+export declare function desktopTerminalActivity(): number;
 export declare function handleTerminalApi(pathname: string, req: any, res: any): boolean;
 export declare function runTerminalModuleSelfTest(): {
     success: boolean;

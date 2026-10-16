@@ -23,9 +23,14 @@ function compilePlanAcceptance(input) {
                 if (checks.some(c => c.id === id))
                     continue;
                 const kind = row.kind || (row.command ? "command" : "");
+                const sources = row.sourceEvidenceIds || [];
+                const mapped = sources.map(sourceId => (plan.files || []).filter(file => file.project === work.project && (file.sourceEvidenceIds || []).includes(sourceId)).map(file => file.path));
+                const sourcePaths = mapped.length && mapped.every(paths => paths.length) ? [...new Set(mapped.flat())] : [];
                 checks.push({ id, workItemId: work.workItemId, projectId: work.project, kind,
                     cwd: row.cwd || ".", ...(row.command ? { command: row.command } : {}), sourceEvidenceIds: row.sourceEvidenceIds || [],
-                    expected: row.expected, assertion: row.assertion, independent: input.strict || row.independent === true });
+                    expected: row.expected, assertion: row.assertion, independent: input.strict || row.independent === true,
+                    ...(sourcePaths.length ? { sourcePaths } : {}),
+                    ...(typeof row.coreRegression === "boolean" ? { coreRegression: row.coreRegression } : {}) });
             }
             const descriptor = (plan.acceptanceDetails || []).find((r) => r.id === criterionId) || {};
             criteria.push({ id: `${work.workItemId}:${criterionId}`, workItemId: work.workItemId, projectId: work.project,
@@ -45,6 +50,9 @@ function compilePlanAcceptance(input) {
 exports.ACCEPTANCE_PLAN_DIRECTIVE = `CCM acceptance contract v1:
 Every verification row MUST provide acceptanceCriterionIds (the confirmed requirement IDs), projectId,
 cwd (relative to the managed project root), sourceEvidenceIds (actually read sources), expected,
+and explicit coreRegression:boolean for checks that must execute in every re-verification.
+Bind every check to all actually inspected source evidence it depends on; if impact coverage
+cannot be proved, preserve the full verification plan instead of claiming incremental safety.
 kind, and assertion. Do not bind every command to every criterion.
 For command checks use assertion {kind:"exit_code",value:0} ONLY for build/test-process completion;
 to prove a business return value execute the actual feature and emit JSON, then use

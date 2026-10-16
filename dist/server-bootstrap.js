@@ -52,6 +52,8 @@ async function bootstrapServerRuntime(startupCollabCtx, port, deps) {
     require('./system/metrics-performance-summary').startMetricsPerformanceSummary();
     require('./core/task-store-checkpoint').startTaskStoreCheckpoints();
     require('./system/performance-monitor').markPerformanceReady('http');
+    // Prepare the bounded read index without delaying HTTP or execution recovery.
+    void require('./system/readonly-performance-service').readTaskRunSummaryOffThread(require('./modules/collaboration/task-run-store').taskRunStorePath()).catch(() => { });
     const scopeContinuations = [];
     const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, processAgentHeartbeatWake, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startAutomationScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
     const recoveredConversationTurns = conversationTurnControl.recoverInterrupted({ createdBefore: Date.now() - process.uptime() * 1000 });
@@ -193,6 +195,7 @@ async function bootstrapServerRuntime(startupCollabCtx, port, deps) {
         if (typeof processAgentHeartbeatWake === "function")
             (0, agent_heartbeat_coordinator_1.startAgentHeartbeatProcessor)({ processor: processAgentHeartbeatWake });
         (0, agent_run_supervisor_1.startAgentRunSupervisor)();
+        require('./review/service').startReviewRecovery();
         // Incremental unfinished-task recovery is independent of historical
         // projector maintenance. Only the latter remains opt-in.
         resumeTaskQueues(startupCollabCtx);

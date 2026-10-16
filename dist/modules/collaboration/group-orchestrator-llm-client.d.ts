@@ -7,6 +7,12 @@ export type LlmChatMessage = {
     content: any;
 };
 export type LlmTokenUsage = {
+    usage_status?: string;
+    usageReportingCoverage?: {
+        input: boolean;
+        output: boolean;
+        total: boolean;
+    };
     cacheUsageReported?: boolean;
     inputTokens: number;
     outputTokens: number;

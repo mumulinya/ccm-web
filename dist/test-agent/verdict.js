@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildTestAgentVerdict = buildTestAgentVerdict;
 const acceptance_summary_1 = require("./acceptance-summary");
 const required_check_summary_1 = require("./required-check-summary");
+const acceptance_failure_routing_1 = require("../agents/acceptance-failure-routing");
 function countStatuses(items) {
     const counts = {};
     for (const item of items)
@@ -31,6 +32,10 @@ function artifactFiles(report) {
     };
 }
 function nextActionsFor(report, failedRequired, unknownRequired) {
+    const feedback = (0, acceptance_failure_routing_1.classifyAcceptanceFailure)({ report, canAccept: report.status === "passed" });
+    const routes = { prepare_environment: "先准备环境并复验受阻检查；不派发代码修复。", await_authorization: "等待针对当前动作的有效授权。", clarify_criteria: "澄清验收标准并通过合同修订流程继续。", supplement_evidence: "补充实际验证证据；不消耗开发返工额度。", reconcile: "对账执行、证据归属及交付记录；不重复开发。", needs_user: "失败原因尚未确认，需要人工核对执行证据。" };
+    if (report.status !== "passed" && routes[feedback.recommended_route])
+        return [routes[feedback.recommended_route]];
     const flakyGroups = report.browserStabilitySummary?.statusCounts?.flaky || 0;
     if (flakyGroups > 0) {
         return [

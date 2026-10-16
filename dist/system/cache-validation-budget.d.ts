@@ -40,9 +40,12 @@ export declare function createCacheValidationRun(input: {
 }): CacheValidationRun;
 export declare function readCacheValidationRun(id: string): CacheValidationRun;
 export declare function updateCacheValidationMetadata(id: string, metadata: any): CacheValidationRun;
+export declare function mutateCacheValidationMetadata(id: string, update: (metadata: any) => any): CacheValidationRun;
 export declare function activeCacheValidationRun(): CacheValidationRun;
 export declare function cacheValidationForSession(sessionId: string): CacheValidationRun;
 export declare function renewCacheValidationRun(id: string): CacheValidationRun;
+/** Atomically own recovery cleanup before examining a dead controller's baseline. */
+export declare function claimCacheValidationRecovery(id: string): CacheValidationRun;
 export declare function resumeCacheValidationRun(id: string): CacheValidationRun;
 export declare function finishCacheValidationRun(id: string, status?: string): CacheValidationRun;
 export declare function cacheValidationBackgroundDeferred(): boolean;

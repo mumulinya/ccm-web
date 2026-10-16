@@ -42,6 +42,8 @@ const side_effect_policy_1 = require("./side-effect-policy");
 const command_live_progress_1 = require("../system/command-live-progress");
 const crypto = __importStar(require("crypto"));
 const user_visible_progress_1 = require("./user-visible-progress");
+const failure_observation_1 = require("./failure-observation");
+const command_preflight_1 = require("./command-preflight");
 function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyContext = null, liveIdentity = null) {
     const startedAt = (0, utils_1.nowIso)();
     const started = Date.now();
@@ -53,6 +55,7 @@ function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyCon
             command,
             cwd: project.workDir,
             status: "blocked",
+            failure_code: "command_side_effect_denied", failure_stage: "safety_gate", failure_kind: "permission",
             exitCode: null,
             startedAt,
             finishedAt,
@@ -72,6 +75,7 @@ function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyCon
             command,
             cwd: project.workDir,
             status: "blocked",
+            failure_code: "command_invocation_invalid", failure_stage: "safety_gate", failure_kind: "criteria_conflict",
             exitCode: null,
             startedAt,
             finishedAt,
@@ -103,7 +107,7 @@ function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyCon
             anchorMessageId: liveIdentity.anchorMessageId,
             description: `验证 ${project.name}`,
         }) : null;
-        const finish = (status, exitCode, signal, error) => {
+        const finish = (status, exitCode, signal, error, failure = {}) => {
             if (settled)
                 return;
             settled = true;
@@ -115,6 +119,7 @@ function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyCon
                 command,
                 cwd: project.workDir,
                 status,
+                ...failure,
                 exitCode,
                 signal,
                 startedAt,
@@ -146,13 +151,13 @@ function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyCon
                     }
                     catch { }
             }, 1500).unref?.();
-            finish("timed_out", null, null, `Command timed out after ${timeoutMs}ms.`);
+            finish("timed_out", null, null, `Command timed out after ${timeoutMs}ms.`, { failure_code: "command_timeout", failure_stage: "timeout", failure_kind: "environment" });
         }, timeoutMs);
         timer.unref?.();
         child.stdout?.on("data", chunk => { stdout = (0, utils_1.appendLimited)(stdout, chunk, maxOutputChars); liveProgress?.observe(chunk); });
         child.stderr?.on("data", chunk => { stderr = (0, utils_1.appendLimited)(stderr, chunk, maxOutputChars); liveProgress?.observe(chunk); });
-        child.on("error", error => finish("failed", null, null, error.message));
-        child.on("close", (code, signal) => finish(code === 0 ? "passed" : "failed", code, signal));
+        child.on("error", (error) => finish("failed", null, null, error.message, (0, failure_observation_1.processStartFailure)(error.code)));
+        child.on("close", (code, signal) => finish(code === 0 ? "passed" : "failed", code, signal, undefined, code === 0 ? {} : { failure_code: "command_nonzero_exit", failure_stage: "operation", failure_kind: "unknown" }));
     });
 }
 async function runVerificationCommands(workOrder) {
@@ -171,7 +176,15 @@ async function runVerificationCommands(workOrder) {
             try {
                 const acceptance = (0, acceptance_contract_adapter_1.prepareContractCommand)(workOrder, project, command);
                 const scopedProject = acceptance.length ? { ...project, workDir: acceptance[0].cwd } : project;
-                const result = await runSingleCommand(scopedProject, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext, liveIdentity ? { ...liveIdentity, commandRunId: trace.toolCallId } : null);
+                const dependency = (0, command_preflight_1.commandDependencyPreflight)(command, scopedProject.workDir);
+                const result = dependency ? { project: project.name, command, cwd: scopedProject.workDir, status: "blocked",
+                    ...dependency, exitCode: null, startedAt: (0, utils_1.nowIso)(), finishedAt: (0, utils_1.nowIso)(), durationMs: 0, stdout: "", stderr: "", output: "" }
+                    : await runSingleCommand(scopedProject, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext, liveIdentity ? { ...liveIdentity, commandRunId: trace.toolCallId } : null);
+                if (result.failure_code === "command_nonzero_exit" && acceptance.some(prepared => prepared.checks.some(check => check.assertion?.kind === "exit_code"))) {
+                    result.failure_code = "command_exit_assertion_failed";
+                    result.failure_stage = "assertion";
+                    result.failure_kind = "implementation";
+                }
                 result.acceptanceEvidenceIds = (0, acceptance_contract_adapter_1.recordContractCommand)(acceptance, result, workOrder.metadata?.acceptanceProducer === "main_agent" ? "main_agent" : "test_agent");
                 trace.finish(result);
                 results.push(result);

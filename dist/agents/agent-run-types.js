@@ -21,7 +21,7 @@ exports.AGENT_RUN_STATUS_VALUES = [
 ];
 function normalizeAgentRunScope(value) {
     const normalized = String(value || "project").trim().toLowerCase();
-    return ['project', 'group', 'global', 'test_agent', 'automation'].includes(normalized)
+    return ['project', 'group', 'global', 'test_agent', 'review_agent', 'automation'].includes(normalized)
         ? normalized
         : "project";
 }

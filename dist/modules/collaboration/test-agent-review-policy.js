@@ -137,9 +137,9 @@ function buildTestAgentIncrementalScope(input) {
         ...(previous?.verdict?.unknownAcceptanceCriteria || []).map((item) => item?.criterion),
     ], 20, 800);
     const verifiedCriteria = coverageCriteria(previous, ["verified"]);
-    const coreRegressionCriteria = verifiedCriteria.slice(0, 1);
+    const coreRegressionCriteria = verifiedCriteria;
     const focusedCommands = resultCommands(previous, ["failed", "blocked", "timed_out"]);
-    const coreRegressionCommands = resultCommands(previous, ["passed"]).slice(0, 1);
+    const coreRegressionCommands = resultCommands(previous, ["passed"]);
     const report = previous?.report || previous?.invocation?.report || {};
     const browserCheckNames = strings((Array.isArray(report.browserResults) ? report.browserResults : [])
         .filter((item) => ["failed", "blocked", "partial", "timed_out"].includes(status(item?.status)))
@@ -154,15 +154,18 @@ function buildTestAgentIncrementalScope(input) {
     ], 30, 300);
     return {
         schema: "ccm-test-agent-incremental-scope-v1",
-        mode: "incremental",
+        // A report alone is not a carry-forward proof. The execution engine may
+        // narrow command execution only after validating the authoritative ledger.
+        mode: "full",
         round: input.round,
-        acceptanceCriteria: scopedCriteria,
+        acceptanceCriteria: allCriteria,
         focusedAcceptanceCriteria,
         coreRegressionCriteria,
-        verificationCommands: scopedCommands,
+        verificationCommands: allCommands,
         focusedCommands,
         coreRegressionCommands,
         browserCheckNames,
+        fallbackReasons: ["等待服务端验证合同、变更影响与上轮证据"],
     };
 }
 function resultsByStatus(report, expected) {
@@ -223,7 +226,7 @@ function runTestAgentReviewPolicySelfTest() {
         pass: policy.tier === "interactive"
             && policy.browserEnabled
             && policy.requireAdversarialProbe === false
-            && scope.mode === "incremental"
+            && scope.mode === "full"
             && scope.acceptanceCriteria.length === 2
             && scope.verificationCommands.join("|") === "npm run check|npm run build"
             && scope.browserCheckNames[0] === "编辑项目名称"

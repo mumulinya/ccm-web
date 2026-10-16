@@ -7,6 +7,7 @@ const crypto_1 = require("crypto");
 const acceptance_user_projection_1 = require("./acceptance-user-projection");
 const acceptance_failure_routing_1 = require("./acceptance-failure-routing");
 const runtime_continuity_projection_1 = require("./runtime-continuity-projection");
+const optimization_projection_1 = require("../test-agent/optimization-projection");
 const labels = { planning: "正在整理执行计划", queued: "等待执行", developing: "开发 Agent 正在执行",
     development_finished: "开发执行结束，等待验收", verifying: "正在核对真实产出与验证证据", acceptance_passed: "验收通过，正在准备交付",
     awaiting_delivery: "等待批准指定交付动作", awaiting_completion_confirmation: "结果已准备，请确认任务完成", completed: "任务已完成",
@@ -95,6 +96,9 @@ function projectUserWorkflow(task, facts = {}) {
         environmentBlocked: state === "environment_blocked", deliveryReconciliationRequired: hard, review_cycle: task.review_cycle || task.review_cycle_id });
     const core = { phase, summary: labels[phase], waiting_on: hard || facts.checkoutBlocked ? "system" : facts.dependencyBlocked ? "dependency" : blockers.length || phase === "awaiting_completion_confirmation" ? "user" : ["developing", "verifying", "acceptance_passed", "development_finished"].includes(phase) ? "agent" : phase === "queued" ? "queue" : "none",
         blockers, primary_action: actions[0] || null, available_actions: actions, acceptance_feedback: route,
+        code_review_summary: require('../review/store').taskReviewProjection(task),
+        verification_summary: task.test_agent_review?.report || task.test_agent_review?.invocation?.report
+            ? (0, optimization_projection_1.testAgentOptimizationProjection)(task.test_agent_review?.report || task.test_agent_review?.invocation?.report) : null,
         compatible_action_kinds: workflowControlKinds(blockers),
         approval_items: facts.approvalItems || [],
         runtime_continuity: facts.runtimeContinuity || { session_saved: !!run?.nativeSessionId, inspection: "unknown", reuse: "unverified", reason: "" } };

@@ -78,6 +78,8 @@ const SELF_SERVICE_MUTATIONS = [
     /^\/api\/navigation\/config(?:\/|$)/,
 ];
 const OPERATOR_MUTATIONS = [
+    /^\/api\/music\/folia\/(?:library|local|login|cover|providers|navidrome|video|generate-theme(?:_openai)?|lyric-proxy|segment-lyrics)(?:\/|$)/,
+    /^\/api\/code-review(?:\/|$)/,
     /^\/api\/automation-session(?:s|-bindings)(?:\/|$)/,
     /^\/api\/(?:tasks|requirements|workbench|missions|agent-qa|auto-dev|conversation-turns)(?:\/|$)/,
     /^\/api\/usability(?:\/|$)/,

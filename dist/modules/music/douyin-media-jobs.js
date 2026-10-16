@@ -33,11 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.desktopMediaJobActivity = desktopMediaJobActivity;
 exports.listDouyinMediaJobs = listDouyinMediaJobs;
 exports.getDouyinTranscription = getDouyinTranscription;
 exports.resolveDouyinJobArtifact = resolveDouyinJobArtifact;
 exports.createDouyinMediaJob = createDouyinMediaJob;
 exports.controlDouyinMediaJob = controlDouyinMediaJob;
+const access_1 = require("./video/access");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -79,10 +81,12 @@ function update(job) { job.updatedAt = new Date().toISOString(); persist(); }
 async function run(job) {
     const controller = new AbortController();
     active.set(job.id, controller);
+    const untrack = (0, access_1.trackVideoAuthorization)(job, () => { controller.abort(); job.status = 'cancelled'; update(job); });
     job.status = 'running';
     job.phase = '抖音 MCP 正在处理（进度未知）';
     update(job);
     try {
+        (0, access_1.requireVideoMediaAccess)(job);
         const args = { ...job.args };
         let result;
         if (job.tool === 'download_video') {
@@ -113,17 +117,20 @@ async function run(job) {
         }
     }
     finally {
+        untrack();
         active.delete(job.id);
         update(job);
         pump();
     }
 }
 function pump() {
+    if (require('../../system/desktop-update-gate').deferDuringDesktopUpdate(pump))
+        return;
     if (active.size)
         return; // Media jobs are serialized to limit platform/ASR load.
     const next = [...records.values()].find(j => j.status === 'queued');
     if (next)
-        void run(next);
+        void (0, access_1.runWithVideoOwner)(next, () => run(next));
 }
 function artifacts(job) {
     const files = new Set();
@@ -150,7 +157,8 @@ function publicJob(job) {
     }
     return { ...job, result: scrub(job.result), artifacts: artifacts(job).map((file, index) => ({ name: path.basename(file), url: `/api/music/platforms/douyin/jobs/${job.id}/files/${index}` })) };
 }
-function listDouyinMediaJobs() { load(); return [...records.values()].reverse().map(publicJob); }
+function desktopMediaJobActivity() { return active.size; }
+function listDouyinMediaJobs() { load(); return [...records.values()].filter(access_1.videoMediaVisible).reverse().map(publicJob); }
 /**
  * Return the latest transcription job for a video without exposing the media
  * job store to the music player.  The lyric endpoint uses this projection to
@@ -162,7 +170,7 @@ function getDouyinTranscription(awemeId) {
     const id = String(awemeId || '').trim();
     if (!/^\d{10,24}$/.test(id))
         return null;
-    const matches = [...records.values()]
+    const matches = [...records.values()].filter(access_1.videoMediaVisible)
         .filter(job => job.tool === 'transcribe_video' && String(job.args?.aweme_id || '') === id)
         .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
     // A failed retry must not hide an earlier successful transcript. Prefer an
@@ -184,6 +192,8 @@ function getDouyinTranscription(awemeId) {
 function resolveDouyinJobArtifact(id, index) {
     load();
     const job = records.get(id);
+    if (job)
+        (0, access_1.requireVideoMediaAccess)(job);
     const file = job && artifacts(job)[index];
     if (!file || !(0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(file))
         throw new Error('文件不存在');
@@ -197,7 +207,7 @@ function createDouyinMediaJob(tool, input, confirmed = true) {
         throw new Error('任务保存目录由 CCM 管理');
     const args = (0, douyin_contract_1.validateDouyinArgs)(tool, input);
     const signature = JSON.stringify([tool, Object.entries(args).sort()]);
-    const existing = [...records.values()].find(job => ['waiting_confirmation', 'queued', 'running', 'done'].includes(job.status) && JSON.stringify([job.tool, Object.entries(job.args).sort()]) === signature);
+    const existing = [...records.values()].filter(access_1.videoMediaVisible).find(job => ['waiting_confirmation', 'queued', 'running', 'done'].includes(job.status) && JSON.stringify([job.tool, Object.entries(job.args).sort()]) === signature);
     if (existing)
         return publicJob(existing);
     if (records.size >= 500)
@@ -205,7 +215,7 @@ function createDouyinMediaJob(tool, input, confirmed = true) {
     if ([...records.values()].filter(j => ['waiting_confirmation', 'queued', 'running'].includes(j.status)).length >= 20)
         throw new Error('等待中的抖音任务过多，请稍后再试');
     const timestamp = new Date().toISOString();
-    const job = { id: `dy_${crypto.randomUUID()}`, tool, args, status: confirmed ? 'queued' : 'waiting_confirmation', phase: confirmed ? '等待处理' : '等待用户确认（下载/转写可能产生费用）', attempt: 1, createdAt: timestamp, updatedAt: timestamp };
+    const job = { ...(0, access_1.videoMediaScope)('douyin'), source: 'douyin', id: `dy_${crypto.randomUUID()}`, tool, args, status: confirmed ? 'queued' : 'waiting_confirmation', phase: confirmed ? '等待处理' : '等待用户确认（下载/转写可能产生费用）', attempt: 1, createdAt: timestamp, updatedAt: timestamp };
     records.set(job.id, job);
     persist();
     setImmediate(pump);
@@ -216,6 +226,7 @@ function controlDouyinMediaJob(id, action) {
     const job = records.get(id);
     if (!job)
         throw new Error('抖音任务不存在');
+    (0, access_1.requireVideoMediaAccess)(job);
     if (action === 'confirm' && job.status === 'waiting_confirmation') {
         job.status = 'queued';
         job.phase = '已确认，等待处理';

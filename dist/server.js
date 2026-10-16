@@ -35,8 +35,11 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const dispatch_receipt_template_1 = require("./agents/dispatch-receipt-template");
+const desktop_update_gate_1 = require("./system/desktop-update-gate");
 const dispatch_profile_1 = require("./agents/dispatch-profile");
 const http = __importStar(require("http"));
+const static_1 = require("./modules/music/folia/static");
+const context_1 = require("./modules/music/folia/context");
 const conversation_attempt_1 = require("./agents/conversation-attempt");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -486,8 +489,15 @@ function handleRequest(req, res) {
         return;
     if (pathname.startsWith("/api/") && !(0, access_policy_1.authorizeResourceQuery)(req, res, parsed))
         return;
+    if ((0, desktop_update_gate_1.handleDesktopLifecycleApi)(pathname, req, res))
+        return;
+    if ((0, desktop_update_gate_1.desktopMutationBlocked)(req, pathname))
+        return (0, utils_1.sendJson)(res, { success: false, code: 'CCM_DESKTOP_UPDATE_PENDING', error: '桌面更新准备中，暂不接受新的修改操作', retryable: true }, 503);
+    (0, desktop_update_gate_1.trackDesktopMutation)(req, res, pathname);
+    if (require('./review/routes').handleCodeReviewApi(pathname, req, res))
+        return;
     if (pathname === "/api/internal/lifecycle/identity" && req.method === "GET") {
-        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+        if (!(0, desktop_update_gate_1.isLifecycleCaller)(req)) {
             (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
             return;
         }
@@ -501,7 +511,7 @@ function handleRequest(req, res) {
         return;
     }
     if (pathname === "/api/internal/lifecycle/ready" && req.method === "GET") {
-        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+        if (!(0, desktop_update_gate_1.isLifecycleCaller)(req)) {
             (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
             return;
         }
@@ -524,7 +534,7 @@ function handleRequest(req, res) {
         return;
     }
     if (pathname === "/api/internal/lifecycle/drain" && req.method === "POST") {
-        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+        if (!(0, desktop_update_gate_1.isLifecycleCaller)(req, true)) {
             (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
             return;
         }
@@ -963,6 +973,8 @@ function handleRequest(req, res) {
         });
         return;
     }
+    if ((0, static_1.handleFoliaStatic)(pathname, req, res, utils_1.PUBLIC_DIR))
+        return;
     // 2. 静态页面与 React SPA 托管
     if (pathname === "/" || pathname === "/index.html") {
         return (0, server_static_1.sendFile)(res, path.join(utils_1.PUBLIC_DIR, "index.html"), req);
@@ -3293,7 +3305,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
     (0, project_git_1.cleanupStaleProjectCloneArtifacts)();
     (0, context_engine_recovery_1.registerContextEngineRecoveryHook)();
     const startupCollabCtx = createCollabCtx();
-    const server = http.createServer(handleRequest);
+    const server = http.createServer((req, res) => (0, context_1.withFoliaRequest)(req, () => handleRequest(req, res)));
     let managedShutdownInProgress = false;
     server.on("error", () => {
         SERVICE_LIFECYCLE_STATE = "failed";
@@ -3550,6 +3562,8 @@ if (require.main === module) {
         await Promise.all([
             (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)().catch(error => console.warn(`[项目运行] 受控退出停止失败：${error?.message || error}`)),
             (0, terminal_1.stopAllTerminalRuns)().catch(error => console.warn(`[终端] 受控退出停止失败：${error?.message || error}`)),
+            require('./modules/music/video/account-login').closeVideoAccounts().then(() => require('./modules/music/video/account-browser').closeVideoBrowsers()).catch(() => { }),
+            require('./modules/music/douyin-mcp-bridge').closeDouyinMcpRuntime().catch(() => { }),
         ]);
         await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 8_000))]);
         (0, process_lifecycle_1.markProcessShutdown)({

@@ -54,7 +54,9 @@ function pathInside(root, relative) {
             throw new Error("workspace_missing");
         cursor = parent;
     }
-    const real = fs.realpathSync(cursor), realRoot = fs.realpathSync(root);
+    // Native resolution handles Windows extended-length paths (\\?\...) without
+    // the JS resolver attempting to lstat a drive-relative "C:" component.
+    const real = fs.realpathSync.native(cursor), realRoot = fs.realpathSync.native(root);
     const rel = path.relative(realRoot, real);
     if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))
         throw new Error("workspace_link_escape");

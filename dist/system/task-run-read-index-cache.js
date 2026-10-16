@@ -25,13 +25,19 @@ async function readCachedTaskRunIndex(file) {
     const entry = entries.get(file);
     if (!entry)
         return null;
-    if (Date.now() - entry.at >= TTL_MS || entry.version !== await taskRunReadSourceVersion(file)) {
+    if (entry.version !== await taskRunReadSourceVersion(file)) {
         entries.delete(file);
         return null;
     }
+    // A fresh source-version check renews this immutable index. Re-parsing an
+    // unchanged archive at a wall-clock boundary adds no freshness guarantee.
+    entry.at = Date.now();
     return entry.value;
 }
 function cacheTaskRunReadIndex(file, result) {
+    for (const [key, entry] of entries)
+        if (Date.now() - entry.at >= TTL_MS)
+            entries.delete(key);
     const runs = result.runs.map((row) => Object.freeze({
         run_id: row.run_id, task_id: row.task_id, status: row.status, updated_at: row.updated_at,
     }));

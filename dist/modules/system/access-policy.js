@@ -187,6 +187,10 @@ function filterAccessibleResources(items, userId, role, type, getId) {
     return items.filter(item => hasResourceAccess(userId, role, type, getId(item), "use"));
 }
 function featureForApi(pathname) {
+    if (/^\/api\/system\/code-review/.test(pathname))
+        return 'platform_settings';
+    if (/^\/api\/code-review/.test(pathname))
+        return 'developer_tools';
     if (/^\/api\/scope-instructions(?:\/|$)/.test(pathname))
         return "resource_workspace";
     if (/^\/api\/delegated-inquiries(?:\/|$)/.test(pathname))

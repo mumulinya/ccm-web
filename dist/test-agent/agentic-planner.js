@@ -47,6 +47,7 @@ const agent_cache_affinity_1 = require("../system/agent-cache-affinity");
 const unified_model_call_config_1 = require("../system/unified-model-call-config");
 const planning_fallback_1 = require("./planning-fallback");
 const user_visible_progress_1 = require("./user-visible-progress");
+const acceptance_failure_routing_1 = require("../agents/acceptance-failure-routing");
 const SOURCE_EXTENSIONS = new Set([
     ".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte", ".py", ".go", ".rs", ".java", ".cs",
     ".html", ".css", ".scss", ".json", ".md", ".yaml", ".yml", ".toml",
@@ -693,6 +694,10 @@ async function planAgenticTestFollowup(input, runtime) {
         || input.workOrder.metadata?.verificationHardening?.planningReceipt?.degraded === true
         || !needsFollowup(input)) {
         return { workOrder: null, metadata: { status: "not_needed" } };
+    }
+    const failure = (0, acceptance_failure_routing_1.classifyAcceptanceFailure)({ report: input });
+    if (["environment", "permission", "criteria_conflict", "reconciliation", "unknown"].includes(failure.failure_kind)) {
+        return { workOrder: null, metadata: { status: "blocked_by_verification_route", failure_kind: failure.failure_kind } };
     }
     try {
         const planner = runtime.agenticFollowupPlanner || callDefaultFollowupPlanner;

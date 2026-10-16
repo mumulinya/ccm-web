@@ -282,6 +282,7 @@ function scopeAuditForTask(task, actualFiles, workspacePath = "") {
 }
 async function runProjectTaskTestAgentReview(input) {
     input.task = require("../../core/db").loadTasks().find((task) => task.id === input.task.id) || input.task;
+    await require('../../review/task-integration').reviewTaskWithRepair({ taskId: input.task.id, project: input.project, root: input.workDir });
     const contractMetadata = require("../../agents/task-acceptance-service").taskAcceptanceVerificationMetadata(input.task.id, input.project);
     const targets = (0, project_test_targets_1.resolveProjectTestTargets)(input.project);
     const taskPlanCommands = explicitTaskVerificationCommands(input.task, input.workItems || []);
@@ -587,7 +588,7 @@ async function runProjectTaskTestAgentReview(input) {
         handoff,
         runner: invocationRun.record,
         reviewPolicy,
-        incrementalScope,
+        incrementalScope: invocation?.report?.metadata?.reverification ? { ...incrementalScope, ...invocation.report.metadata.reverification } : incrementalScope,
         evidenceProjection,
         surfaceAuditBefore: surfaceAudit,
         surfaceAuditAfter,

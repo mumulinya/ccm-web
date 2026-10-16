@@ -60,6 +60,7 @@ const http_concurrency_1 = require("./http-concurrency");
 const http_page_resources_1 = require("./http-page-resources");
 const utils_1 = require("./utils");
 const verdict_1 = require("./verdict");
+const evidence_projection_1 = require("./evidence-projection");
 function fileIntegrity(filePath, options = {}) {
     try {
         const stat = fs.statSync(filePath);
@@ -953,7 +954,7 @@ function buildTestAgentMarkdownReport(report) {
     ];
     return `${lines.join("\n")}\n`;
 }
-function writeTestAgentArtifacts(report) {
+function writeTestAgentArtifacts(report, options = {}) {
     const artifactDir = (0, utils_1.ensureDir)(report.artifactDir);
     const reportJsonPath = path.join(artifactDir, "report.json");
     const reportMarkdownPath = path.join(artifactDir, "report.md");
@@ -999,12 +1000,20 @@ function writeTestAgentArtifacts(report) {
         },
     };
     const verdict = (0, verdict_1.buildTestAgentVerdict)(augmented);
-    fs.writeFileSync(reportJsonPath, `${JSON.stringify(augmented, null, 2)}\n`, "utf-8");
-    fs.writeFileSync(reportMarkdownPath, buildTestAgentMarkdownReport(augmented), "utf-8");
-    fs.writeFileSync(verdictJsonPath, `${JSON.stringify(verdict, null, 2)}\n`, "utf-8");
-    let manifest = buildTestAgentArtifactManifest(augmented, manifestPath);
+    let durable = (0, evidence_projection_1.projectTestAgentReportForPersistence)(augmented, { retainVerificationMetadata: true });
+    fs.writeFileSync(reportJsonPath, `${JSON.stringify(durable, null, 2)}\n`, "utf-8");
+    fs.writeFileSync(reportMarkdownPath, buildTestAgentMarkdownReport(durable), "utf-8");
+    fs.writeFileSync(verdictJsonPath, `${JSON.stringify((0, evidence_projection_1.projectTestAgentReportForPersistence)(verdict), null, 2)}\n`, "utf-8");
+    let manifest = buildTestAgentArtifactManifest(durable, manifestPath);
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
-    manifest = buildTestAgentArtifactManifest(augmented, manifestPath);
+    if (options.beforeSeal) {
+        augmented.metadata = { ...augmented.metadata, ...options.beforeSeal() };
+        durable = (0, evidence_projection_1.projectTestAgentReportForPersistence)(augmented, { retainVerificationMetadata: true });
+        fs.writeFileSync(reportJsonPath, `${JSON.stringify(durable, null, 2)}\n`, "utf-8");
+        fs.writeFileSync(reportMarkdownPath, buildTestAgentMarkdownReport(durable), "utf-8");
+        fs.writeFileSync(verdictJsonPath, `${JSON.stringify((0, verdict_1.buildTestAgentVerdict)(durable), null, 2)}\n`, "utf-8");
+    }
+    manifest = buildTestAgentArtifactManifest(durable, manifestPath);
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
     return augmented;
 }

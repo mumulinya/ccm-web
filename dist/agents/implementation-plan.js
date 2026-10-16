@@ -164,6 +164,7 @@ function verification(value, expectedResults) {
         ...(row?.assertion || row?.command ? { ...(row.assertion ? { assertion: row.assertion } : {}), kind: row.kind || (row.command ? "command" : ""),
             cwd: row.cwd || ".", projectId: row.projectId || row.project, sourceEvidenceIds: list(row.sourceEvidenceIds, 30, 160),
             acceptanceCriterionIds: list(row.acceptanceCriterionIds, 30, 160), independent: row.independent === true } : {}),
+        ...(typeof row?.coreRegression === "boolean" ? { coreRegression: row.coreRegression } : {}),
         ...(text(row?.command, 500) ? { command: text(row.command, 500) } : {}),
         expected: text(row?.expected || row?.result || row?.description, 800),
         acceptanceCriteria: list(row?.acceptanceCriteria || row?.acceptance_criteria || row?.acceptance, 12, 800),

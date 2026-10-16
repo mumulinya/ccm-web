@@ -13,6 +13,9 @@ export type AcceptanceCheck = {
         pointer?: string;
     };
     independent: boolean;
+    /** Frozen impact bindings. Absence requires full verification. */
+    sourcePaths?: string[];
+    coreRegression?: boolean;
 };
 export type AcceptanceCriterion = {
     id: string;

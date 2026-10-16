@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runTestAgent = runTestAgent;
 const browser_verifier_1 = require("./browser-verifier");
-const registry_1 = require("./browser/registry");
 const tool_executor_1 = require("./browser/tool-executor");
 const resource_lifecycle_1 = require("./browser/resource-lifecycle");
 const authentication_summary_1 = require("./browser/authentication-summary");
@@ -26,25 +25,17 @@ const isolation_1 = require("./isolation");
 const readonly_capabilities_1 = require("./readonly-capabilities");
 const isolation_execution_gate_1 = require("./isolation-execution-gate");
 const db_1 = require("../core/db");
-function mergeProviderUsage(rows) {
-    const total = rows.filter(row => row && typeof row === "object").reduce((sum, row) => {
-        sum.inputTokens += Number(row.inputTokens || row.input_tokens || 0);
-        sum.outputTokens += Number(row.outputTokens || row.output_tokens || 0);
-        sum.directInputTokens += Number(row.directInputTokens || row.direct_input_tokens || 0);
-        sum.cacheCreationInputTokens += Number(row.cacheCreationInputTokens || row.cache_creation_input_tokens || 0);
-        sum.cacheReadInputTokens += Number(row.cacheReadInputTokens || row.cache_read_input_tokens || 0);
-        sum.providerTotalTokens += Number(row.providerTotalTokens || row.provider_total_tokens || row.totalTokens || row.total_tokens || 0);
-        sum.totalCostUsd += Number(row.totalCostUsd || row.total_cost_usd || row.costUsd || row.cost_usd || 0);
-        return sum;
-    }, { inputTokens: 0, outputTokens: 0, directInputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, providerTotalTokens: 0, totalCostUsd: 0 });
-    const reported = total.inputTokens > 0 || total.outputTokens > 0 || total.providerTotalTokens > 0 || total.totalCostUsd > 0;
-    return reported
-        ? { ...total, totalTokens: total.providerTotalTokens || total.inputTokens + total.outputTokens, reported: true, source: "provider_reported" }
-        : { source: "local_no_model", reported: false };
-}
+const model_call_observation_1 = require("../system/model-call-observation");
+const verification_telemetry_1 = require("./verification-telemetry");
+const environment_preflight_1 = require("./environment-preflight");
+const reverification_1 = require("./reverification");
+const acceptance_failure_routing_1 = require("../agents/acceptance-failure-routing");
 async function runTestAgent(input, options = {}) {
+    return (0, model_call_observation_1.observeModelCalls)(rows => runObservedTestAgent(input, options, rows));
+}
+async function runObservedTestAgent(input, options, modelCalls) {
+    const timing = (0, verification_telemetry_1.createVerificationTiming)();
     const startedAt = (0, utils_1.nowIso)();
-    const providerUsages = [];
     const invocationAllowedWorkDirs = (0, utils_1.normalizeTestAgentAllowedWorkDirs)(options.allowedWorkDirs || (0, utils_1.configuredTestAgentAllowedWorkDirs)());
     const invocationOptions = {
         ...options,
@@ -55,64 +46,70 @@ async function runTestAgent(input, options = {}) {
         metadata: { ...(input.metadata || {}), userVisibleProgressContext: options.userVisibleProgressContext },
     } : input;
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(progressBoundInput, invocationOptions);
+    const initialPreflight = await timing.measure("preflight_planning", () => (0, environment_preflight_1.preflightVerificationEnvironment)(normalized.workOrder, invocationOptions, "before_planning"));
+    normalized.workOrder.metadata = { ...normalized.workOrder.metadata, environmentPreflight: [initialPreflight] };
+    if (initialPreflight.status === "blocked")
+        normalized.issues.push({ severity: "error", code: "test_agent_environment_preflight_blocked", message: "验收环境预检未通过；未启动模型规划或验证操作" });
     let isolatedSession = null;
     let planningInput = normalized.workOrder;
     let planningRuntimeOptions = { ...invocationOptions };
-    try {
-        const hardeningPolicy = (0, planning_fallback_1.resolveTestAgentHardeningPolicy)(normalized.workOrder);
-        isolatedSession = await (0, isolation_1.prepareTestAgentIsolation)(normalized.workOrder, {
-            riskLevel: hardeningPolicy.riskTier,
-            mode: hardeningPolicy.isolationMode,
-            executionId: normalized.workOrder.id,
-        });
-        planningInput = isolatedSession.workOrder;
-        const isolatedExecutionWorkDirs = isolatedSession.receipt.status === "ready"
-            ? isolatedSession.receipt.projectBindings.map(binding => binding.executionWorkDir)
-            : [];
-        planningRuntimeOptions = {
-            ...planningRuntimeOptions,
-            allowedWorkDirs: (0, utils_1.normalizeTestAgentAllowedWorkDirs)([
-                ...invocationAllowedWorkDirs,
-                ...isolatedExecutionWorkDirs,
-            ]),
-        };
-        const selectedSkillNames = Array.isArray(planningInput.metadata?.selectedSkills)
-            ? planningInput.metadata.selectedSkills
-            : Array.isArray(planningInput.metadata?.workflowDecision?.selectedSkills)
-                ? planningInput.metadata.workflowDecision.selectedSkills
+    if (initialPreflight.status === "passed")
+        try {
+            const hardeningPolicy = (0, planning_fallback_1.resolveTestAgentHardeningPolicy)(normalized.workOrder);
+            isolatedSession = await timing.measure("isolation_prepare", () => (0, isolation_1.prepareTestAgentIsolation)(normalized.workOrder, {
+                riskLevel: hardeningPolicy.riskTier,
+                mode: hardeningPolicy.isolationMode,
+                executionId: normalized.workOrder.id,
+            }));
+            planningInput = isolatedSession.workOrder;
+            const isolatedExecutionWorkDirs = isolatedSession.receipt.status === "ready"
+                ? isolatedSession.receipt.projectBindings.map(binding => binding.executionWorkDir)
                 : [];
-        const readonlyCapabilities = (0, readonly_capabilities_1.buildTestAgentReadonlyCapabilityManifest)({
-            targetName: planningInput.projects[0]?.name || "test-agent",
-            workDir: planningInput.projects[0]?.workDir || "",
-            taskText: [planningInput.originalUserGoal, ...(planningInput.acceptanceCriteria || [])].join("\n"),
-            selectedSkillNames,
-        });
-        planningInput.metadata = {
-            ...(planningInput.metadata || {}),
-            verificationHardening: {
-                ...(planningInput.metadata?.verificationHardening || {}),
-                readonlyCapabilityManifest: readonlyCapabilities.manifest,
-                readonlyCapabilityRejected: {
-                    mcp: readonlyCapabilities.rejectedMcp,
-                    skill: readonlyCapabilities.rejectedSkills,
+            planningRuntimeOptions = {
+                ...planningRuntimeOptions,
+                allowedWorkDirs: (0, utils_1.normalizeTestAgentAllowedWorkDirs)([
+                    ...invocationAllowedWorkDirs,
+                    ...isolatedExecutionWorkDirs,
+                ]),
+            };
+            const selectedSkillNames = Array.isArray(planningInput.metadata?.selectedSkills)
+                ? planningInput.metadata.selectedSkills
+                : Array.isArray(planningInput.metadata?.workflowDecision?.selectedSkills)
+                    ? planningInput.metadata.workflowDecision.selectedSkills
+                    : [];
+            const readonlyCapabilities = (0, readonly_capabilities_1.buildTestAgentReadonlyCapabilityManifest)({
+                targetName: planningInput.projects[0]?.name || "test-agent",
+                workDir: planningInput.projects[0]?.workDir || "",
+                taskText: [planningInput.originalUserGoal, ...(planningInput.acceptanceCriteria || [])].join("\n"),
+                selectedSkillNames,
+            });
+            planningInput.metadata = {
+                ...(planningInput.metadata || {}),
+                verificationHardening: {
+                    ...(planningInput.metadata?.verificationHardening || {}),
+                    readonlyCapabilityManifest: readonlyCapabilities.manifest,
+                    readonlyCapabilityRejected: {
+                        mcp: readonlyCapabilities.rejectedMcp,
+                        skill: readonlyCapabilities.rejectedSkills,
+                    },
                 },
-            },
-        };
-        planningRuntimeOptions = {
-            ...planningRuntimeOptions,
-            readonlyCapabilityPrompt: readonlyCapabilities.prompt,
-            readonlyCapabilityManifest: readonlyCapabilities.manifest,
-        };
-    }
-    catch (error) {
-        normalized.issues.push({
-            severity: "error",
-            code: "test_agent_isolation_prepare_failed",
-            message: `TestAgent isolation preparation failed: ${String(error?.message || error).slice(0, 500)}`,
-        });
-    }
-    const agentic = await (0, agentic_planner_1.applyAgenticTestPlanning)(planningInput, planningRuntimeOptions, normalized.issues);
-    providerUsages.push(agentic.workOrder.metadata?.semanticDecisionReceipt?.usage);
+            };
+            planningRuntimeOptions = {
+                ...planningRuntimeOptions,
+                readonlyCapabilityPrompt: readonlyCapabilities.prompt,
+                readonlyCapabilityManifest: readonlyCapabilities.manifest,
+            };
+        }
+        catch (error) {
+            normalized.issues.push({
+                severity: "error",
+                code: "test_agent_isolation_prepare_failed",
+                message: `TestAgent isolation preparation failed: ${String(error?.message || error).slice(0, 500)}`,
+            });
+        }
+    const agentic = initialPreflight.status === "blocked"
+        ? { workOrder: planningInput, issues: [] }
+        : await timing.measure("planning", () => (0, agentic_planner_1.applyAgenticTestPlanning)(planningInput, planningRuntimeOptions, normalized.issues));
     const planned = (0, command_planner_1.planVerificationCommands)(agentic.workOrder, [...normalized.issues, ...agentic.issues]);
     const isolationGate = (0, isolation_execution_gate_1.applyTestAgentIsolationExecutionGate)(planned.workOrder, isolatedSession);
     const workOrder = isolationGate.workOrder;
@@ -175,7 +172,7 @@ async function runTestAgent(input, options = {}) {
         })),
     });
     const executionWorkOrder = withRuntimeEnvironments(workOrder);
-    const semanticPlanningBlocked = (0, planning_fallback_1.testAgentPlanningIsBlocked)(workOrder);
+    const semanticPlanningBlocked = initialPreflight.status === "blocked" || (0, planning_fallback_1.testAgentPlanningIsBlocked)(workOrder);
     let commandResults = [];
     let devServers = [];
     let httpResults = [];
@@ -191,30 +188,39 @@ async function runTestAgent(input, options = {}) {
             blocked.code = "CCM_TEST_AGENT_SEMANTIC_PLANNING_BLOCKED";
             throw blocked;
         }
-        browserProviderPreflight = await (0, registry_1.collectBrowserProviderPreflight)(executionWorkOrder, runtimeOptions);
+        const executionPreflight = await timing.measure("preflight_execution", () => (0, environment_preflight_1.preflightVerificationEnvironment)(executionWorkOrder, runtimeOptions, "before_execution"));
+        workOrder.metadata.environmentPreflight = [initialPreflight, executionPreflight];
+        browserProviderPreflight = executionPreflight.providers;
+        if (executionPreflight.status === "blocked") {
+            issues.push({ severity: "error", code: "test_agent_execution_preflight_blocked", message: "规划后环境预检未通过；未执行验证操作" });
+            const blocked = new Error("执行前环境预检阻塞");
+            blocked.code = "CCM_TEST_AGENT_SEMANTIC_PLANNING_BLOCKED";
+            throw blocked;
+        }
         workOrder.metadata = {
             ...workOrder.metadata,
             browserProviderPreflight,
         };
-        commandResults = await (0, command_runner_1.runVerificationCommands)(executionWorkOrder);
-        devServers = await (0, dev_server_1.startDevServersForBrowserChecks)(executionWorkOrder);
-        httpResults = await (0, http_verifier_1.runHttpVerification)(executionWorkOrder);
-        browserResults = await (0, browser_verifier_1.runBrowserVerification)(executionWorkOrder, runtimeOptions);
-        const followup = await (0, agentic_planner_1.planAgenticTestFollowup)({ workOrder, commandResults, httpResults, browserResults }, runtimeOptions);
-        providerUsages.push(followup.metadata?.providerUsage);
+        const reverification = (0, reverification_1.prepareTestAgentReverification)(workOrder, executionWorkOrder, runtimeOptions);
+        workOrder.metadata.reverification = reverification.summary;
+        commandResults = await timing.measure("commands", () => (0, command_runner_1.runVerificationCommands)(reverification.workOrder));
+        devServers = await timing.measure("service_ready", () => (0, dev_server_1.startDevServersForBrowserChecks)(executionWorkOrder));
+        httpResults = await timing.measure("http", () => (0, http_verifier_1.runHttpVerification)(executionWorkOrder));
+        browserResults = await timing.measure("browser", () => (0, browser_verifier_1.runBrowserVerification)(executionWorkOrder, runtimeOptions));
+        const followup = await timing.measure("supplemental_planning", () => (0, model_call_observation_1.inModelCallStage)("supplemental_planning", () => (0, agentic_planner_1.planAgenticTestFollowup)({ workOrder, commandResults, httpResults, browserResults }, runtimeOptions)));
         workOrder.metadata = { ...workOrder.metadata, agenticFollowup: followup.metadata };
         if (followup.issue)
             issues.push(followup.issue);
         if (followup.workOrder) {
             const followupWorkOrder = withRuntimeEnvironments(followup.workOrder);
-            commandResults.push(...await (0, command_runner_1.runVerificationCommands)(followupWorkOrder));
+            commandResults.push(...await timing.measure("supplemental_verification", () => (0, command_runner_1.runVerificationCommands)(followupWorkOrder)));
             if ((0, shared_1.wantsBrowser)(followupWorkOrder)) {
-                const followupBrowserResults = await (0, browser_verifier_1.runBrowserVerification)(followupWorkOrder, {
+                const followupBrowserResults = await timing.measure("supplemental_verification", () => (0, browser_verifier_1.runBrowserVerification)(followupWorkOrder, {
                     ...runtimeOptions,
                     // Follow-up checks are focused diagnostics. They must not mutate the
                     // frozen primary browser execution plan or its lifecycle coverage.
                     browserResourceLifecycle: undefined,
-                });
+                }));
                 const diagnosticResults = followupBrowserResults.map(result => {
                     const { execution: _execution, ...diagnostic } = result;
                     return {
@@ -260,7 +266,7 @@ async function runTestAgent(input, options = {}) {
         }
         if (isolatedSession) {
             try {
-                const cleanupReceipt = await isolatedSession.cleanup();
+                const cleanupReceipt = await timing.measure("cleanup", () => isolatedSession.cleanup());
                 const hardening = workOrder.metadata?.verificationHardening && typeof workOrder.metadata.verificationHardening === "object"
                     ? workOrder.metadata.verificationHardening
                     : {};
@@ -328,7 +334,27 @@ async function runTestAgent(input, options = {}) {
         browserToolCalls,
         browserResourceLifecycleEvents: browserResourceLifecycle?.getEvents() || [],
     });
-    const written = (0, artifacts_1.writeTestAgentArtifacts)(report);
+    const observations = [...modelCalls.values()];
+    // Injected planners may use an unobserved external boundary. Never infer zero.
+    if (initialPreflight.status !== "blocked" && workOrder.options.agenticPlanning && !observations.length && (options.agenticPlanner || options.agenticFollowupPlanner))
+        observations.push({ stage: "planning", model_call_status: "unknown" });
+    const usage = (0, verification_telemetry_1.summarizeVerificationModelCalls)(observations);
+    report.metadata = { ...report.metadata, model_call_status: usage.model_call_status, usage_status: usage.usage_status, model_usage: usage, timing: timing.snapshot() };
+    const feedback = (0, acceptance_failure_routing_1.classifyAcceptanceFailure)({ report, canAccept: report.status === "passed" });
+    report.metadata.acceptanceFeedback = feedback;
+    if (report.status !== "passed")
+        report.recommendation = feedback.can_auto_rework ? "rework" : "need_human";
+    const finishEvidenceWrite = timing.start("evidence_write");
+    let written;
+    try {
+        written = (0, artifacts_1.writeTestAgentArtifacts)(report, { beforeSeal: () => {
+                finishEvidenceWrite();
+                return { timing: { ...timing.snapshot(), measurement_endpoint: "before_report_seal" } };
+            } });
+    }
+    finally {
+        finishEvidenceWrite();
+    }
     (0, artifact_retention_1.pruneTestAgentArtifacts)({ excludeDirs: [written.artifactDir] });
     if (options.recordMetrics !== false) {
         const project = written.metadata?.project || workOrder.projects[0]?.name || "test-agent";
@@ -336,22 +362,25 @@ async function runTestAgent(input, options = {}) {
         (0, db_1.recordMetric)("test-agent", {
             status: written.status === "passed" ? "completed" : written.status === "blocked" ? "blocked" : "failed",
             success: written.status === "passed",
-            durationMs: written.durationMs,
+            durationMs: timing.snapshot().totalMs,
             scopeType: groupId ? "group" : "project",
             scopeId: groupId || project,
             groupId,
             projectId: project,
             role: "test_agent",
             source: "native-test-agent",
-            runtime: providerUsages.some(Boolean) ? "native-test-agent+model-planner" : "native-test-agent",
+            runtime: usage.model_call_status === "called" ? "native-test-agent+model-planner" : "native-test-agent",
             taskId: written.taskId || workOrder.taskId,
             executionId: written.id || workOrder.id,
             usageAnchorId: `test-agent:${written.id || workOrder.id}`,
-            usage: mergeProviderUsage(providerUsages),
-            timing: { totalMs: written.durationMs, verificationMs: written.durationMs },
+            usage,
+            timing: timing.snapshot(),
             error: written.status === "passed" ? "" : written.summary,
         });
     }
+    // The immutable artifact records its own sealing boundary. The live return
+    // and runner persistence additionally record the completed invocation.
+    written.metadata = { ...written.metadata, timing: { ...timing.snapshot(), measurement_endpoint: "return" } };
     return written;
 }
 //# sourceMappingURL=agent.js.map

@@ -51,6 +51,8 @@ exports.readScopeInstructionDetail = readScopeInstructionDetail;
 exports.supplementScopeInstruction = supplementScopeInstruction;
 exports.regenerateScopeInstruction = regenerateScopeInstruction;
 exports.runScopeInstructionGeneration = runScopeInstructionGeneration;
+exports.readScopeInstructionGenerationValidationBaseline = readScopeInstructionGenerationValidationBaseline;
+exports.queueScopeInstructionValidationRefresh = queueScopeInstructionValidationRefresh;
 exports.initializeScopeInstructions = initializeScopeInstructions;
 exports.scopeInstructionStoreRootForTests = scopeInstructionStoreRootForTests;
 exports.stopScopeInstructionValidationTasks = stopScopeInstructionValidationTasks;
@@ -986,6 +988,8 @@ async function runScopeInstructionGeneration(taskId) {
     }, taskId);
     if (result.outcome === 'superseded') {
         const evidence = readStore().generationEvidence?.find(item => item.taskId === result.taskId);
+        if (evidence?.validationId && require('./cache-validation-budget').readCacheValidationRun(evidence.validationId)?.metadata.baselinePolicy === 'stable-v1')
+            return result;
         if (evidence?.kind === 'project')
             ensureProjectScopeInstruction(evidence.scopeId);
         else if (evidence?.kind === 'group') {
@@ -995,6 +999,31 @@ async function runScopeInstructionGeneration(taskId) {
         }
     }
     return result;
+}
+/** Read-only summary at the formal generation seam; no source body is exposed. */
+function readScopeInstructionGenerationValidationBaseline(taskId) {
+    const job = readStore().jobs.find(item => item.key === taskId);
+    if (!job)
+        throw new Error('VALIDATION_TASK_NOT_FOUND');
+    const prepared = job.kind === 'project' ? prepareProjectGeneration(job.projectId) : prepareGroupGeneration(job.groupId);
+    return require('./scope-navigation-validation-baseline').captureNavigationPhaseBaseline(prepared, (0, group_orchestrator_config_1.loadOrchestratorConfig)());
+}
+/** Controlled automatic check, limited to the caller's isolated validation store. */
+function queueScopeInstructionValidationRefresh(documentId) {
+    const binding = require('./cache-validation-budget').currentCacheValidationBinding();
+    const run = binding && require('./cache-validation-budget').readCacheValidationRun(binding.validationId);
+    if (!run || path.resolve(run.metadata.generationStoreFile || '') !== path.resolve(STORE_FILE))
+        throw new Error('VALIDATION_STORE_IDENTITY_REQUIRED');
+    return (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
+        const store = readStore();
+        const row = store.documents.find(item => item.active && item.documentId === documentId);
+        if (!row)
+            throw new Error('VALIDATION_DOCUMENT_NOT_FOUND');
+        row.status = 'stale';
+        enqueue(store, { kind: row.kind === 'project' ? 'project' : 'group', projectId: row.projectId, groupId: row.groupId, inputChecksum: row.inputChecksum });
+        saveStore(store);
+        return publicEntry(row, store);
+    });
 }
 async function runWorker() {
     if (require('./cache-validation-budget').cacheValidationBackgroundDeferred()) {

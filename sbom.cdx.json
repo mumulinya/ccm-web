@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:952a891c-aa42-40a8-8d10-1f9b209b4b7a",
+  "serialNumber": "urn:uuid:576ad435-eabb-45a6-a871-ba1403ef5597",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-08-31T11:07:25.175Z",
+    "timestamp": "2026-10-16T03:42:45.927Z",
     "component": {
       "type": "application",
       "name": "@mumulinya167/cc-web",
-      "version": "2.0.14"
+      "version": "5.0.0"
     }
   },
   "components": [
@@ -45,7 +45,7 @@
     {
       "type": "library",
       "name": "better-sqlite3",
-      "version": "11.10.0",
+      "version": "13.0.3",
       "scope": "required"
     },
     {
@@ -122,8 +122,50 @@
     },
     {
       "type": "library",
+      "name": "secretlint",
+      "version": "10.2.2",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "@secretlint/secretlint-rule-preset-recommend",
+      "version": "10.2.2",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "@neteasecloudmusicapienhanced/api",
+      "version": "4.40.1",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "@yakult-green-tea/qq-music-api",
+      "version": "3.1.4",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "kugoumusicapi",
+      "version": "https://github.com/MakcRe/KuGouMusicApi/archive/refs/tags/v1.6.0.tar.gz",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "qrcode",
+      "version": "^1.5.4",
+      "scope": "required"
+    },
+    {
+      "type": "library",
       "name": "node-pty",
       "version": "1.2.0-beta.14",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "name": "@alibaba-group/open-code-review",
+      "version": "1.12.13",
       "scope": "optional"
     }
   ]

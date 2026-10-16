@@ -906,6 +906,7 @@ function requestGroupSessionAgentCancellation(input = {}) {
 }
 async function runManagedCommand(input) {
     const taskId = String(input.taskId || input.executionId || "standalone");
+    await require('../system/desktop-update-gate').waitForDesktopExecution(taskId);
     const executionId = String(input.executionId || input.taskId || "");
     const leaseOwnerId = String(input.leaseOwnerId || `managed:${process.pid}`);
     let persistedLeaseId = "";

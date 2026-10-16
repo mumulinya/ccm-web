@@ -33,14 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.desktopMediaJobActivity = desktopMediaJobActivity;
 exports.listMusicVideoJobs = listMusicVideoJobs;
 exports.getMusicVideoJob = getMusicVideoJob;
 exports.findCachedMusicVideo = findCachedMusicVideo;
+exports.registerDouyinVideoCache = registerDouyinVideoCache;
 exports.registerStreamVideoCache = registerStreamVideoCache;
 exports.prepareExistingVideoJob = prepareExistingVideoJob;
 exports.createMusicVideoJob = createMusicVideoJob;
 exports.controlMusicVideoJob = controlMusicVideoJob;
 exports.resolveMusicVideoFile = resolveMusicVideoFile;
+const access_1 = require("./video/access");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -125,7 +128,9 @@ async function prepare(job) {
     job.progress = null;
     update(job);
     let partial = '';
+    const untrack = (0, access_1.trackVideoAuthorization)(job, () => { controller.abort(); job.status = 'cancelled'; job.phase = '平台账号已退出'; update(job); });
     try {
+        (0, access_1.requireVideoMediaAccess)(job);
         partial = path.join(directory(job.id), 'partial.mp4');
         fs.mkdirSync(directory(job.id), { recursive: true });
         if (ready(job)) {
@@ -133,7 +138,7 @@ async function prepare(job) {
             update(job);
             const localFile = job.source === 'douyin' ? (0, douyin_media_coordinator_1.douyinVideoFile)(job.sourceId) : output(job);
             job.durationSeconds = (await (0, music_catalog_1.probeMusicFile)(localFile)).durationSeconds;
-            if (job.source !== 'netease')
+            if (job.source !== 'netease' && !job.requiresAuth)
                 job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, localFile, controller.signal);
             if (!controller.signal.aborted) {
                 job.status = 'done';
@@ -141,6 +146,20 @@ async function prepare(job) {
                 job.phase = '视频与音乐库已就绪';
                 job.error = undefined;
             }
+            return;
+        }
+        if (['bilibili', 'douyin'].includes(job.source)) {
+            // 播放与显式下载共享生产任务，下载持有自己的会话引用。
+            const { produceVideoForDownload } = await Promise.resolve().then(() => __importStar(require('./video/stream-download')));
+            const result = await produceVideoForDownload(job, controller.signal, progress => { job.progress = progress; update(job); });
+            if (controller.signal.aborted)
+                return;
+            job.durationSeconds = result.durationSeconds;
+            job.linkedTrack = result.linkedTrack;
+            job.status = 'done';
+            job.phase = '视频已缓存';
+            job.progress = 100;
+            job.error = undefined;
             return;
         }
         let args, duration = 0;
@@ -154,7 +173,8 @@ async function prepare(job) {
                 job.durationSeconds = asset.durationSeconds;
                 job.phase = '正在建立音频与曲库关联';
                 update(job);
-                job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, asset.filePath, controller.signal);
+                if (!job.requiresAuth)
+                    job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, asset.filePath, controller.signal);
                 if (!controller.signal.aborted) {
                     job.status = 'done';
                     job.progress = 100;
@@ -224,7 +244,7 @@ async function prepare(job) {
         job.durationSeconds = (await (0, music_catalog_1.probeMusicFile)(output(job))).durationSeconds;
         job.phase = '正在建立音频与曲库关联';
         update(job);
-        if (job.source !== 'netease')
+        if (job.source !== 'netease' && !job.requiresAuth)
             job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, output(job), controller.signal);
         if (controller.signal.aborted)
             return;
@@ -250,24 +270,46 @@ async function prepare(job) {
                 fs.unlinkSync(partial);
         }
         catch { }
+        untrack();
         active.delete(job.id);
         update(job);
         pump();
     }
 }
-function pump() { if (!active.size) {
+function pump() { if (require('../../system/desktop-update-gate').deferDuringDesktopUpdate(pump))
+    return; if (!active.size) {
     const next = [...jobs.values()].find(j => j.status === 'queued');
     if (next)
-        void prepare(next);
+        void (0, access_1.runWithVideoOwner)(next, () => prepare(next));
 } }
-function listMusicVideoJobs() { load(); return [...jobs.values()].reverse().map(publicJob); }
+function desktopMediaJobActivity() { return active.size; }
+function listMusicVideoJobs() { load(); return [...jobs.values()].filter(access_1.videoMediaVisible).reverse().map(publicJob); }
 function getMusicVideoJob(id) { load(); const job = jobs.get(id); if (!job)
-    throw new Error('视频任务不存在'); return publicJob(job); }
+    throw new Error('视频任务不存在'); (0, access_1.requireVideoMediaAccess)(job); return publicJob(job); }
 /** Identity lookup is shared by search, library playback and HLS completion. No download. */
 function findCachedMusicVideo(source, sourceId) {
     load();
-    const job = [...jobs.values()].find(j => j.source === source && j.sourceId === sourceId && j.status === 'done' && ready(j));
+    const job = [...jobs.values()].find(j => (0, access_1.videoMediaVisible)(j) && j.source === source && j.sourceId === sourceId && j.status === 'done' && ready(j));
     return job ? publicJob(job) : null;
+}
+/** 已核验的抖音 MP4 直接进入视频索引，不再复制或二次转码成 HLS。 */
+function registerDouyinVideoCache(session) {
+    load();
+    if (!/^ms_[a-f\d-]{36}$/.test(session.sessionId))
+        throw new Error('无效视频会话');
+    const cached = findCachedMusicVideo('douyin', session.sourceId);
+    if (cached)
+        return cached;
+    const asset = (0, douyin_media_coordinator_1.getDouyinVideoAsset)(session.sourceId);
+    if (!asset)
+        throw new Error('抖音视频缓存尚未就绪');
+    const timestamp = new Date().toISOString();
+    const job = { ...(0, access_1.videoMediaScope)('douyin'), id: `mv_${session.sessionId.slice(3)}`, source: 'douyin', sourceId: session.sourceId,
+        title: session.title || session.sourceId, artist: session.artist, durationSeconds: asset.durationSeconds || session.durationSeconds,
+        status: 'done', phase: '原视频已就绪', progress: 100, createdAt: timestamp, updatedAt: timestamp };
+    jobs.set(job.id, job);
+    persist();
+    return publicJob(job);
 }
 /** Adopt a completed stream output into the existing durable video index, without transcoding. */
 function registerStreamVideoCache(session) {
@@ -277,14 +319,15 @@ function registerStreamVideoCache(session) {
     const existing = findCachedMusicVideo(session.source, session.sourceId);
     if (existing)
         return existing;
-    const id = `mv_${session.sessionId.slice(3)}`;
+    const pending = [...jobs.values()].find(job => (0, access_1.videoMediaVisible)(job) && job.source === session.source && job.sourceId === session.sourceId && ['queued', 'running'].includes(job.status));
+    const id = pending?.id || `mv_${session.sessionId.slice(3)}`;
     const targetDir = directory(id);
     const stagingDir = path.join(root, `stream_${session.sessionId}`);
     for (const p of [stagingDir, path.join(stagingDir, 'video.mp4')]) {
         if (fs.existsSync(p) && fs.lstatSync(p).isSymbolicLink())
             throw new Error('视频缓存不可使用符号链接');
     }
-    const job = { id, source: session.source, sourceId: session.sourceId,
+    const job = { ...(0, access_1.videoMediaScope)(session.source), id, source: session.source, sourceId: session.sourceId,
         title: session.title || session.sourceId, artist: session.artist, linkedTrack: session.linkedTrack,
         durationSeconds: session.durationSeconds, status: 'done', phase: '本地视频已缓存', progress: 100,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
@@ -296,7 +339,10 @@ function registerStreamVideoCache(session) {
         fs.mkdirSync(targetDir, { recursive: true });
         fs.renameSync(staged, target);
     }
-    jobs.set(id, job);
+    if (pending)
+        Object.assign(pending, job);
+    else
+        jobs.set(id, job);
     persist();
     return publicJob(job);
 }
@@ -305,9 +351,10 @@ function prepareExistingVideoJob(id) {
     const job = jobs.get(id);
     if (!job)
         throw new Error('视频任务不存在');
+    (0, access_1.requireVideoMediaAccess)(job);
     if (['failed', 'cancelled'].includes(job.status))
         return controlMusicVideoJob(id, 'retry');
-    if (job.status === 'done' && (!ready(job) || job.source !== 'netease' && (!job.linkedTrack?.trackId || !(0, music_catalog_1.findMusicCatalogTrackById)(job.linkedTrack.trackId)))) {
+    if (job.status === 'done' && (!ready(job) || !job.requiresAuth && job.source !== 'netease' && (!job.linkedTrack?.trackId || !(0, music_catalog_1.findMusicCatalogTrackById)(job.linkedTrack.trackId)))) {
         job.status = 'queued';
         job.phase = '正在准备缓存与曲库关联';
         update(job);
@@ -333,9 +380,9 @@ function createMusicVideoJob(source, token, trackId) {
         payload.sourceId = (0, netease_mv_1.neteaseVideoIdentity)(payload.sourceId);
     if (!(source === 'douyin' ? /^\d{10,24}$/ : source === 'netease' ? /^mv:\d{1,20}$/ : /^BV[\da-zA-Z]{10}$/).test(payload.sourceId))
         throw new Error('视频 ID 无效');
-    const old = [...jobs.values()].find(j => j.source === source && j.sourceId === payload.sourceId && (['queued', 'running'].includes(j.status) || j.status === 'done' && ready(j)));
+    const old = [...jobs.values()].find(j => (0, access_1.videoMediaVisible)(j) && j.source === source && j.sourceId === payload.sourceId && (['queued', 'running'].includes(j.status) || j.status === 'done' && ready(j)));
     if (old) {
-        if (old.source !== 'netease' && old.status === 'done' && (!old.linkedTrack?.filename || !(0, music_catalog_1.findMusicCatalogTrackById)(old.linkedTrack.trackId))) {
+        if (!old.requiresAuth && old.source !== 'netease' && old.status === 'done' && (!old.linkedTrack?.filename || !(0, music_catalog_1.findMusicCatalogTrackById)(old.linkedTrack.trackId))) {
             old.status = 'queued';
             old.phase = '正在补建曲库关联';
             update(old);
@@ -343,13 +390,13 @@ function createMusicVideoJob(source, token, trackId) {
         }
         return publicJob(old);
     }
-    const failed = [...jobs.values()].find(j => j.source === source && j.sourceId === payload.sourceId && ['failed', 'cancelled'].includes(j.status));
+    const failed = [...jobs.values()].find(j => (0, access_1.videoMediaVisible)(j) && j.source === source && j.sourceId === payload.sourceId && ['failed', 'cancelled'].includes(j.status));
     if (failed)
         return prepareExistingVideoJob(failed.id);
     if (jobs.size >= 200 || [...jobs.values()].filter(j => ['queued', 'running'].includes(j.status)).length >= 10)
         throw new Error('视频任务过多，请先清理缓存或稍后再试');
     const timestamp = new Date().toISOString();
-    const job = { id: `mv_${crypto.randomUUID()}`, source, sourceId: payload.sourceId, linkedTrack: localTrack, title: payload.title, artist: payload.artist, status: 'queued', phase: '等待缓存视频', progress: null, createdAt: timestamp, updatedAt: timestamp };
+    const job = { ...(0, access_1.videoMediaScope)(source, !!payload.owner), id: `mv_${crypto.randomUUID()}`, source, sourceId: payload.sourceId, linkedTrack: localTrack, title: payload.title, artist: payload.artist, status: 'queued', phase: '等待缓存视频', progress: null, createdAt: timestamp, updatedAt: timestamp };
     jobs.set(job.id, job);
     persist();
     setImmediate(pump);
@@ -360,6 +407,7 @@ function controlMusicVideoJob(id, action) {
     const job = jobs.get(id);
     if (!job)
         throw new Error('视频任务不存在');
+    (0, access_1.requireVideoMediaAccess)(job);
     if (action === 'cancel' && ['queued', 'running'].includes(job.status)) {
         job.status = 'cancelled';
         job.phase = '已取消';
@@ -392,6 +440,7 @@ function resolveMusicVideoFile(id) {
     const job = jobs.get(id);
     if (!job || job.status !== 'done' || !ready(job))
         throw new Error('视频缓存未就绪或已删除');
+    (0, access_1.requireVideoMediaAccess)(job);
     return job.source === 'douyin' && (0, douyin_media_coordinator_1.getDouyinVideoAsset)(job.sourceId) ? (0, douyin_media_coordinator_1.douyinVideoFile)(job.sourceId) : output(job);
 }
 //# sourceMappingURL=video-playback-jobs.js.map

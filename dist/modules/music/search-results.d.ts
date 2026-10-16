@@ -13,6 +13,8 @@ export type SignedMusicResult = {
     downloadToken: string;
 };
 type TokenPayload = {
+    owner?: string;
+    accountEpoch?: number;
     v: 1;
     source: MusicSource;
     sourceId: string;
@@ -23,6 +25,7 @@ type TokenPayload = {
 export declare function signSearchResults(source: MusicSource, query: string, results: any[], limit?: number): SignedMusicResult[];
 export declare function verifyDownloadToken(token: any, expectedSource?: MusicSource): TokenPayload;
 export declare function issueDownloadToken(source: MusicSource, sourceId: string, title: string, artist: string): string;
+export declare function issuePersonalVideoToken(source: 'bilibili' | 'douyin', sourceId: string, title: string, artist: string, owner: string): string;
 export declare function extractMusicConvertTarget(message: string, keyword?: string): {
     source: "douyin";
     sourceId: string;

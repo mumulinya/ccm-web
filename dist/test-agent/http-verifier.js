@@ -23,7 +23,7 @@ function projectNeedsAutomaticPageProbe(workOrder, project) {
 async function fetchWithTimeout(url, timeoutMs, init = {}) {
     const safety = (0, utils_1.validateTestAgentUrl)(url);
     if (!safety.valid)
-        return { response: null, text: "", durationMs: 0, error: safety.error, finalUrl: url, redirectCount: 0 };
+        return { response: null, text: "", durationMs: 0, error: safety.error, finalUrl: url, redirectCount: 0, failure: { failure_code: "http_url_denied", failure_stage: "safety_gate", failure_kind: "permission" } };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const started = Date.now();
@@ -68,6 +68,7 @@ async function fetchWithTimeout(url, timeoutMs, init = {}) {
                     text: "",
                     durationMs: Date.now() - started,
                     error: `HTTP redirect target was blocked: ${nextSafety.error}`,
+                    failure: { failure_code: "http_redirect_denied", failure_stage: "safety_gate", failure_kind: "permission" },
                     finalUrl: currentUrl,
                     redirectCount,
                 };
@@ -97,7 +98,8 @@ async function fetchWithTimeout(url, timeoutMs, init = {}) {
         }
     }
     catch (error) {
-        return { response: null, text: "", durationMs: Date.now() - started, error: error.message || String(error), finalUrl: currentUrl, redirectCount };
+        return { response: null, text: "", durationMs: Date.now() - started, error: error.message || String(error), finalUrl: currentUrl, redirectCount,
+            failure: controller.signal.aborted ? { failure_code: "http_timeout", failure_stage: "timeout", failure_kind: "environment" } : { failure_code: "http_target_unreachable", failure_stage: "service_ready", failure_kind: "environment" } };
     }
     finally {
         clearTimeout(timer);
@@ -347,6 +349,7 @@ async function verifyProjectPageHttp(workOrder, project) {
             },
             responsePreview: "",
             error: main.error || "request failed",
+            ...(main.failure || {}),
         };
     }
     const maxResourceChecks = workOrder.options.maxHttpResourceChecks;
@@ -573,6 +576,7 @@ async function verifyExplicitHttpCheck(workOrder, project, check, index) {
             probeType: check.probeType || check.probe_type,
             context: check.context,
             error: result.error || "request failed",
+            ...(result.failure || {}),
         };
     }
     return {
@@ -640,6 +644,20 @@ async function runHttpVerification(workOrder) {
             }
         }
     }
-    return results;
+    return results.map(result => {
+        if (result.failure_kind || result.status === "passed" || result.status === "skipped")
+            return result;
+        if (result.context?.sideEffectPolicy === "blocked")
+            return { ...result, failure_code: "http_side_effect_denied", failure_stage: "safety_gate", failure_kind: "permission" };
+        if (result.statusCode === null)
+            return { ...result, failure_code: "http_target_unreachable", failure_stage: "service_ready", failure_kind: "environment" };
+        // An unexpected authentication response needs authentication evidence,
+        // unless the frozen test deliberately asserts that response.
+        if ([401, 403].includes(result.statusCode))
+            return { ...result, failure_code: "http_authentication_unverified", failure_stage: "authentication", failure_kind: "evidence" };
+        if (result.assertions?.some(assertion => assertion.status === "failed"))
+            return { ...result, failure_code: "http_assertion_failed", failure_stage: "assertion", failure_kind: "implementation" };
+        return { ...result, failure_code: "http_verification_failed", failure_stage: "operation", failure_kind: "unknown" };
+    });
 }
 //# sourceMappingURL=http-verifier.js.map

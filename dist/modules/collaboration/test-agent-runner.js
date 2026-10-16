@@ -598,6 +598,7 @@ async function startJob(input, key) {
                 .map(([name, value]) => [name, String(value)])),
             CCM_TEST_AGENT_ALLOWED_WORK_DIRS: JSON.stringify((input.allowedWorkDirs || []).map(item => path.resolve(item))),
             CCM_TEST_AGENT_RUNNER_ID: id,
+            CCM_TEST_AGENT_AGENT_RUN_ID: record.agentRunId || "",
             CCM_TEST_AGENT_PROGRESS_PATH: progressPath,
             CCM_TEST_AGENT_PROGRESS_CONTEXT: JSON.stringify(input.runtimeProgressContext || null),
         },

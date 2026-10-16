@@ -4605,8 +4605,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         checkId?: string;
         projectIndex?: number;
         checkIndex?: number;
@@ -4617,8 +4617,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         checkId?: string;
         projectIndex?: number;
         checkIndex?: number;
@@ -4632,8 +4632,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         checkId?: string;
         projectIndex?: number;
         checkIndex?: number;
@@ -4652,8 +4652,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         checkId?: string;
         projectIndex?: number;
         checkIndex?: number;

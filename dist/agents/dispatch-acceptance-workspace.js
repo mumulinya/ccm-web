@@ -46,6 +46,8 @@ const child_process_1 = require("child_process");
  * workers may register only their project; never substitute another root. */
 function startDispatchAcceptanceAtWorkspace(taskId, project, workspacePath) {
     const task = (0, db_1.loadTasks)().find(row => row.id === taskId);
+    if (task)
+        require('../review/task-integration').startTaskCodeReviewBaseline(task, project, workspacePath);
     if (!task || !(0, acceptance_contract_1.taskAcceptanceContract)(task))
         return;
     (0, task_acceptance_service_1.startTaskAcceptance)(task, { [project]: workspacePath }, project);

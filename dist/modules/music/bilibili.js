@@ -42,7 +42,9 @@ exports.getBiliPlaybackStreams = getBiliPlaybackStreams;
 exports.getBiliAudioUrl = getBiliAudioUrl;
 exports.getBiliCookieHeader = getBiliCookieHeader;
 const crypto = __importStar(require("crypto"));
+const accounts_store_1 = require("./video/accounts-store");
 const platform_http_1 = require("./platform-http");
+const bilibili_browser_resolver_1 = require("./bilibili-browser-resolver");
 // B站相关常量与模块级变量
 exports.BILI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 let wbiMixinKey = "";
@@ -92,7 +94,7 @@ async function refreshWbiKey() {
         await ensureBuvid3();
         const data = await (0, platform_http_1.musicPlatformJson)({
             url: "https://api.bilibili.com/x/web-interface/nav",
-            headers: { "User-Agent": exports.BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": `buvid3=${buvid3}` },
+            headers: { "User-Agent": exports.BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": getBiliCookieHeader() },
             timeoutMs: 8_000,
             maxBytes: 1024 * 1024,
         });
@@ -138,7 +140,7 @@ async function biliSearch(keyword) {
         headers: {
             "User-Agent": exports.BILI_UA,
             "Referer": "https://www.bilibili.com/",
-            "Cookie": `buvid3=${buvid3}`,
+            "Cookie": getBiliCookieHeader(),
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Origin": "https://www.bilibili.com",
@@ -171,6 +173,21 @@ async function biliSearch(keyword) {
 async function getBiliPlaybackStreams(bvid) {
     if (!/^BV[0-9A-Za-z]{10}$/.test(bvid))
         throw new Error('B站视频 ID 无效');
+    try {
+        return await getBiliApiPlaybackStreams(bvid);
+    }
+    catch (apiError) {
+        try {
+            const fallback = await (0, bilibili_browser_resolver_1.resolveBiliPlaybackStreamsWithBrowser)(bvid);
+            console.warn(`[BiliPlayback] API 解析失败，已使用网页播放器解析：${String(apiError?.message || "未知错误").slice(0, 160)}`);
+            return fallback;
+        }
+        catch (browserError) {
+            throw new Error(`B站播放地址获取失败：接口 ${String(apiError?.message || "未知错误").slice(0, 120)}；网页解析 ${String(browserError?.message || "未知错误").slice(0, 120)}`);
+        }
+    }
+}
+async function getBiliApiPlaybackStreams(bvid) {
     await ensureBuvid3();
     await ensureWbiKey();
     const params = { bvid };
@@ -181,7 +198,7 @@ async function getBiliPlaybackStreams(bvid) {
         headers: {
             "User-Agent": exports.BILI_UA,
             "Referer": "https://www.bilibili.com/",
-            "Cookie": `buvid3=${buvid3}`,
+            "Cookie": getBiliCookieHeader(),
             "Accept": "application/json, text/plain, */*"
         },
         timeoutMs: 10_000,
@@ -209,7 +226,7 @@ async function getBiliPlaybackStreams(bvid) {
         headers: {
             "User-Agent": exports.BILI_UA,
             "Referer": "https://www.bilibili.com/",
-            "Cookie": `buvid3=${buvid3}`,
+            "Cookie": getBiliCookieHeader(),
             "Accept": "application/json, text/plain, */*"
         },
         timeoutMs: 10_000,
@@ -218,22 +235,25 @@ async function getBiliPlaybackStreams(bvid) {
     if (playData?.code !== 0) {
         throw new Error(`获取播放地址失败: ${playData?.message || "未知错误"}`);
     }
-    const audioList = playData?.data?.dash?.audio;
-    if (!audioList || audioList.length === 0) {
-        throw new Error("未找到对应的音频流直链");
-    }
+    const audioList = playData?.data?.dash?.audio || [];
     const videoList = playData?.data?.dash?.video || [];
     const video = videoList.find((item) => item.codecid === 7) || videoList[0];
+    if (!video && !audioList.length)
+        throw new Error("B站未返回可播放的 DASH 媒体");
     return {
-        audioUrl: audioList[0].baseUrl || audioList[0].backupUrl?.[0],
+        videoCodec: video?.codecid === 7 ? 'h264' : 'unknown', audioCodec: !audioList.length ? 'none' : String(audioList[0]?.codecs || '').startsWith('mp4a') ? 'aac' : 'unknown',
+        audioUrl: audioList[0]?.baseUrl || audioList[0]?.backupUrl?.[0],
         videoUrl: video?.baseUrl || video?.backupUrl?.[0],
         durationSeconds: Number(viewData?.data?.duration || 0),
     };
 }
 async function getBiliAudioUrl(bvid) {
-    return (await getBiliPlaybackStreams(bvid)).audioUrl;
+    const audio = (await getBiliPlaybackStreams(bvid)).audioUrl;
+    if (!audio)
+        throw new Error('此 B站视频没有可用音轨');
+    return audio;
 }
 function getBiliCookieHeader() {
-    return `buvid3=${buvid3}`;
+    return [(0, accounts_store_1.videoCookie)(), `buvid3=${buvid3}`].filter(Boolean).join("; ");
 }
 //# sourceMappingURL=bilibili.js.map

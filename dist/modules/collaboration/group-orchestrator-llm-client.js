@@ -84,6 +84,7 @@ const provider_cache_capability_registry_1 = require("../../system/provider-cach
 const automatic_provider_cache_optimization_1 = require("../../system/automatic-provider-cache-optimization");
 const provider_cache_observation_1 = require("../../system/provider-cache-observation");
 const provider_usage_1 = require("../../system/provider-usage");
+const provider_usage_coverage_1 = require("../../system/provider-usage-coverage");
 const model_cache_preparation_1 = require("../../system/model-cache-preparation");
 const model_request_context_1 = require("../../system/model-request-context");
 const model_cache_metrics_1 = require("../../system/model-cache-metrics");
@@ -583,6 +584,7 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
     const reported = normalized.reported;
     return {
         inputTokens,
+        ...(0, provider_usage_coverage_1.providerUsageReportingCoverage)(usage),
         outputTokens,
         totalTokens: normalized.directInputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
         reported,

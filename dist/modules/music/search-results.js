@@ -36,12 +36,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.signSearchResults = signSearchResults;
 exports.verifyDownloadToken = verifyDownloadToken;
 exports.issueDownloadToken = issueDownloadToken;
+exports.issuePersonalVideoToken = issuePersonalVideoToken;
 exports.extractMusicConvertTarget = extractMusicConvertTarget;
 exports.runMusicSearchResultSelfTest = runMusicSearchResultSelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
+const context_1 = require("./folia/context");
+const accounts_store_1 = require("./video/accounts-store");
 const SECRET_FILE = path.join(utils_1.CCM_DIR, "music-download-token-secret");
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 function loadSecret() {
@@ -150,6 +153,8 @@ function verifyDownloadToken(token, expectedSource) {
         throw new Error("下载凭证已过期，请重新搜索后再试");
     if (expectedSource && payload.source !== expectedSource)
         throw new Error("下载来源与凭证不匹配");
+    if (payload.owner && (payload.owner !== (0, context_1.currentFoliaOwner)() || payload.accountEpoch !== (0, accounts_store_1.videoEpoch)((0, context_1.currentFoliaOwner)(), payload.source) || (0, accounts_store_1.videoAccount)((0, context_1.currentFoliaOwner)(), payload.source).status !== 'authenticated'))
+        throw new Error('个人视频凭证已退出、过期或不属于当前账号');
     return payload;
 }
 function issueDownloadToken(source, sourceId, title, artist) {
@@ -165,6 +170,7 @@ function issueDownloadToken(source, sourceId, title, artist) {
         throw new Error("缺少转码目标 ID");
     return tokenFor(payload);
 }
+function issuePersonalVideoToken(source, sourceId, title, artist, owner) { return tokenFor({ v: 1, source, sourceId, title: String(title).slice(0, 200), artist: String(artist).slice(0, 200), owner, accountEpoch: (0, accounts_store_1.videoEpoch)(owner, source), exp: Date.now() + TOKEN_TTL_MS }); }
 function extractMusicConvertTarget(message, keyword = "") {
     const text = `${keyword || ""} ${message || ""}`;
     const directAwemeId = text.match(/(?:douyin\.com\/(?:video|note)\/|aweme_id[=：:]|抖音(?:视频)?\s*[#：:]?)(\d{10,24})/i)?.[1];

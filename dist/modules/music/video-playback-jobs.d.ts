@@ -1,5 +1,9 @@
+export declare function desktopMediaJobActivity(): number;
 export declare function listMusicVideoJobs(): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;
@@ -19,6 +23,9 @@ export declare function listMusicVideoJobs(): {
 }[];
 export declare function getMusicVideoJob(id: string): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;
@@ -39,6 +46,38 @@ export declare function getMusicVideoJob(id: string): {
 /** Identity lookup is shared by search, library playback and HLS completion. No download. */
 export declare function findCachedMusicVideo(source: string, sourceId: string): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
+    id: string;
+    source: "douyin" | "bilibili" | "netease";
+    sourceId: string;
+    title: string;
+    artist?: string;
+    durationSeconds?: number;
+    linkedTrack?: any;
+    errorKind?: string;
+    systemCode?: number;
+    failedStage?: string;
+    status: "queued" | "running" | "done" | "failed" | "cancelled";
+    phase: string;
+    progress: number | null;
+    error?: string;
+    createdAt: string;
+    updatedAt: string;
+};
+/** 已核验的抖音 MP4 直接进入视频索引，不再复制或二次转码成 HLS。 */
+export declare function registerDouyinVideoCache(session: {
+    sessionId: string;
+    sourceId: string;
+    title?: string;
+    artist?: string;
+    durationSeconds?: number;
+}): {
+    streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;
@@ -67,6 +106,9 @@ export declare function registerStreamVideoCache(session: {
     linkedTrack?: any;
 }): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;
@@ -86,6 +128,9 @@ export declare function registerStreamVideoCache(session: {
 };
 export declare function prepareExistingVideoJob(id: string): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;
@@ -105,6 +150,9 @@ export declare function prepareExistingVideoJob(id: string): {
 };
 export declare function createMusicVideoJob(source: any, token: any, trackId?: string): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;
@@ -124,6 +172,9 @@ export declare function createMusicVideoJob(source: any, token: any, trackId?: s
 };
 export declare function controlMusicVideoJob(id: string, action: 'cancel' | 'retry' | 'remove'): {
     streamUrl: string;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
     id: string;
     source: "douyin" | "bilibili" | "netease";
     sourceId: string;

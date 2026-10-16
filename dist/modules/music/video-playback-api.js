@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleMusicVideoApi = handleMusicVideoApi;
 const utils_1 = require("../../core/utils");
+const context_1 = require("./folia/context");
 const video_playback_jobs_1 = require("./video-playback-jobs");
 const video_stream_1 = require("./video-stream");
 const media_interactions_1 = require("./media-interactions");
@@ -49,7 +50,7 @@ function handleMusicVideoApi(pathname, req, res) {
                 rejected = true;
                 req.destroy();
             } });
-            req.on('end', async () => {
+            req.on('end', (0, context_1.bindFoliaRequest)(req, async () => {
                 if (rejected)
                     return;
                 try {
@@ -65,7 +66,7 @@ function handleMusicVideoApi(pathname, req, res) {
                 catch (e) {
                     error(e);
                 }
-            });
+            }));
             return true;
         }
         try {
@@ -111,7 +112,7 @@ function handleMusicVideoApi(pathname, req, res) {
             rejected = true;
             req.destroy();
         } });
-        req.on('end', async () => {
+        req.on('end', (0, context_1.bindFoliaRequest)(req, async () => {
             if (rejected)
                 return;
             try {
@@ -127,7 +128,7 @@ function handleMusicVideoApi(pathname, req, res) {
             catch (e) {
                 error(e);
             }
-        });
+        }));
         req.on('error', () => { });
         return true;
     }

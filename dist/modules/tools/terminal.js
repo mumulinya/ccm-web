@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.persistentTerminalCapability = persistentTerminalCapability;
 exports.authorizeTerminalCommandExecution = authorizeTerminalCommandExecution;
 exports.stopAllTerminalRuns = stopAllTerminalRuns;
+exports.desktopTerminalActivity = desktopTerminalActivity;
 exports.handleTerminalApi = handleTerminalApi;
 exports.runTerminalModuleSelfTest = runTerminalModuleSelfTest;
 exports.runPersistentTerminalSelfTest = runPersistentTerminalSelfTest;
@@ -585,6 +586,11 @@ async function stopAllTerminalRuns() {
         ...[...activeRuns.values()].map(run => stopTerminalRun(run, "shutdown")),
         ...[...activePtySessions.values()].map(session => terminatePtySession(session).catch(() => null)),
     ]);
+}
+function desktopTerminalActivity() {
+    // Persistent shells may execute arbitrary foreground jobs; keep an update
+    // waiting until the user closes them rather than infer idleness from output.
+    return activeRuns.size + [...activePtySessions.values()].filter(session => session.status === 'running').length;
 }
 function handleTerminalApi(pathname, req, res) {
     if (pathname === "/api/terminal/stream" && req.method === "POST") {

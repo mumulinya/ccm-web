@@ -2,7 +2,7 @@ import type { AgentRuntimeDescriptor } from "./runtime";
 export declare const AGENT_RUN_STATUS_VALUES: readonly ["created", "queued", "leased", "starting", "running", "waiting_confirmation", "waiting_input", "paused", "recovery_required", "recovering", "succeeded", "failed", "cancelled"];
 export type AgentRunStatus = typeof AGENT_RUN_STATUS_VALUES[number];
 export type RunStatus = AgentRunStatus;
-export type AgentRunScope = "project" | "group" | "global" | "test_agent" | "automation";
+export type AgentRunScope = "project" | "group" | "global" | "test_agent" | "review_agent" | "automation";
 export type AgentRunTrigger = "user" | "schedule" | "heartbeat" | "resume" | "retry";
 export type RunScope = AgentRunScope;
 export type RunTrigger = AgentRunTrigger;

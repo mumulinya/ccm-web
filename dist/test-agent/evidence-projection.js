@@ -42,6 +42,7 @@ exports.summarizeTestAgentEvidenceProjection = summarizeTestAgentEvidenceProject
 exports.readTestAgentEvidenceProjection = readTestAgentEvidenceProjection;
 exports.projectTestAgentHandoffForPersistence = projectTestAgentHandoffForPersistence;
 exports.projectTestAgentExecutionResultForPersistence = projectTestAgentExecutionResultForPersistence;
+exports.projectTestAgentReportForPersistence = projectTestAgentReportForPersistence;
 exports.runTestAgentEvidenceProjectionSelfTest = runTestAgentEvidenceProjectionSelfTest;
 const crypto = __importStar(require("crypto"));
 const hardening_metrics_1 = require("./hardening-metrics");
@@ -98,7 +99,7 @@ function uniqueStrings(value, max = 200) {
 function scalarSize(value) {
     let serialized = "";
     try {
-        serialized = typeof value === "string" ? value : JSON.stringify(value);
+        serialized = typeof value === "string" ? value : JSON.stringify(value) ?? "";
     }
     catch {
         serialized = String(value || "");
@@ -303,7 +304,7 @@ function projectTestAgentExecutionResultForPersistence(result) {
         return result;
     const projected = projectTestAgentValueForPersistence(result);
     return {
-        ...projected.value,
+        ...projectTestAgentReportForPersistence(projected.value),
         persistenceProjection: {
             schema: exports.TEST_AGENT_HANDOFF_PROJECTION_SCHEMA,
             redactedFields: projected.redactions,
@@ -312,6 +313,78 @@ function projectTestAgentExecutionResultForPersistence(result) {
             checksum: testAgentEvidenceChecksum(projected.redactions),
         },
     };
+}
+/** Report artifacts retain executable evidence identities, status and hashes,
+ * while full invocation text and captured output remain live-only. Handoff
+ * definitions are intentionally handled separately because they must execute. */
+function projectTestAgentReportForPersistence(report, options = {}) {
+    const commands = new Map();
+    const commandKeys = new Set(["command", "commands", "runcommand", "devservercommand", "verificationcommands"]);
+    const collect = (node) => {
+        if (!node || typeof node !== "object")
+            return;
+        for (const [key, child] of Object.entries(node)) {
+            if (commandKeys.has(normalizedKey(key)))
+                for (const text of (Array.isArray(child) ? child : [child])) {
+                    if (typeof text === "string" && text.trim())
+                        commands.set(text, `command:${testAgentEvidenceChecksum(text)}`);
+                }
+            else
+                collect(child);
+        }
+    };
+    collect(report);
+    const projected = projectTestAgentValueForPersistence(report).value;
+    if (Array.isArray(projected.failureSummary))
+        projected.failureSummary = projected.failureSummary.map((item) => ["command", "server"].includes(item.type) ? { ...item, reason: `执行状态：${item.status}；请核对原因码与冻结检查证据` } : item);
+    if (options.retainVerificationMetadata) {
+        // Artifact integrity checks need these typed provenance facts. This is not
+        // the source/tool body named context in handoffs and is never copied wholesale.
+        const allowed = new Set(["acceptanceCriteria", "acceptance_criteria", "coversAcceptanceCriteria", "covers_acceptance_criteria", "generatedBy", "generated_by", "source",
+            "adversarialIntent", "adversarial_intent", "pageResourceProbe", "failOnHttpResourceError", "maxHttpResourceChecks", "sideEffectPolicy", "multiSession",
+            "sessionCount", "sessionNames", "sessionStepCount", "parallelGroupCount", "comparisonCount", "browserStability", "stabilityGroupId", "stabilityRun", "stabilityRuns"]);
+        for (const collection of ["browserResults", "httpResults"])
+            for (const [index, row] of (report[collection] || []).entries()) {
+                const context = {};
+                for (const [key, value] of Object.entries(row.context || {}))
+                    if (allowed.has(key)) {
+                        if (["boolean", "number"].includes(typeof value))
+                            context[key] = value;
+                        else if (typeof value === "string")
+                            context[key] = value.slice(0, 600);
+                        else if (Array.isArray(value) && value.every(item => typeof item === "string"))
+                            context[key] = value.slice(0, 100).map(item => item.slice(0, 600));
+                    }
+                if (Object.keys(context).length)
+                    projected[collection][index].context = context;
+            }
+    }
+    const visit = (node) => {
+        if (typeof node === "string") {
+            let safe = node;
+            for (const [command, reference] of commands)
+                safe = safe.split(command).join(`[${reference}]`);
+            return safe;
+        }
+        if (Array.isArray(node))
+            return node.map(visit);
+        if (!node || typeof node !== "object")
+            return node;
+        const result = {};
+        for (const [key, child] of Object.entries(node)) {
+            const normalized = normalizedKey(key);
+            if (commandKeys.has(normalized)) {
+                result[key] = Array.isArray(child) ? [] : "";
+                result[`${key}Ref`] = Array.isArray(child) ? child.map(value => commands.get(value)).filter(Boolean) : commands.get(String(child || "")) || null;
+            }
+            else if (["bodypreview", "responsepreview", "responsebodypreview"].includes(normalized))
+                result[`${key}Ref`] = scalarSize(child);
+            else
+                result[key] = visit(child);
+        }
+        return result;
+    };
+    return visit(projected);
 }
 function runTestAgentEvidenceProjectionSelfTest() {
     const sentinel = "TEST_AGENT_DURABLE_BODY_SENTINEL_8f4c88";

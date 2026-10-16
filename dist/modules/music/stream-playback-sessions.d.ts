@@ -1,11 +1,17 @@
 export type StreamSessionStatus = "resolving" | "buffering" | "streaming" | "completed" | "reconnecting" | "failed" | "cancelled";
 export type StreamMediaKind = "audio" | "video";
 export type StreamSession = {
+    producerId?: string;
+    background?: boolean;
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
+    videoJobId?: string;
     sessionId: string;
     source: string;
     sourceId: string;
     mediaKind: StreamMediaKind;
-    protocol: "hls";
+    protocol: "hls" | "mp4";
     status: StreamSessionStatus;
     bufferedDuration: number;
     downloadedBytes: number;
@@ -32,14 +38,25 @@ export declare function resolveStreamMediaInput(s: StreamSession & any, signal: 
     duration: number;
 } | {
     input: string;
+    local: boolean;
+    duration: any;
+    headers?: undefined;
+    video?: undefined;
+    audio?: undefined;
+    videoCodec?: undefined;
+    audioCodec?: undefined;
+} | {
+    input: string;
     headers: {
         "User-Agent"?: undefined;
         Referer?: undefined;
     };
     duration: any;
+    local?: undefined;
     video?: undefined;
     audio?: undefined;
-    local?: undefined;
+    videoCodec?: undefined;
+    audioCodec?: undefined;
 } | {
     video: any;
     audio: any;
@@ -47,18 +64,24 @@ export declare function resolveStreamMediaInput(s: StreamSession & any, signal: 
         "User-Agent": string;
         Referer: string;
     };
-    duration: number;
+    duration: any;
+    videoCodec: any;
+    audioCodec: any;
     input?: undefined;
     local?: undefined;
 } | {
     input: any;
-    local: boolean;
+    headers: any;
     duration: any;
-    headers?: undefined;
+    videoCodec: any;
+    audioCodec: any;
+    local?: undefined;
     video?: undefined;
     audio?: undefined;
 }>;
+export declare function prewarmVideoInput(input: any, signal: AbortSignal): Promise<void>;
 export declare function createStreamSession(body: any): any;
+export declare function createDownloadStream(job: any): any;
 export declare function getStreamSession(id: string): any;
 export declare function cancelStreamSession(id: string): any;
 export declare function retryStreamSession(id: string): any;
@@ -78,3 +101,4 @@ export declare function pruneStreamCache(): {
     sessions: any[];
 };
 export declare function handleMusicStreamApi(pathname: string, req: any, res: any): boolean;
+export declare function shutdownVideoStreams(): Promise<void>;

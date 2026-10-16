@@ -136,6 +136,10 @@ function validateAcceptanceContract(value) {
                 issues.push("fixture_fields_missing");
     }
     for (const check of checks) {
+        if (check.sourcePaths !== undefined && (!Array.isArray(check.sourcePaths) || !check.sourcePaths.length || check.sourcePaths.some(file => !relativeAcceptancePath(file))))
+            issues.push("verification_impact_paths_invalid");
+        if (check.coreRegression !== undefined && typeof check.coreRegression !== "boolean")
+            issues.push("verification_core_regression_invalid");
         if (byItem.get(check.workItemId)?.projectId !== check.projectId)
             issues.push("verification_project_mismatch");
         if (!relativeAcceptancePath(check.cwd))

@@ -2713,6 +2713,7 @@ async function executeProjectMainTask(input) {
     });
     (0, collaboration_task_service_1.updateTask)(taskId, { workflow_meta: { ...(input.task.workflow_meta || {}), plan_dispatch_contract: dispatchContract }, plan_dispatch_contract: dispatchContract });
     require("../../agents/task-acceptance-service").startTaskAcceptance({ ...input.task, plan_dispatch_contract: dispatchContract }, workDir);
+    require('../../review/task-integration').startTaskCodeReviewBaseline(getProjectMainTask(taskId) || input.task, project, workDir);
     const executionGeneration = Math.max(0, Number(input.task?.generation || input.task?.boundary_generation || 0));
     const traceId = (0, reliability_ledger_1.ensureTraceId)(input.task.trace_id, "project-main");
     const projectRuntimeId = (0, runtime_1.normalizeAgentRuntimeId)(input.task?.agent_type || input.task?.agentType || input.task?.provider || "claudecode");
@@ -2956,7 +2957,7 @@ async function executeProjectMainTask(input) {
             else
                 pending.add(item);
         }
-        const executeWorkItem = async (item, repairRound = 0, repairProblems = []) => {
+        const executeWorkItem = async (item, repairRound = 0, repairProblems = [], reviewRepair = false) => {
             assertNotCancelled();
             executionPhase = "executing";
             persistExecutionState();
@@ -3001,6 +3002,9 @@ async function executeProjectMainTask(input) {
             emit("work_item", { status: result.success ? "awaiting_review" : "failed", work_item: item });
             if (!result.success)
                 throw new Error(result.error || "开发 Agent 执行失败");
+            if (!reviewRepair)
+                await require('../../review/task-integration').reviewTaskWithRepair({ taskId, project, root: workDir, workItemId: item.id,
+                    repair: (round, gaps) => executeWorkItem(item, round, gaps, true) });
             completedWorkItemIds.add(String(item.id));
             emitVisiblePlanState("executing");
             persistResumeCheckpoint("awaiting_test_agent", { workItemId: item.id });

@@ -4,14 +4,9 @@ exports.resolveMusicPlaybackDecisionV2 = resolveMusicPlaybackDecisionV2;
 exports.publicMusicPlaybackDecision = publicMusicPlaybackDecision;
 exports.sameMusicPlaybackCandidate = sameMusicPlaybackCandidate;
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
-const bilibili_1 = require("./bilibili");
-const douyin_1 = require("./douyin");
-const music_catalog_1 = require("./music-catalog");
-const netease_1 = require("./netease");
-const search_results_1 = require("./search-results");
 const select_track_1 = require("./select-track");
 const state_1 = require("./state");
-const platform_http_1 = require("./platform-http");
+const search_1 = require("./folia/search");
 function cleanText(value, limit) {
     return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, limit);
 }
@@ -25,10 +20,12 @@ function sourceMode(value) {
         return "bilibili";
     if (mode === "douyin")
         return "douyin";
+    if (mode === 'qq' || mode === 'kugou' || mode === 'navidrome')
+        return mode;
     return "auto";
 }
 function candidateIdentity(candidate) {
-    return `${candidate.source}:${candidate.sourceId}`;
+    return JSON.stringify([candidate.source, candidate.instanceId || 'default', candidate.sourceId]);
 }
 function makeDecision(input) {
     const createdAt = new Date().toISOString();
@@ -47,82 +44,7 @@ function makeDecision(input) {
     return { ...core, id: `music_decision_${checksum.slice(0, 20)}`, checksum };
 }
 async function searchCandidates(decision) {
-    const mode = sourceMode(decision.sourceMode);
-    const query = decision.strategy === "random"
-        ? "热门 华语 音乐 推荐"
-        : decision.searchQuery;
-    const requested = new Set(mode === "auto" ? ["local", "netease", "bilibili", "douyin"] : [mode]);
-    const statuses = {
-        local: { status: requested.has("local") ? "unavailable" : "not_requested", resultCount: 0 },
-        netease: { status: requested.has("netease") ? "unavailable" : "not_requested", resultCount: 0 },
-        bilibili: { status: requested.has("bilibili") ? "unavailable" : "not_requested", resultCount: 0 },
-        douyin: { status: requested.has("douyin") ? "unavailable" : "not_requested", resultCount: 0 },
-    };
-    const jobs = [];
-    if (requested.has("local"))
-        jobs.push({ source: "local", promise: Promise.resolve().then(() => ({
-                source: "local",
-                candidates: (0, music_catalog_1.queryMusicCatalog)({ query: decision.strategy === "random" ? "" : query, limit: 20 }).tracks.map((item) => ({
-                    source: "local",
-                    sourceId: String(item.filename || ""),
-                    filename: String(item.filename || ""),
-                    title: cleanText(item.title || item.filename, 200),
-                    artist: cleanText(item.artist || "未知歌手", 120),
-                    duration: cleanText(item.duration || "", 40),
-                })).filter(item => item.sourceId),
-            })) });
-    if (requested.has("netease"))
-        jobs.push({ source: "netease", promise: (0, netease_1.neteaseSearch)(query).then(results => ({
-                source: "netease",
-                candidates: (0, search_results_1.signSearchResults)("netease", query, results, 12).map((item) => ({
-                    source: "netease",
-                    sourceId: String(item.songId || ""),
-                    title: cleanText(item.title || item.songId, 200),
-                    artist: cleanText(item.artist || "未知歌手", 120),
-                    duration: cleanText(item.duration || "", 40),
-                    downloadToken: String(item.downloadToken || ""),
-                })).filter(item => item.sourceId),
-            })) });
-    if (requested.has("bilibili"))
-        jobs.push({ source: "bilibili", promise: (0, bilibili_1.biliSearch)(query).then(results => ({
-                source: "bilibili",
-                candidates: (0, search_results_1.signSearchResults)("bilibili", query, results, 12).map((item) => ({
-                    source: "bilibili",
-                    sourceId: String(item.bvid || ""),
-                    title: cleanText(item.title || item.bvid, 200),
-                    artist: cleanText(item.author || "未知UP主", 120),
-                    duration: cleanText(item.duration || "", 40),
-                    downloadToken: String(item.downloadToken || ""),
-                })).filter(item => item.sourceId),
-            })) });
-    if (requested.has("douyin"))
-        jobs.push({ source: "douyin", promise: (0, douyin_1.douyinSearch)(query).then(results => ({
-                source: "douyin",
-                candidates: (0, search_results_1.signSearchResults)("douyin", query, results, 12).map((item) => ({
-                    source: "douyin",
-                    sourceId: String(item.awemeId || ""),
-                    title: cleanText(item.title || item.awemeId, 200),
-                    artist: cleanText(item.author || "抖音作者", 120),
-                    duration: cleanText(item.duration || "", 40),
-                    pic: cleanText(item.pic || "", 2_000),
-                    shareUrl: cleanText(item.shareUrl || "", 2_000),
-                    searchChannel: item.searchChannel || "mcp",
-                    downloadToken: String(item.downloadToken || ""),
-                })).filter(item => item.sourceId),
-            })) });
-    const settled = await Promise.allSettled(jobs.map(job => job.promise));
-    const candidates = [];
-    for (const [index, item] of settled.entries()) {
-        if (item.status === "fulfilled") {
-            statuses[item.value.source] = { status: "success", resultCount: item.value.candidates.length };
-            candidates.push(...item.value.candidates);
-            continue;
-        }
-        const platformError = (0, platform_http_1.publicMusicPlatformError)(item.reason);
-        statuses[jobs[index].source] = { ...platformError, resultCount: 0 };
-    }
-    const unique = Array.from(new Map(candidates.map(candidate => [candidateIdentity(candidate), candidate])).values());
-    return { candidates: unique, sourceStatuses: statuses };
+    return (0, search_1.searchFoliaPlaybackCandidates)(decision);
 }
 async function resolveMusicPlaybackDecisionV2(input) {
     const intent = input.intent;
@@ -141,6 +63,9 @@ async function resolveMusicPlaybackDecisionV2(input) {
             netease: { status: "not_requested", resultCount: 0 },
             bilibili: { status: "not_requested", resultCount: 0 },
             douyin: { status: "not_requested", resultCount: 0 },
+            qq: { status: "not_requested", resultCount: 0 },
+            kugou: { status: "not_requested", resultCount: 0 },
+            navidrome: { status: "not_requested", resultCount: 0 },
         },
     };
     if (intent.action === "none") {

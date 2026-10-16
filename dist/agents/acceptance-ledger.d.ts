@@ -10,6 +10,11 @@ export type AcceptanceExecution = {
     baseline: AcceptanceSnapshot;
     verificationSource?: AcceptanceSnapshot;
     environmentFingerprint: string;
+    verificationConfigurationChecksum?: string;
+    verificationHistory?: Array<{
+        snapshot: AcceptanceSnapshot;
+        configurationChecksum?: string;
+    }>;
 };
 export type AcceptanceObservation = {
     id: string;
@@ -35,6 +40,7 @@ export type AcceptanceObservation = {
     reason: string;
     sourceRecordId: string;
     sourceChecksum: string;
+    originEvidenceId?: string;
 };
 type Ledger = {
     contract: AcceptanceContract;
@@ -42,6 +48,7 @@ type Ledger = {
     observations: AcceptanceObservation[];
     history?: Omit<Ledger, "history">[];
 };
+export declare const acceptanceLedgerLocation: (taskId: string) => string;
 export declare function readAcceptanceLedger(taskId: string, contractChecksum?: string): Ledger | null;
 export declare function registerAcceptanceExecution(contract: AcceptanceContract, input: {
     projectId: string;

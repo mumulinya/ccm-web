@@ -4,6 +4,8 @@ exports.listTaskAccessReferences = listTaskAccessReferences;
 exports.queryTaskWorkbenchPage = queryTaskWorkbenchPage;
 const task_store_1 = require("./task-store");
 const performance_monitor_1 = require("../system/performance-monitor");
+const task_workbench_read_version_1 = require("./task-workbench-read-version");
+const node_crypto_1 = require("node:crypto");
 const snapshots = new WeakMap();
 // Authorization reads every resource reference, including cross-project mission
 // targets, from the authoritative payload. This is not an execution-state cache.
@@ -19,15 +21,19 @@ function listTaskAccessReferences() {
   ) refs FROM tasks WHERE archived=0 AND json_extract(payload_json,'$.deleted_at') IS NULL`).all().map((row) => ({ id: row.id, ...JSON.parse(row.refs) })));
 }
 function queryTaskWorkbenchPage(runs, input, accessibleIds, sourceVersion, authorizationKey = '') {
+    // Legacy callers supply mutable Run arrays without a file version. Hash only
+    // the columns actually projected, on every call, so pagination can reuse the
+    // read projection while still observing in-place changes immediately.
+    sourceVersion ||= `rows:${(0, node_crypto_1.createHash)('sha256').update(JSON.stringify(runs.map(run => [run.run_id, run.task_id, run.status, run.updated_at]))).digest('hex')}`;
     return (0, performance_monitor_1.measurePerformance)('db.tasks.workbench_page', () => (0, task_store_1.withSqliteTaskStore)(db => {
         db.function('ccm_workbench_lower', { deterministic: true }, (value) => String(value ?? '').toLowerCase());
         const text = (value, fallback = '') => String(value ?? '').trim() || fallback;
         const page = Math.max(1, Math.floor(Number(input.page) || 1)), limit = Math.max(1, Math.min(100, Math.floor(Number(input.limit) || 50)));
-        const revision = () => `${db.pragma('data_version', { simple: true })}:${db.prepare('SELECT total_changes() value').get().value}`;
+        const taskVersion = (0, task_workbench_read_version_1.taskWorkbenchReadVersion)(db);
         const access = JSON.stringify([authorizationKey, accessibleIds || null]);
         const previous = snapshots.get(db);
         const reusable = !!sourceVersion && previous?.runs === sourceVersion && previous.access === access
-            && previous.version === revision() && Date.now() - previous.at < 5000;
+            && previous.version === taskVersion && Date.now() - previous.at < 5000;
         db.exec(`CREATE TEMP TABLE IF NOT EXISTS ccm_workbench_runs(run_id TEXT PRIMARY KEY,task_id TEXT,status TEXT,updated_at TEXT);
       CREATE INDEX IF NOT EXISTS temp.idx_workbench_run_task ON ccm_workbench_runs(task_id,updated_at DESC)`);
         const insert = db.prepare('INSERT OR IGNORE INTO ccm_workbench_runs VALUES(?,?,?,?)');
@@ -46,18 +52,18 @@ function queryTaskWorkbenchPage(runs, input, accessibleIds, sourceVersion, autho
         ${accessibleIds ? 'AND id IN (SELECT value FROM json_each(?))' : ''}
     ), bound AS MATERIALIZED (
       SELECT t.id,t.target_project,t.group_id,
-        COALESCE(NULLIF(r.updated_at,''),NULLIF(t.updated_at,''),t.created_at) sort_at,
+        COALESCE(NULLIF(preferred.updated_at,''),NULLIF(fallback.updated_at,''),NULLIF(t.updated_at,''),t.created_at) sort_at,
         CASE WHEN json_extract(payload_json,'$.intake_state')='awaiting_confirmation'
           OR (json_extract(payload_json,'$.task_spec.task_session_archive_policy')='user_confirm' AND json_extract(payload_json,'$.acceptance_state')='awaiting_user_acceptance') THEN 'waiting_user'
-        WHEN r.status IS NOT NULL THEN r.status WHEN ccm_workbench_lower(t.status)='done' THEN 'completed' ELSE ccm_workbench_lower(t.status) END projected_status,
+        WHEN COALESCE(preferred.status,fallback.status) IS NOT NULL THEN COALESCE(preferred.status,fallback.status) WHEN ccm_workbench_lower(t.status)='done' THEN 'completed' ELSE ccm_workbench_lower(t.status) END projected_status,
         CASE WHEN json_extract(payload_json,'$.approval_policy')='confirm_before_delivery'
           OR json_extract(payload_json,'$.task_spec.approval_policy')='confirm_before_delivery' THEN 1 ELSE 0 END approval_attention,
-        ccm_workbench_lower(COALESCE(NULLIF(trim(json_extract(payload_json,'$.task_spec.origin')),''),NULLIF(trim(json_extract(payload_json,'$.origin')),''),NULLIF(trim(json_extract(payload_json,'$.source_channel')),''),json_extract(payload_json,'$.request_origin'),'')) raw_origin,
+        lower(COALESCE(NULLIF(trim(json_extract(payload_json,'$.task_spec.origin')),''),NULLIF(trim(json_extract(payload_json,'$.origin')),''),NULLIF(trim(json_extract(payload_json,'$.source_channel')),''),json_extract(payload_json,'$.request_origin'),'')) raw_origin,
         COALESCE(NULLIF(trim(json_extract(payload_json,'$.title')),''),NULLIF(trim(json_extract(payload_json,'$.name')),''),NULLIF(trim(json_extract(payload_json,'$.task_spec.goal')),''),NULLIF(trim(json_extract(payload_json,'$.description')),''),'未命名任务') title,
         COALESCE(NULLIF(trim(json_extract(payload_json,'$.task_spec.goal')),''),NULLIF(trim(json_extract(payload_json,'$.description')),''),json_extract(payload_json,'$.title'),'') goal
-      FROM candidates t LEFT JOIN run_rows r ON r.run_id=COALESCE(
-        (SELECT run_id FROM run_rows WHERE task_id=t.id AND run_id=t.active_id LIMIT 1),
-        (SELECT run_id FROM run_rows WHERE task_id=t.id ORDER BY updated_at DESC LIMIT 1))
+      FROM candidates t LEFT JOIN run_rows preferred ON preferred.run_id=t.active_id AND preferred.task_id=t.id
+        LEFT JOIN run_rows fallback ON preferred.run_id IS NULL AND fallback.run_id=(
+          SELECT run_id FROM run_rows WHERE task_id=t.id ORDER BY updated_at DESC LIMIT 1)
     ), projected AS (
       SELECT *,CASE WHEN instr(raw_origin,'automation') OR instr(raw_origin,'cron') THEN 'automation'
           WHEN instr(raw_origin,'global') THEN 'global_agent' WHEN instr(raw_origin,'conversation') OR instr(raw_origin,'chat') THEN 'conversation'
@@ -74,7 +80,7 @@ function queryTaskWorkbenchPage(runs, input, accessibleIds, sourceVersion, autho
             db.prepare(`CREATE TEMP TABLE ccm_workbench_rows AS ${base} SELECT id,title,goal,projected_status,origin,target_project,group_id,needs_attention,
         sort_at FROM rows`).run(...(accessibleIds ? [JSON.stringify(accessibleIds)] : []));
             db.exec('CREATE INDEX temp.idx_workbench_rows_sort ON ccm_workbench_rows(sort_at DESC,id ASC)');
-            snapshots.set(db, { version: revision(), runs: sourceVersion, access, at: Date.now() });
+            snapshots.set(db, { version: taskVersion, runs: sourceVersion, access, at: Date.now() });
         }
         const args = accessibleIds && !sourceVersion ? [JSON.stringify(accessibleIds)] : [];
         const filters = [];

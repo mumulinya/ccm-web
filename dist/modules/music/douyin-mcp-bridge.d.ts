@@ -33,17 +33,145 @@ export type DouyinMcpSearchRow = {
     musicAuthor?: string;
     secUserId?: string;
 };
-export declare function adoptDouyinMcpCookie(storage: any): boolean;
+declare function createOwnedRuntime(owner: string): {
+    adoptDouyinMcpCookie: (storage: any) => boolean;
+    getDouyinMcpCookie: () => string;
+    callDouyinMcpTool: <T = any>(name: DouyinMcpToolName, input?: Record<string, any>, options?: DouyinMcpCallOptions) => Promise<T>;
+    douyinMcpCapabilities: () => Promise<DouyinMcpCapability[]>;
+    douyinMcpGetVideoDetail: (awemeId: string) => Promise<any>;
+    douyinMcpGetVideoComments: (awemeId: string, cursor?: number, count?: number, sourceKeyword?: string) => Promise<any>;
+    douyinMcpGetVideoLiveComments: (awemeId: string, sinceTime?: number, count?: number, sourceKeyword?: string) => Promise<any>;
+    douyinMcpGetSubComments: (commentId: string, cursor?: number, count?: number, sourceKeyword?: string) => Promise<any>;
+    douyinMcpGetUserInfo: (secUserId: string) => Promise<any>;
+    douyinMcpGetUserPosts: (secUserId: string, maxCursor?: string, count?: number) => Promise<any>;
+    douyinMcpGetHomefeed: (tag?: string, count?: number, refreshIndex?: number) => Promise<any>;
+    douyinMcpGetLoginQrcode: () => Promise<{
+        mode: string;
+        launched: boolean;
+        enabled: boolean;
+        root: string;
+        commit: string;
+        dependencies: {
+            uv: boolean;
+            python: boolean;
+            files: boolean;
+            playwright: "ready" | "unknown" | "missing";
+        };
+        connected: boolean;
+        authenticated: boolean;
+        verified: boolean;
+        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginStartedAt: string;
+        error: string;
+        installHint: string;
+    }>;
+    douyinMcpResolveShareUrl: (shareUrl: string) => Promise<any>;
+    douyinMcpDownloadVideo: (awemeId: string, subdir?: string, options?: DouyinMcpCallOptions) => Promise<any>;
+    isDouyinManagedMediaPath: (value: any) => boolean;
+    douyinMcpDownloadImages: (awemeId: string, subdir?: string) => Promise<any>;
+    douyinMcpOcrImages: (awemeId: string, subdir?: string) => Promise<any>;
+    douyinMcpTranscribeVideo: (awemeId: string) => Promise<any>;
+    douyinMcpBatchTranscribe: (keyword: string, count?: number, sortType?: number) => Promise<any>;
+    normalizeDouyinRows: (value: any) => DouyinMcpSearchRow[];
+    douyinMcpStatus: () => {
+        enabled: boolean;
+        mode: DouyinMcpMode;
+        root: string;
+        commit: string;
+        dependencies: {
+            uv: boolean;
+            python: boolean;
+            files: boolean;
+            playwright: "ready" | "unknown" | "missing";
+        };
+        connected: boolean;
+        authenticated: boolean;
+        verified: boolean;
+        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginStartedAt: string;
+        error: string;
+        installHint: string;
+    };
+    douyinMcpCheckLogin: () => Promise<boolean>;
+    douyinMcpSearchPage: (keyword: string, options?: DouyinMcpSearchOptions) => Promise<any>;
+    douyinMcpSearch: (keyword: string, limit?: number, options?: DouyinMcpSearchOptions) => Promise<DouyinMcpSearchRow[]>;
+    startDouyinMcpLogin: () => {
+        enabled: boolean;
+        mode: DouyinMcpMode;
+        root: string;
+        commit: string;
+        dependencies: {
+            uv: boolean;
+            python: boolean;
+            files: boolean;
+            playwright: "ready" | "unknown" | "missing";
+        };
+        connected: boolean;
+        authenticated: boolean;
+        verified: boolean;
+        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginStartedAt: string;
+        error: string;
+        installHint: string;
+    };
+    revokeDouyinMcpLogin: () => Promise<{
+        enabled: boolean;
+        mode: DouyinMcpMode;
+        root: string;
+        commit: string;
+        dependencies: {
+            uv: boolean;
+            python: boolean;
+            files: boolean;
+            playwright: "ready" | "unknown" | "missing";
+        };
+        connected: boolean;
+        authenticated: boolean;
+        verified: boolean;
+        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginStartedAt: string;
+        error: string;
+        installHint: string;
+    }>;
+    runDouyinMcpBridgeSelfTest: () => {
+        ok: boolean;
+        rootFound: boolean;
+        mode: DouyinMcpMode;
+        status: {
+            enabled: boolean;
+            mode: DouyinMcpMode;
+            root: string;
+            commit: string;
+            dependencies: {
+                uv: boolean;
+                python: boolean;
+                files: boolean;
+                playwright: "ready" | "unknown" | "missing";
+            };
+            connected: boolean;
+            authenticated: boolean;
+            verified: boolean;
+            loginState: "failed" | "waiting" | "idle" | "authenticated";
+            loginStartedAt: string;
+            error: string;
+            installHint: string;
+        };
+        checksum: string;
+    };
+    closeDouyinMcpRuntime: () => Promise<void>;
+};
+export declare const adoptDouyinMcpCookie: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["adoptDouyinMcpCookie"]>) => boolean;
+export declare const getDouyinMcpCookie: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["getDouyinMcpCookie"]>) => string;
 export declare function callDouyinMcpTool<T = any>(name: DouyinMcpToolName, input?: Record<string, any>, options?: DouyinMcpCallOptions): Promise<T>;
-export declare function douyinMcpCapabilities(): Promise<DouyinMcpCapability[]>;
-export declare function douyinMcpGetVideoDetail(awemeId: string): Promise<any>;
-export declare function douyinMcpGetVideoComments(awemeId: string, cursor?: number, count?: number, sourceKeyword?: string): Promise<any>;
-export declare function douyinMcpGetVideoLiveComments(awemeId: string, sinceTime?: number, count?: number, sourceKeyword?: string): Promise<any>;
-export declare function douyinMcpGetSubComments(commentId: string, cursor?: number, count?: number, sourceKeyword?: string): Promise<any>;
-export declare function douyinMcpGetUserInfo(secUserId: string): Promise<any>;
-export declare function douyinMcpGetUserPosts(secUserId: string, maxCursor?: string, count?: number): Promise<any>;
-export declare function douyinMcpGetHomefeed(tag?: string, count?: number, refreshIndex?: number): Promise<any>;
-export declare function douyinMcpGetLoginQrcode(): Promise<{
+export declare const douyinMcpCapabilities: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpCapabilities"]>) => Promise<DouyinMcpCapability[]>;
+export declare const douyinMcpGetVideoDetail: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetVideoDetail"]>) => Promise<any>;
+export declare const douyinMcpGetVideoComments: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetVideoComments"]>) => Promise<any>;
+export declare const douyinMcpGetVideoLiveComments: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetVideoLiveComments"]>) => Promise<any>;
+export declare const douyinMcpGetSubComments: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetSubComments"]>) => Promise<any>;
+export declare const douyinMcpGetUserInfo: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetUserInfo"]>) => Promise<any>;
+export declare const douyinMcpGetUserPosts: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetUserPosts"]>) => Promise<any>;
+export declare const douyinMcpGetHomefeed: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetHomefeed"]>) => Promise<any>;
+export declare const douyinMcpGetLoginQrcode: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpGetLoginQrcode"]>) => Promise<{
     mode: string;
     launched: boolean;
     enabled: boolean;
@@ -63,15 +191,15 @@ export declare function douyinMcpGetLoginQrcode(): Promise<{
     error: string;
     installHint: string;
 }>;
-export declare function douyinMcpResolveShareUrl(shareUrl: string): Promise<any>;
-export declare function douyinMcpDownloadVideo(awemeId: string, subdir?: string, options?: DouyinMcpCallOptions): Promise<any>;
-export declare function isDouyinManagedMediaPath(value: any): boolean;
-export declare function douyinMcpDownloadImages(awemeId: string, subdir?: string): Promise<any>;
-export declare function douyinMcpOcrImages(awemeId: string, subdir?: string): Promise<any>;
-export declare function douyinMcpTranscribeVideo(awemeId: string): Promise<any>;
-export declare function douyinMcpBatchTranscribe(keyword: string, count?: number, sortType?: number): Promise<any>;
-export declare function normalizeDouyinRows(value: any): DouyinMcpSearchRow[];
-export declare function douyinMcpStatus(): {
+export declare const douyinMcpResolveShareUrl: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpResolveShareUrl"]>) => Promise<any>;
+export declare const douyinMcpDownloadVideo: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpDownloadVideo"]>) => Promise<any>;
+export declare const isDouyinManagedMediaPath: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["isDouyinManagedMediaPath"]>) => boolean;
+export declare const douyinMcpDownloadImages: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpDownloadImages"]>) => Promise<any>;
+export declare const douyinMcpOcrImages: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpOcrImages"]>) => Promise<any>;
+export declare const douyinMcpTranscribeVideo: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpTranscribeVideo"]>) => Promise<any>;
+export declare const douyinMcpBatchTranscribe: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpBatchTranscribe"]>) => Promise<any>;
+export declare const normalizeDouyinRows: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["normalizeDouyinRows"]>) => DouyinMcpSearchRow[];
+export declare const douyinMcpStatus: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpStatus"]>) => {
     enabled: boolean;
     mode: DouyinMcpMode;
     root: string;
@@ -90,10 +218,10 @@ export declare function douyinMcpStatus(): {
     error: string;
     installHint: string;
 };
-export declare function douyinMcpCheckLogin(): Promise<boolean>;
-export declare function douyinMcpSearchPage(keyword: string, options?: DouyinMcpSearchOptions): Promise<any>;
-export declare function douyinMcpSearch(keyword: string, limit?: number, options?: DouyinMcpSearchOptions): Promise<DouyinMcpSearchRow[]>;
-export declare function startDouyinMcpLogin(): {
+export declare const douyinMcpCheckLogin: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpCheckLogin"]>) => Promise<boolean>;
+export declare const douyinMcpSearchPage: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpSearchPage"]>) => Promise<any>;
+export declare const douyinMcpSearch: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["douyinMcpSearch"]>) => Promise<DouyinMcpSearchRow[]>;
+export declare const startDouyinMcpLogin: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["startDouyinMcpLogin"]>) => {
     enabled: boolean;
     mode: DouyinMcpMode;
     root: string;
@@ -112,7 +240,7 @@ export declare function startDouyinMcpLogin(): {
     error: string;
     installHint: string;
 };
-export declare function revokeDouyinMcpLogin(): Promise<{
+export declare const revokeDouyinMcpLogin: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["revokeDouyinMcpLogin"]>) => Promise<{
     enabled: boolean;
     mode: DouyinMcpMode;
     root: string;
@@ -131,7 +259,7 @@ export declare function revokeDouyinMcpLogin(): Promise<{
     error: string;
     installHint: string;
 }>;
-export declare function runDouyinMcpBridgeSelfTest(): {
+export declare const runDouyinMcpBridgeSelfTest: (...args: Parameters<ReturnType<typeof createOwnedRuntime>["runDouyinMcpBridgeSelfTest"]>) => {
     ok: boolean;
     rootFound: boolean;
     mode: DouyinMcpMode;
@@ -156,5 +284,6 @@ export declare function runDouyinMcpBridgeSelfTest(): {
     };
     checksum: string;
 };
-/** Release sidecars without logging out or changing encrypted credentials. */
 export declare function closeDouyinMcpRuntime(): Promise<void>;
+export declare function resetDouyinOwnerRuntime(owner: string): Promise<void>;
+export {};

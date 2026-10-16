@@ -1,0 +1,32 @@
+import type { ReviewFinding, ReviewJob, ReviewPolicySnapshot } from './types';
+export declare const safeReviewText: (value: any, max?: number) => string;
+export declare function finding(input: any, source: string, paths: string[]): ReviewFinding;
+export declare function mergeReviewFindings(existing: ReviewFinding[], incoming: ReviewFinding[], subjectChecksum: string): {
+    id: string;
+    path: string;
+    startLine: number;
+    endLine: number;
+    side: "before" | "after";
+    symbol: string;
+    category: string;
+    severity: import("./types").ReviewSeverity;
+    state: import("./types").ReviewFindingState;
+    title: string;
+    trigger: string;
+    impact: string;
+    evidence: string[];
+    suggestion: string;
+    sources: string[];
+    firstSeen: string;
+    lastSeen: string;
+    decision?: {
+        actor: string;
+        role: string;
+        reason: string;
+        at: string;
+        subjectChecksum: string;
+    };
+}[];
+export declare function blockingFinding(f: ReviewFinding, policy: ReviewPolicySnapshot): boolean;
+export declare function evaluateReviewJob(job: ReviewJob): "blocked" | "passed" | "not_required" | "incomplete";
+export declare function reviewCanProceed(job: ReviewJob): boolean;

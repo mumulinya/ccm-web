@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="description" content="一个动态歌词播放器，支持 AI 主题生成" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Folia" />
+    <link rel="icon" type="image/svg+xml" href="/music/folia/icon.svg" />
+    <link rel="apple-touch-icon" href="/music/folia/icon.svg" />
+    <title>Folia</title>
+    <script src="/api/music/folia/runtime-config.js"></script>
+
+    <!-- 首屏加载遮罩：内联样式，随 HTML 首帧一起绘制，不等 index.css 与 JS bundle。
+         由 src/utils/appSplash.ts 在 React 挂载后淡出并移除。 -->
+    <style>html,body{background-color:#09090b}#app-splash{z-index:2147483000;background-color:#09090b;justify-content:center;align-items:center;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;transition:opacity .32s;display:flex;position:fixed;inset:0}#app-splash.is-hiding{opacity:0;pointer-events:none}#app-splash .app-splash-inner{opacity:0;flex-direction:column;align-items:center;gap:28px;animation:.42s .18s forwards app-splash-in;display:flex}#app-splash .app-splash-title{letter-spacing:.06em;text-indent:.06em;font-size:clamp(64px,17vw,200px);font-weight:600;line-height:1}#app-splash .app-splash-title span{text-align:center;color:#fff;text-shadow:0 0 8px #ffffff8c,0 0 28px #ffffff4d;transform-origin:50% 78%;font-family:inherit;display:inline-block}#app-splash .app-splash-wave{align-items:center;gap:clamp(6px,1.1vw,11px);height:clamp(42px,7.5vw,92px);display:flex}#app-splash .app-splash-wave span{width:var(--w,5px);height:100%;transform:scaleY(var(--floor,.18));background-color:rgba(255, 255, 255, var(--alpha,.85));box-shadow:0 0 var(--glow,14px) #ffffff59;animation:1.1s ease-in-out infinite app-splash-wave}#app-splash .app-splash-wave span:nth-child(2n){animation-delay:-550ms}@keyframes app-splash-in{to{opacity:1}}@keyframes app-splash-wave{0%,to{transform:scaleY(var(--floor,.18))}50%{transform:scaleY(var(--peak,1))}}@media (prefers-reduced-motion:reduce){#app-splash .app-splash-inner{opacity:1;animation:none}#app-splash .app-splash-wave span{transform:scaleY(calc(var(--peak,.5) * .7));opacity:.5;animation:none}}</style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "framer-motion": "https://aistudiocdn.com/framer-motion@^12.23.24",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "react-i18next": "https://aistudiocdn.com/react-i18next@^16.3.5",
+    "i18next": "https://aistudiocdn.com/i18next@^25.6.3",
+    "i18next-browser-languagedetector": "https://aistudiocdn.com/i18next-browser-languagedetector@^8.2.0"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/music/folia/assets/main-D6z_vaZa.js"></script>
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/rolldown-runtime-hePW80VL.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/folia-icons-C-1JgITt.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/use-presence-BuFOqE_4.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/visualizerModes-BWTanAGc.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/workerClient-Ck1ZFTwZ.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/config-oWB8oM0y.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/providerRegistry-CJ_yTL0w.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/graphemeTiming-BhIjEJVM.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/wordSegmentation-Dsdo2zS_.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/LocalFileLyricAdapter-UJgbmzb7.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/urlBackground-B7cq42ZX.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/useThemeSettingsStore-wuj38Qv9.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/useMotionSettingsStore-BJMbUwq5.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/proxy-Ckz_84jH.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/AnimatePresence-DYrdngen.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/ThemedDialog-erwCMnmk.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/registry-BH0cus4y.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/glowBlurQuantize-A7QIlrsX.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/useVisualizerSettingsStore-EoitBfmV.js">
+  <link rel="modulepreload" crossorigin href="/music/folia/assets/accountSession-C5kCdyEe.js">
+</head>
+  <body>
+    <div id="app-splash" role="status" aria-live="polite" aria-label="Loading Folia">
+      <div class="app-splash-inner">
+        <div class="app-splash-title" aria-label="Folia"><span>F</span><span>o</span><span>l</span><span>i</span><span>a</span></div>
+        <div class="app-splash-wave" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        try {
+          // 需要透明背景的入口不能盖遮罩：OBS 浏览器源会被直接推流捕获，
+          // Electron 的透明播放背景 / 壁纸窗口（main.cjs 传 splash=0）会在桌面上闪一个黑块。
+          var params = new URLSearchParams(window.location.search);
+          if (params.get('obs') === '1' || window.location.pathname === '/obs' || params.get('splash') === '0') {
+            var splash = document.getElementById('app-splash');
+            if (splash) {
+              splash.remove();
+            }
+            return;
+          }
+        } catch (error) {
+          // 探测失败时保留遮罩，React 挂载后仍会移除它。
+        }
+
+        // 波形逐条随机化：高度、宽度、节奏、相位和颜色都带抖动，每次加载的形状都不一样。
+        // 同步执行，在首帧绘制前完成；失败时 CSS 里的默认值会兜底成一条静态波形。
+        try {
+          var rand = function (min, max) {
+            return min + Math.random() * (max - min);
+          };
+
+          var bars = document.querySelectorAll('#app-splash .app-splash-wave span');
+          for (var i = 0; i < bars.length; i += 1) {
+            var bar = bars[i];
+            // 中间高、两端低的整体包络，再叠加随机量，形状既像波形又不规整。
+            var envelope = Math.sin(((i + 0.5) / bars.length) * Math.PI);
+            var peak = Math.min(1, 0.32 + envelope * rand(0.38, 0.72));
+            bar.style.setProperty('--peak', peak.toFixed(3));
+            bar.style.setProperty('--floor', rand(0.08, 0.24).toFixed(3));
+            bar.style.setProperty('--w', rand(3.5, 6.5).toFixed(2) + 'px');
+            // 白色平涂，只在亮度和辉光半径上留随机：高的条更亮、光晕更散。
+            bar.style.setProperty('--alpha', rand(0.55, 1).toFixed(2));
+            bar.style.setProperty('--glow', Math.round(rand(6, 26)) + 'px');
+            bar.style.animationDuration = Math.round(rand(820, 1500)) + 'ms';
+            bar.style.animationDelay = '-' + Math.round(rand(0, 1500)) + 'ms';
+          }
+        } catch (error) {
+          // 随机化失败无所谓，CSS 默认值已经能跑一条波形。
+        }
+
+        // Folia 五个字母不断跳到不同字形（Loki 片头那种字体轮盘），偶尔整体落回基准样式。
+        // 只用通用字族，再叠加字重、斜体和横向拉伸——不同机器上装的字体不一样，
+        // 单靠字体名会退化成同一张脸，加上这几个轴才保证每次跳变都看得出来。
+        try {
+          if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            return;
+          }
+          var BASE_FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif";
+          var FAMILIES = [BASE_FONT, 'serif', 'monospace', 'cursive', 'fantasy', 'system-ui'];
+          var WEIGHTS = ['400', '600', '800'];
+          var SCALES = [0.86, 0.94, 1, 1.06, 1.12];
+          var letters = document.querySelectorAll('#app-splash .app-splash-title span');
+          if (!letters.length) {
+            return;
+          }
+
+          // 用 canvas 在 100px 基准下量出每个字母在所有候选字形里的最大宽度，换算成 em 写死盒子宽度，
+          // 这样字形来回换、词标整体不会左右乱跳。
+          var measure = document.createElement('canvas').getContext('2d');
+          for (var m = 0; m < letters.length; m += 1) {
+            var glyph = letters[m].textContent;
+            var widest = 0;
+            for (var f = 0; f < FAMILIES.length; f += 1) {
+              measure.font = 'italic 800 100px ' + FAMILIES[f];
+              widest = Math.max(widest, measure.measureText(glyph).width);
+              measure.font = '800 100px ' + FAMILIES[f];
+              widest = Math.max(widest, measure.measureText(glyph).width);
+            }
+            if (widest > 0) {
+              // 余量留给最大的缩放组合（1.12 × 1.12），字形放大时不会压到相邻字母。
+              letters[m].style.width = ((widest / 100) * 1.26 + 0.04).toFixed(3) + 'em';
+            }
+          }
+
+          var pick = function (list) {
+            return list[Math.floor(Math.random() * list.length)];
+          };
+          var jitter = function (min, max) {
+            return min + Math.random() * (max - min);
+          };
+          // 辉光分三档：干净、微光、过曝。片头里字母亮度参差不齐，靠这个模拟。
+          var randomGlow = function () {
+            var roll = Math.random();
+            if (roll < 0.3) {
+              return '0 0 ' + (2 + Math.random() * 4).toFixed(1) + 'px rgba(255,255,255,0.35)';
+            }
+            if (roll < 0.75) {
+              return '0 0 ' + (6 + Math.random() * 8).toFixed(1) + 'px rgba(255,255,255,0.7), 0 0 ' +
+                (20 + Math.random() * 16).toFixed(1) + 'px rgba(255,255,255,0.35)';
+            }
+            return '0 0 ' + (10 + Math.random() * 8).toFixed(1) + 'px rgba(255,255,255,0.95), 0 0 ' +
+              (34 + Math.random() * 20).toFixed(1) + 'px rgba(255,255,255,0.7), 0 0 ' +
+              (70 + Math.random() * 40).toFixed(1) + 'px rgba(255,255,255,0.45)';
+          };
+          var timer = window.setInterval(function () {
+            // 遮罩被移除后自己停掉，不留空转的定时器。
+            if (!document.getElementById('app-splash')) {
+              window.clearInterval(timer);
+              return;
+            }
+            // 一拍只换一个字母，偶尔两个，节奏克制。
+            var swaps = Math.random() < 0.25 ? 2 : 1;
+            for (var i = 0; i < swaps; i += 1) {
+              var letter = pick(letters);
+              letter.style.fontFamily = pick(FAMILIES);
+              letter.style.fontWeight = pick(WEIGHTS);
+              letter.style.fontStyle = Math.random() < 0.25 ? 'italic' : 'normal';
+              // 大小和宽窄都用 transform 做：不进入布局，盒子宽度不受影响，排版才不会抖。
+              var sizeScale = jitter(0.86, 1.12);
+              letter.style.transform =
+                'scale(' + (sizeScale * pick(SCALES)).toFixed(3) + ',' + sizeScale.toFixed(3) + ')';
+              letter.style.textShadow = randomGlow();
+            }
+          }, 380);
+        } catch (error) {
+          // 字体轮盘失败就保持静态词标。
+        }
+      })();
+    </script>
+    <div id="root"></div>
+  </body>
+</html>

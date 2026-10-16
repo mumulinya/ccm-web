@@ -325,6 +325,7 @@ function createTaskWithScopedIdentity(task) {
     const dispatchProfile = (0, dispatch_profile_2.resolveDispatchProfileSnapshot)(newTask);
     newTask.dispatch_profile = dispatchProfile.profile;
     newTask.dispatch_profile_snapshot = dispatchProfile;
+    newTask.code_review_policy = require('../../review/task-integration').newTaskReviewPolicy(newTask);
     newTask.rework_max_rounds = (0, dispatch_profile_2.reworkLimitForDispatchProfile)(dispatchProfile.profile);
     newTask.dispatch_scope = (0, dispatch_profile_2.resolveDispatchScope)(newTask);
     const executionPolicy = (0, task_workflow_model_1.resolveTaskExecutionPolicy)({ ...newTask, workflow_policy_snapshot: null, task_spec: null, automation_definition: null });
@@ -1076,6 +1077,9 @@ function hasStructuredTaskAcceptanceEvidence(task, updates = {}) {
         || updates.terminal_decision?.gate_passed === true;
 }
 function validateTaskTerminalTransition(task, updates = {}, options = {}) {
+    const codeReviewError = require('../../review/task-integration').validateTaskCodeReview(task, updates);
+    if (codeReviewError)
+        return codeReviewError;
     if ((0, acceptance_contract_2.isAcceptanceProjectionTask)(task))
         return (0, acceptance_projection_service_1.validateProjectionTerminal)(task, updates, (0, db_1.loadTasks)());
     const acceptanceError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(task, updates, options);
@@ -1279,6 +1283,9 @@ function updateTask(id, updates, options = {}) {
         updates.status = normalized;
     }
     const acceptanceUpdateError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(tasks[idx], updates, { developmentCycleSource: options.developmentCycleSource });
+    const reviewUpdateError = require('../../review/task-integration').validateTaskCodeReview(tasks[idx], updates);
+    if (reviewUpdateError)
+        throw new Error(reviewUpdateError);
     if (acceptanceUpdateError)
         throw new Error(acceptanceUpdateError);
     const workItemId = String(updates.workItemId || updates.work_item_id || tasks[idx].work_item_id || tasks[idx].workItemId || "").trim();
@@ -1884,6 +1891,7 @@ function purgeArchivedTask(id) {
     const purgedExecutionArtifacts = (0, execution_kernel_1.purgeTaskExecutionArtifacts)(id);
     const purgedTestAgentArtifacts = (0, artifact_retention_1.purgeTestAgentArtifactsForTask)(id);
     const purgedTestAgentRuns = (0, test_agent_runner_1.purgeTestAgentRunnerRecordsForTask)(id);
+    require('../../review/maintenance').purgeTaskCodeReviews(id);
     const purgedReplayJournal = (0, task_replay_journal_1.purgeTaskReplayJournalForTask)(id);
     (0, execution_kernel_1.clearTaskCancellation)(id);
     (0, db_1.saveTasks)(tasks.filter(task => task.id !== id));

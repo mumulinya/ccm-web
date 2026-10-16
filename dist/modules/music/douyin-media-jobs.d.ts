@@ -1,5 +1,9 @@
 import { type DouyinMcpToolName } from './douyin-mcp-bridge';
 export type DouyinMediaJob = {
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
+    source?: string;
     id: string;
     tool: DouyinMcpToolName;
     args: Record<string, any>;
@@ -11,12 +15,17 @@ export type DouyinMediaJob = {
     error?: string;
     result?: any;
 };
+export declare function desktopMediaJobActivity(): number;
 export declare function listDouyinMediaJobs(): {
     result: any;
     artifacts: {
         name: string;
         url: string;
     }[];
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
+    source?: string;
     id: string;
     tool: DouyinMcpToolName;
     args: Record<string, any>;
@@ -47,6 +56,10 @@ export declare function createDouyinMediaJob(tool: DouyinMcpToolName, input: Rec
         name: string;
         url: string;
     }[];
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
+    source?: string;
     id: string;
     tool: DouyinMcpToolName;
     args: Record<string, any>;
@@ -63,6 +76,10 @@ export declare function controlDouyinMediaJob(id: string, action: 'confirm' | 'c
         name: string;
         url: string;
     }[];
+    owner?: string;
+    requiresAuth?: boolean;
+    accountEpoch?: number | null;
+    source?: string;
     id: string;
     tool: DouyinMcpToolName;
     args: Record<string, any>;

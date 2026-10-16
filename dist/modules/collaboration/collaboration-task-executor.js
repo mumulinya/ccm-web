@@ -1948,6 +1948,10 @@ ${(0, dispatch_receipt_template_1.renderDispatchReceiptTemplate)(directDispatchP
             });
             return { ...result, ...coordination, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills, executionKernel: { executionId: task.id, green: failedGreen } };
         }
+        const codeReview = await require('../../review/task-integration').runTaskCodeReview(task.id, task.target_project, workDir);
+        const reviewQueue = codeReview && require('../../review/task-queue-review').handleQueuedTaskReview(task, codeReview, result, workDir);
+        if (reviewQueue)
+            return { ...reviewQueue, ...coordination };
         const changedFiles = Array.isArray(fileChanges?.files) ? fileChanges.files : [];
         const requiresProjectReview = workflowPolicy?.verification === "quick_check"
             ? false

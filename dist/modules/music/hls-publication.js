@@ -39,7 +39,7 @@ exports.hlsEncodingArgs = hlsEncodingArgs;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto_1 = require("crypto");
-exports.HLS_SEGMENT_SECONDS = 3;
+exports.HLS_SEGMENT_SECONDS = 2;
 const isHlsMediaName = (name) => /^(?:r[a-f0-9]{12}_)?(?:init\.mp4|segment_[0-9]{6}\.m4s)$/.test(name);
 exports.isHlsMediaName = isHlsMediaName;
 function readEntries(directory, filename) {
@@ -78,10 +78,15 @@ function createHlsPublication(directory) {
     const base = readEntries(directory, 'manifest.m3u8');
     const resumeAt = base.reduce((sum, e) => sum + e.duration, 0);
     const playlist = `${prefix}manifest.m3u8`;
-    let lastText = '';
+    let lastText = '', lastInput = '', lastResult = { duration: resumeAt, bytes: 0 };
+    const sizes = new Map();
     return {
         resumeAt, playlist, init: `${prefix}init.mp4`, segment: `${prefix}segment_%06d.m4s`,
         publish(complete = false) {
+            const inputText = fs.existsSync(path.join(directory, playlist)) ? fs.readFileSync(path.join(directory, playlist), 'utf8') : '';
+            if (inputText === lastInput && !complete)
+                return lastResult;
+            lastInput = inputText;
             const next = readEntries(directory, playlist);
             if (base.length && next.length)
                 next[0].discontinuity = true;
@@ -110,19 +115,21 @@ function createHlsPublication(directory) {
                 lastText = text;
             }
             const names = new Set(entries.flatMap(e => [e.name, e.init]));
-            return { duration: entries.reduce((sum, e) => sum + e.duration, 0), bytes: [...names].reduce((sum, name) => sum + fs.statSync(path.join(directory, name)).size, 0) };
+            lastResult = { duration: entries.reduce((sum, e) => sum + e.duration, 0), bytes: [...names].reduce((sum, name) => { if (!sizes.has(name))
+                    sizes.set(name, fs.statSync(path.join(directory, name)).size); return sum + sizes.get(name); }, 0) };
+            return lastResult;
         },
     };
 }
 function hlsEncodingArgs(mediaKind, input, publication) {
-    const args = ['-nostdin', '-y'];
+    const args = ['-nostdin', '-y', '-threads', '2', '-filter_threads', '1'];
     const addInput = (url) => {
         if (/^https?:\/\//.test(url)) {
             args.push('-rw_timeout', '15000000', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '8');
             if (input.headers && Object.keys(input.headers).length)
                 args.push('-headers', Object.entries(input.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n');
         }
-        args.push('-i', url);
+        args.push('-probesize', '262144', '-analyzeduration', '1000000', '-i', url);
     };
     addInput(mediaKind === 'audio' ? input.audio || input.input : input.video || input.input);
     if (mediaKind === 'video' && input.video && input.audio)
@@ -131,7 +138,11 @@ function hlsEncodingArgs(mediaKind, input, publication) {
     if (publication.resumeAt > 0)
         args.push('-ss', String(publication.resumeAt));
     if (mediaKind === 'video') {
-        args.push('-map', '0:v:0', '-map', input.video && input.audio ? '1:a:0' : '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-flags', '+cgop', '-force_key_frames', `expr:gte(t,n_forced*${exports.HLS_SEGMENT_SECONDS})`, '-sc_threshold', '0', '-c:a', 'aac', '-b:a', '160k');
+        args.push('-map', '0:v:0', '-map', input.video && input.audio ? '1:a:0' : '0:a?');
+        if (input.copyCompatible)
+            args.push('-c', 'copy');
+        else
+            args.push('-c:v', 'libx264', '-threads', '2', '-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-flags', '+cgop', '-force_key_frames', `expr:gte(t,n_forced*${exports.HLS_SEGMENT_SECONDS})`, '-sc_threshold', '0', '-c:a', 'aac', '-b:a', '160k');
     }
     else {
         // B站音频模式直接使用音轨，不把 video/audio 对象误当成单流地址。

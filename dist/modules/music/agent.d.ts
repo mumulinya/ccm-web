@@ -25,7 +25,7 @@ export type MusicIntentDecisionV2 = {
     artist: string;
     mood: string;
     genre: string;
-    sourceMode: "auto" | "local" | "netease" | "bilibili" | "douyin";
+    sourceMode: "auto" | "local" | "netease" | "bilibili" | "douyin" | "qq" | "kugou" | "navidrome";
     randomize: boolean;
     strictMatch: boolean;
     confidence: number;
@@ -58,7 +58,7 @@ export declare function normalizeMusicAgentMessages(history?: any[], currentMess
 export declare function classifyMusicAgentAction(cfg: any, message: string, mode: string, history?: any[]): Promise<{
     type: string;
     keyword: string;
-    mode: "auto" | "local" | "douyin" | "netease" | "bilibili";
+    mode: "auto" | "local" | "qq" | "kugou" | "netease" | "bilibili" | "douyin" | "navidrome";
     source: string;
     confidence: number;
     reason: string;

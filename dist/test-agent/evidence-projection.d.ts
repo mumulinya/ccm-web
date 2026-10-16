@@ -49,6 +49,12 @@ export declare function summarizeTestAgentEvidenceProjection(value: TestAgentEvi
 export declare function readTestAgentEvidenceProjection(value: any): TestAgentEvidenceProjectionV2 | null;
 export declare function projectTestAgentHandoffForPersistence(handoff: any): any;
 export declare function projectTestAgentExecutionResultForPersistence(result: any): any;
+/** Report artifacts retain executable evidence identities, status and hashes,
+ * while full invocation text and captured output remain live-only. Handoff
+ * definitions are intentionally handled separately because they must execute. */
+export declare function projectTestAgentReportForPersistence(report: any, options?: {
+    retainVerificationMetadata?: boolean;
+}): any;
 export declare function runTestAgentEvidenceProjectionSelfTest(): {
     pass: boolean;
     sentinelAbsent: boolean;

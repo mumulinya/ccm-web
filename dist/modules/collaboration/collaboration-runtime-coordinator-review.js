@@ -134,6 +134,11 @@ async function runCoordinatorReviewLoop(input) {
     if (!input.acceptancePolicy || input.acceptancePolicy?.checksum === "")
         throw new Error("群聊验收缺少任务级策略快照");
     const policyTask = input.taskId ? (0, db_1.loadTasks)().find((item) => item.id === input.taskId) : null;
+    await require('../../review/task-integration').reviewGroupTask(input, async (project, gaps) => {
+        const message = `代码审核确认缺陷，请仅修复以下问题并提交原工作项回执：\n${gaps.join('\n')}`;
+        const outputs = await (0, collaboration_runtime_cross_agent_runtime_1.processCrossAgents)(input.groupId, input.group, coordinator.project, message, [{ targetName: project, project, message, task: message, reason: 'ReviewAgent 已确认代码缺陷', rework: true, continuationOf: project }], input.configs, input.ctx, input.streamRes, 1, seenMentions, 'sequential', '', input.taskId || '');
+        allOutputs.push(...outputs);
+    });
     const independentTestAgentEnabled = policyTask
         ? (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(policyTask, input.acceptancePolicy)
         : input.acceptancePolicy?.mode === "test_agent";
@@ -835,6 +840,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
             const tasks = (0, db_1.loadTasks)();
             const task = tasks.find(t => t.id === runId || String(t?.task_run?.run_id || t?.run_id || "") === runId);
             const taskId = task?.id || runId;
+            await require('../../system/desktop-update-gate').waitForDesktopExecution(taskId);
             queue.forEach((queuedId, index) => {
                 const queuedTask = tasks.find(t => t.id === queuedId || String(t?.task_run?.run_id || t?.run_id || "") === queuedId);
                 if (queuedTask)

@@ -54,6 +54,8 @@ const provider_wire_evidence_1 = require("./provider-wire-evidence");
 const conversation_attempt_1 = require("../agents/conversation-attempt");
 const provider_request_cache_fields_1 = require("./provider-request-cache-fields");
 const provider_usage_1 = require("./provider-usage");
+const model_call_observation_1 = require("./model-call-observation");
+const provider_usage_coverage_1 = require("./provider-usage-coverage");
 const model_request_context_1 = require("./model-request-context");
 const model_cache_metrics_1 = require("./model-cache-metrics");
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -302,6 +304,7 @@ function startProviderAttempt(options, config, body, protocol, endpoint) {
             comparedPurpose: previous?.attribution?.purpose,
             publicPrefix: (0, provider_wire_evidence_1.comparePublicProviderWire)(publicPrevious?.snapshot, snapshot) }, contentStored: false };
     state.active = row;
+    (0, model_call_observation_1.observePhysicalModelRequest)(row);
     append(row);
     return row;
 }
@@ -386,8 +389,10 @@ function finishProviderAttempt(options, result) {
     const cached = normalizedUsage.cacheUsageReported ? normalizedUsage.cacheReadInputTokens : null;
     const creation = reported ? normalizedUsage.cacheCreationInputTokens : null;
     Object.assign(row, { completedAt: new Date().toISOString(), status: result.ok ? 'completed' : result.error?.name === 'AbortError' ? 'cancelled' : 'failed',
+        ...(0, provider_usage_coverage_1.providerUsageReportingCoverage)(usage),
         providerRequestId: safe(result.providerRequestId || row.providerRequestId),
         usageReported: reported, directInputTokens: direct, cacheReadInputTokens: cached, cacheCreationInputTokens: creation,
+        providerTotalTokens: reported ? normalizedUsage.providerTotalTokens : null,
         totalInputTokens: reported ? normalizedUsage.totalContextTokens : null, outputTokens: reported ? normalizedUsage.outputTokens : null,
         cache_usage_reported: normalizedUsage.cacheUsageReported, ...(0, model_cache_metrics_1.providerCostEvidence)(usage),
         estimatedCostUsd: (0, model_cache_metrics_1.providerCostEvidence)(usage).estimatedCostUsd ?? (0, model_cache_metrics_1.configuredModelInputCost)(options._modelCacheCostRates, usage, row.protocol),
@@ -406,6 +411,7 @@ function finishProviderAttempt(options, result) {
             providerCacheCandidateSource: safe(result.cacheReuse.providerCacheCandidateSource),
         });
     }
+    (0, model_call_observation_1.observePhysicalModelRequest)(row);
     append(row);
     state.active = undefined;
     (0, scope_navigation_execution_1.scopeNavigationCompleted)(row);

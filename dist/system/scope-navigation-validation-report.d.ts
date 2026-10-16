@@ -1,5 +1,37 @@
 /** 只读重算：预算、正式回执、持久化任务证据是验收依据。 */
 export declare function buildScopeNavigationValidationReport(id: string): {
+    whole: {
+        request_hit_rate: number;
+        token_reuse_rate: number;
+        total_input_tokens: any;
+        cache_known_input_tokens: any;
+        cache_token_reporting_coverage: number;
+        baseline_only_rate: number;
+        cache_preparation_coverage: number;
+        logical_calls: number;
+        physical_attempts: number;
+        cache_reported_calls: number;
+        cache_unreported_calls: number;
+        reported_cost_usd: any;
+        estimated_cost_usd: any;
+        cost_unreported_attempts: number;
+        by_origin: {
+            [k: string]: number;
+        };
+        contentStored: boolean;
+    };
+    codeAccepted: boolean;
+    accepted: boolean;
+    contentStored: boolean;
+    baseline?: {
+        policy: any;
+        accepted: boolean;
+        summaries: any;
+        checks: any;
+        changes: any;
+        sealed: boolean;
+    };
+    runtimeCloseout?: any;
     validationRunId: string;
     trace_id: string;
     status: string;
@@ -265,27 +297,4 @@ export declare function buildScopeNavigationValidationReport(id: string): {
         }[];
         attempts: number;
     };
-    whole: {
-        request_hit_rate: number;
-        token_reuse_rate: number;
-        total_input_tokens: any;
-        cache_known_input_tokens: any;
-        cache_token_reporting_coverage: number;
-        baseline_only_rate: number;
-        cache_preparation_coverage: number;
-        logical_calls: number;
-        physical_attempts: number;
-        cache_reported_calls: number;
-        cache_unreported_calls: number;
-        reported_cost_usd: any;
-        estimated_cost_usd: any;
-        cost_unreported_attempts: number;
-        by_origin: {
-            [k: string]: number;
-        };
-        contentStored: boolean;
-    };
-    codeAccepted: boolean;
-    accepted: boolean;
-    contentStored: boolean;
 };

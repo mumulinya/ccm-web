@@ -66,6 +66,7 @@ exports.listAgentRunSecrets = listAgentRunSecrets;
 exports.agentGovernanceMetrics = agentGovernanceMetrics;
 exports.recordManualAgentAction = recordManualAgentAction;
 exports.listAgentBudgetIncidents = listAgentBudgetIncidents;
+const task_store_read_statements_1 = require("../core/task-store-read-statements");
 const crypto = __importStar(require("crypto"));
 const task_store_1 = require("../core/task-store");
 const agent_run_store_1 = require("./agent-run-store");
@@ -289,7 +290,7 @@ function listAgentApprovals(runId) {
 }
 /** Read-only task projection: one indexed query, without per-Run write transactions. */
 function listTaskAgentApprovals(taskId, attemptId) {
-    return (0, task_store_1.withSqliteTaskStore)(db => db.prepare(`SELECT a.* FROM agent_approvals a
+    return (0, task_store_1.withSqliteTaskStore)(db => (0, task_store_read_statements_1.taskStoreReadStatement)(db, `SELECT a.* FROM agent_approvals a
     JOIN agent_runs r ON r.run_id = a.run_id WHERE r.task_id = ?
     ${attemptId ? "AND r.attempt_id = ?" : ""} ORDER BY a.requested_at ASC`)
         .all(...(attemptId ? [text(taskId), text(attemptId)] : [text(taskId)])).map(row => {
@@ -462,7 +463,7 @@ function createAgentRunArtifact(input) { return (0, task_store_1.withImmediateTa
     return rowArtifact(existing); const artifactId = id("artifact"); db.prepare(`INSERT INTO agent_run_artifacts(artifact_id, run_id, task_id, kind, name, path, external_ref, checksum, content_type, size_bytes, retention_status, created_at, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(artifactId, input.runId, input.taskId, input.kind, text(input.name), text(input.path), text(input.externalRef), text(input.checksum), text(input.contentType), Number(input.sizeBytes || 0), text(input.retentionStatus) || "active", now(), text(input.idempotencyKey)); recordAgentActivityInTransaction(db, { taskId: input.taskId, runId: input.runId, eventType: "artifact.created", summary: "Run 交付物已记录", payload: { artifactId, kind: input.kind, checksum: input.checksum }, idempotencyKey: `artifact-activity:${input.idempotencyKey}` }); return rowArtifact(db.prepare("SELECT * FROM agent_run_artifacts WHERE artifact_id = ?").get(artifactId)); }); }
 function listAgentRunArtifacts(runId, taskId) { return (0, task_store_1.withSqliteTaskStore)(db => db.prepare(`SELECT * FROM agent_run_artifacts WHERE ${text(taskId) ? "task_id = ?" : "run_id = ?"} ORDER BY created_at ASC`).all(text(taskId) || text(runId)).map(rowArtifact)); }
 function rowDependency(row) { return { dependencyId: text(row.dependency_id), taskId: text(row.task_id), dependsOnTaskId: text(row.depends_on_task_id), relation: (text(row.relation) || "blocks"), status: (text(row.status) || "active"), createdAt: text(row.created_at), releasedAt: text(row.released_at) }; }
-function listAgentTaskDependencies(taskId) { return (0, task_store_1.withSqliteTaskStore)(db => db.prepare(`SELECT * FROM agent_task_dependencies ${text(taskId) ? "WHERE task_id = ? OR depends_on_task_id = ?" : ""} ORDER BY created_at ASC`).all(...(text(taskId) ? [text(taskId), text(taskId)] : [])).map(rowDependency)); }
+function listAgentTaskDependencies(taskId) { return (0, task_store_1.withSqliteTaskStore)(db => (0, task_store_read_statements_1.taskStoreReadStatement)(db, `SELECT * FROM agent_task_dependencies ${text(taskId) ? "WHERE task_id = ? OR depends_on_task_id = ?" : ""} ORDER BY created_at ASC`).all(...(text(taskId) ? [text(taskId), text(taskId)] : [])).map(rowDependency)); }
 function listActiveBlockingDependencies(taskId) {
     return listAgentTaskDependencies(taskId).filter(item => item.taskId === text(taskId) && item.relation === "blocks" && item.status === "active");
 }

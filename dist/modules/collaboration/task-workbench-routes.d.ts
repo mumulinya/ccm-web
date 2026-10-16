@@ -104,6 +104,7 @@ export declare function projectTaskWorkbenchRow(task: any, allRuns?: any[], opti
         available_actions: string[];
         acceptance_feedback: {
             failure_kind: string;
+            failure_kinds: any[];
             failed_criteria: {
                 criterion: string;
                 status: any;
@@ -111,12 +112,21 @@ export declare function projectTaskWorkbenchRow(task: any, allRuns?: any[], opti
             failed_checks: {
                 check_id: string;
                 exit_code: any;
+                failure_code: string;
+                failure_stage: string;
+                failure_kind: any;
+                reproduction: string;
+                expected_summary: string;
+                actual_summary: string;
+                evidence_refs: string[];
             }[];
-            evidence_refs: unknown[];
+            evidence_refs: string[];
             recommended_route: string;
             can_auto_rework: boolean;
             review_cycle: any;
         };
+        code_review_summary: any;
+        verification_summary: any;
         compatible_action_kinds: string[];
         approval_items: any;
         runtime_continuity: any;
@@ -224,6 +234,7 @@ export declare function projectTaskWorkbenchRow(task: any, allRuns?: any[], opti
         available_actions: string[];
         acceptance_feedback: {
             failure_kind: string;
+            failure_kinds: any[];
             failed_criteria: {
                 criterion: string;
                 status: any;
@@ -231,12 +242,21 @@ export declare function projectTaskWorkbenchRow(task: any, allRuns?: any[], opti
             failed_checks: {
                 check_id: string;
                 exit_code: any;
+                failure_code: string;
+                failure_stage: string;
+                failure_kind: any;
+                reproduction: string;
+                expected_summary: string;
+                actual_summary: string;
+                evidence_refs: string[];
             }[];
-            evidence_refs: unknown[];
+            evidence_refs: string[];
             recommended_route: string;
             can_auto_rework: boolean;
             review_cycle: any;
         };
+        code_review_summary: any;
+        verification_summary: any;
         compatible_action_kinds: string[];
         approval_items: any;
         runtime_continuity: any;
@@ -350,6 +370,7 @@ export declare function projectTaskWorkbenchRow(task: any, allRuns?: any[], opti
         available_actions: string[];
         acceptance_feedback: {
             failure_kind: string;
+            failure_kinds: any[];
             failed_criteria: {
                 criterion: string;
                 status: any;
@@ -357,12 +378,21 @@ export declare function projectTaskWorkbenchRow(task: any, allRuns?: any[], opti
             failed_checks: {
                 check_id: string;
                 exit_code: any;
+                failure_code: string;
+                failure_stage: string;
+                failure_kind: any;
+                reproduction: string;
+                expected_summary: string;
+                actual_summary: string;
+                evidence_refs: string[];
             }[];
-            evidence_refs: unknown[];
+            evidence_refs: string[];
             recommended_route: string;
             can_auto_rework: boolean;
             review_cycle: any;
         };
+        code_review_summary: any;
+        verification_summary: any;
         compatible_action_kinds: string[];
         approval_items: any;
         runtime_continuity: any;

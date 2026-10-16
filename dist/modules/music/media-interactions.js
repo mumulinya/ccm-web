@@ -4,6 +4,7 @@ exports.musicInteractionIdentity = musicInteractionIdentity;
 exports.ensureNeteaseRequest = ensureNeteaseRequest;
 exports.readMediaComments = readMediaComments;
 exports.handleMusicInteractions = handleMusicInteractions;
+const context_1 = require("./folia/context");
 const utils_1 = require("../../core/utils");
 const search_results_1 = require("./search-results");
 const music_catalog_1 = require("./music-catalog");
@@ -99,7 +100,7 @@ function handleMusicInteractions(pathname, req, res) {
     let raw = '';
     req.on('data', chunk => { raw += chunk.toString(); if (Buffer.byteLength(raw) > 16384)
         req.destroy(); });
-    req.on('end', async () => {
+    req.on('end', (0, context_1.bindFoliaRequest)(req, async () => {
         try {
             const body = JSON.parse(raw || '{}');
             if (pathname.endsWith('/comments'))
@@ -114,7 +115,7 @@ function handleMusicInteractions(pathname, req, res) {
             const detail = (0, platform_http_1.publicMusicPlatformError)(e);
             (0, utils_1.sendJson)(res, { success: false, error: detail.error || '媒体信息暂不可用', errorKind: detail.status }, 400);
         }
-    });
+    }));
     return true;
 }
 //# sourceMappingURL=media-interactions.js.map

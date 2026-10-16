@@ -4,6 +4,13 @@ export declare function ensureWbiKey(): Promise<void>;
 export declare function signBiliParams(params: Record<string, string>): string;
 export declare function biliSearch(keyword: string): Promise<any[]>;
 export declare function getBiliPlaybackStreams(bvid: string): Promise<{
+    audioUrl: string;
+    videoUrl: string;
+    durationSeconds: number;
+    resolver: "browser";
+} | {
+    videoCodec: string;
+    audioCodec: string;
     audioUrl: any;
     videoUrl: any;
     durationSeconds: number;

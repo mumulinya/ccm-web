@@ -137,10 +137,10 @@ function beginTestAgentVisibleTool(contextValue, input) {
         return { toolCallId: "", finish: (_result) => undefined };
     const normalized = {
         kind: input.kind,
-        key: clean(input.key, 300),
+        key: input.command ? `command-check:${checksum(input.key)}` : clean(input.key, 300),
         project: clean(input.project || context.projectId || context.scopeId, 240),
-        label: clean(input.label, 240) || "检查",
-        command: clean(input.command, 600),
+        label: input.command ? "冻结命令验证" : clean(input.label, 240) || "检查",
+        commandRef: input.command ? `command:${checksum(input.command)}` : "",
     };
     const toolCallId = `test-agent-tool:${checksum({ context, normalized }).slice(0, 28)}`;
     const startedAt = new Date().toISOString();
@@ -150,9 +150,9 @@ function beginTestAgentVisibleTool(contextValue, input) {
     const safeArguments = {
         project_id: normalized.project,
         check: normalized.label,
-        ...(normalized.command ? { command: normalized.command } : {}),
+        ...(normalized.commandRef ? { command_ref: normalized.commandRef } : {}),
     };
-    const toolDisplay = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName: canonicalTool, arguments: safeArguments, result: { status: "running" }, includeTechnicalCommand: true });
+    const toolDisplay = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName: canonicalTool, arguments: safeArguments, result: { status: "running" }, includeTechnicalCommand: false });
     (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
         eventId: `${toolCallId}:started`,
         ...context,
@@ -183,7 +183,7 @@ function beginTestAgentVisibleTool(contextValue, input) {
                 ? `${normalized.label}${statusText === "blocked" ? "已阻止" : statusText === "timed_out" ? "已超时" : "未通过"}`
                 : `${normalized.label}已完成`;
             const safeResult = { status: failed ? statusText || "failed" : "passed", exitCode, durationMs, contentStored: false };
-            const completedDisplay = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName: canonicalTool, arguments: safeArguments, result: safeResult, error: failed ? clean(result?.error, 500) || summary : undefined, includeTechnicalCommand: true });
+            const completedDisplay = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName: canonicalTool, arguments: safeArguments, result: safeResult, error: failed ? summary : undefined, includeTechnicalCommand: false });
             const at = new Date().toISOString();
             (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
                 eventId: `${toolCallId}:${failed ? "failed" : "completed"}`,

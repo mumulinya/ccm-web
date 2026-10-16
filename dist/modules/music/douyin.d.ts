@@ -32,30 +32,13 @@ type RuntimePreparationState = {
     error: string;
 };
 export declare function updateDouyinSettings(input: any): DouyinSettings;
+export declare function getDouyinBrowserStorage(): any;
 export declare function douyinVideoUrl(awemeId: string): string;
 export declare function startDouyinBrowserLogin(): Promise<any>;
 /** Use the upstream MCP login flow exclusively. The legacy TypeScript
  * Playwright login opens duplicate browser pages on some Windows hosts, so
  * it must not be selected for the user-facing login action. */
-export declare function startDouyinLogin(): Promise<{
-    enabled: boolean;
-    mode: import("./douyin-mcp-bridge").DouyinMcpMode;
-    root: string;
-    commit: string;
-    dependencies: {
-        uv: boolean;
-        python: boolean;
-        files: boolean;
-        playwright: "ready" | "unknown" | "missing";
-    };
-    connected: boolean;
-    authenticated: boolean;
-    verified: boolean;
-    loginState: "failed" | "waiting" | "idle" | "authenticated";
-    loginStartedAt: string;
-    error: string;
-    installHint: string;
-}>;
+export declare function startDouyinLogin(): Promise<any>;
 export declare function revokeDouyinBrowserLogin(): {
     schema: string;
     official: {
@@ -112,62 +95,7 @@ export declare function revokeDouyinBrowserLogin(): {
         authenticatedEnhancement: boolean;
     };
 };
-export declare function revokeDouyinLogin(): Promise<{
-    schema: string;
-    official: {
-        configured: boolean;
-        clientKey: string;
-        secretProtected: boolean;
-    };
-    browser: {
-        compatibilityEnabled: boolean;
-        authenticated: any;
-        authenticatedAt: string;
-        loginState: string;
-        loginStartedAt: string;
-        error: string;
-    };
-    mcp: {
-        enabled: boolean;
-        mode: import("./douyin-mcp-bridge").DouyinMcpMode;
-        root: string;
-        commit: string;
-        dependencies: {
-            uv: boolean;
-            python: boolean;
-            files: boolean;
-            playwright: "ready" | "unknown" | "missing";
-        };
-        connected: boolean;
-        authenticated: boolean;
-        verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
-        loginStartedAt: string;
-        error: string;
-        installHint: string;
-    };
-    runtime: {
-        ready: boolean;
-        managed: boolean;
-        version: string;
-        platformSupported: boolean;
-        preparation: RuntimePreparationState;
-    };
-    asr: {
-        provider: "openai" | "custom" | "siliconflow" | "volcengine";
-        configured: boolean;
-        apiUrl: string;
-        model: string;
-        apiUrlConfigured: boolean;
-        keyProtected: boolean;
-    };
-    search: {
-        enabled: boolean;
-        mode: string;
-        anonymousSupported: boolean;
-        authenticatedEnhancement: boolean;
-    };
-}>;
+export declare function revokeDouyinLogin(): Promise<any>;
 export declare function douyinSearch(keyword: string, limit?: number): Promise<DouyinMusicResult[]>;
 export declare function prepareDouyinMediaRuntime(): Promise<any>;
 export declare function resolveDouyinMediaInput(awemeId: string, options?: {

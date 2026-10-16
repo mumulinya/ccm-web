@@ -36,9 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.streamMusicVideo = streamMusicVideo;
 const fs = __importStar(require("fs"));
 /** Serve a verified managed MP4, including byte ranges for native seeking. */
-function streamMusicVideo(req, res, file) {
+function streamMusicVideo(req, res, file, contentType = 'video/mp4') {
     const size = fs.statSync(file).size;
-    const headers = { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' };
+    const headers = { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' };
     let start = 0, end = size - 1, partial = false;
     if (req.headers.range) {
         const match = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range));

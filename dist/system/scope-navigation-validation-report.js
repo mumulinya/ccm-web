@@ -69,7 +69,7 @@ function buildScopeNavigationValidationReport(id) {
         const repairOrdinal = scope === 'project' ? Number(run.metadata.sourceBoundaryRepair?.afterOrdinal || 0) : 0;
         const declaredInputChanges = repairOrdinal ? warm.filter(row => row.validationOrdinal === repairOrdinal + 1) : [];
         const changes = warm.filter(row => row.configurationChanged !== true && row.validationOrdinal !== (repairOrdinal ? repairOrdinal + 1 : -1) &&
-            (!['unchanged', 'append_only'].includes(row.wireReuseEvidence?.comparison) || row.cacheIdentityPreserved === false));
+            (!(run.metadata.baselinePolicy === 'stable-v1' ? ['unchanged'] : ['unchanged', 'append_only']).includes(row.wireReuseEvidence?.comparison) || row.cacheIdentityPreserved === false));
         const metrics = (0, model_cache_metrics_1.summarizeModelCacheRows)(warm);
         const repairRows = repairOrdinal ? rows.filter(row => row.validationOrdinal > repairOrdinal) : [];
         const repairCold = repairRows.find(row => row.status === 'completed');
@@ -91,7 +91,13 @@ function buildScopeNavigationValidationReport(id) {
         && requests.every(row => run.requests.some(permit => permit.requestId === row.requestId && permit.status === row.status));
     const automaticReuse = ['project', 'group'].every(kind => evidence.some(row => row.kind === kind && row.outcome === 'local_reuse' && row.requestIds.length === 0));
     const linkedRequests = new Set(evidence.flatMap(row => row.requestIds));
+    const stable = run.metadata.baselinePolicy === 'stable-v1';
+    const baselineAccepted = !stable || !run.metadata.validationSealed && !(run.metadata.baselineChanges || []).length
+        && ['global', 'project', 'group'].every(phase => run.metadata.validationBaselines?.[phase] && run.metadata.baselineChecks?.[phase]?.matched === true);
+    const runtimeAccepted = !stable || run.metadata.runtimeCloseout?.completed === true && run.metadata.serviceHealthy === true
+        && run.metadata.backgroundResumed === true && pending.length === 0 && restoredBackground.every(row => ['completed', 'failed', 'cancelled'].includes(row.status));
     const codeAccepted = reconciled && automaticReuse && pending.length === 0 && run.metadata.restartVerified === true && run.status === 'completed'
+        && baselineAccepted
         && requests.every(row => linkedRequests.has(row.requestId)) && Object.values(scopes).every((scope) => scope.nonessentialPrefixChanges === 0 && scope.whole.logical_calls >= 4)
         && evidence.filter(row => row.outcome === 'model').length >= 8;
     return { validationRunId: id, trace_id: run.trace_id, status: run.status, limit: run.limit, used: run.used, windows, requests, permits: run.requests, rejections: run.rejections,
@@ -100,6 +106,9 @@ function buildScopeNavigationValidationReport(id) {
         derivedAuxiliaryRequests: requests.filter(row => row.attribution.purpose !== 'scope_navigation_generation'),
         missingReceipts, unbudgetedRequestIds: unbudgeted.map(row => row.requestId), reconciled, automaticReuse, pendingTaskIds: pending.map(row => row.key), evidence, scopes,
         restoredBackground: { observationFinishedAt: observationFinishedAt || null, requests: restoredBackground, attempts: restoredBackground.length },
-        whole: (0, model_cache_metrics_1.summarizeModelCacheRows)(requests), codeAccepted, accepted: codeAccepted && Object.values(scopes).every((scope) => scope.providerAccepted), contentStored: false };
+        ...(stable ? { baseline: { policy: run.metadata.baselinePolicy, accepted: baselineAccepted, summaries: run.metadata.validationBaselines,
+                checks: run.metadata.baselineChecks, changes: run.metadata.baselineChanges || [], sealed: run.metadata.validationSealed === true },
+            runtimeCloseout: { ...run.metadata.runtimeCloseout, accepted: runtimeAccepted, serviceHealthy: run.metadata.serviceHealthy, backgroundResumed: run.metadata.backgroundResumed } } : {}),
+        whole: (0, model_cache_metrics_1.summarizeModelCacheRows)(requests), codeAccepted, accepted: codeAccepted && runtimeAccepted && Object.values(scopes).every((scope) => scope.providerAccepted), contentStored: false };
 }
 //# sourceMappingURL=scope-navigation-validation-report.js.map

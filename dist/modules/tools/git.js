@@ -41,6 +41,7 @@ exports.parseGitStatus = parseGitStatus;
 exports.parseNumstat = parseNumstat;
 exports.buildGitStatusSummary = buildGitStatusSummary;
 exports.validatePatchPaths = validatePatchPaths;
+exports.commitPreviewAsync = commitPreviewAsync;
 exports.handleGitApi = handleGitApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -1320,6 +1321,7 @@ function handleGitApi(pathname, req, res, parsed) {
             void (async () => {
                 try {
                     const preview = await commitPreviewAsync(resolved.workDir, body.files, project);
+                    preview.code_review = require('../../review/git-integration').commitReviewSettings();
                     (0, utils_1.sendJson)(res, { success: true, preview, workspace_snapshot_checksum: preview.workspace_snapshot_checksum });
                 }
                 catch (error) {
@@ -1354,6 +1356,7 @@ function handleGitApi(pathname, req, res, parsed) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "请明确选择本次要提交的文件" }, 400);
                 const response = await (0, git_workspace_runtime_1.withGitMutationLease)(resolved.workDir, project, action, async ({ before }) => {
                     (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(body.expected_snapshot_checksum || body.workspace_snapshot_checksum, before);
+                    const codeReview = await require('../../review/git-integration').preCommitReview({ project, root: resolved.workDir, files: requested, allFiles, body, before });
                     if (action === "commit_and_push") {
                         const preflight = await inspectGitRemoteStateAsync(resolved.workDir);
                         if (!preflight.remoteUrl) {
@@ -1368,10 +1371,15 @@ function handleGitApi(pathname, req, res, parsed) {
                         }
                     }
                     const committed = await commitSelectedChangesAsync(resolved.workDir, message, requested, allFiles, project);
+                    const reviewDrift = await require('../../review/git-integration').verifyCommittedReview(codeReview, resolved.workDir, committed);
                     let push = null;
                     let outcome = committed.noop ? "no_changes" : "committed";
                     let partialSuccess = false;
-                    if (!committed.noop && action === "commit_and_push") {
+                    if (!committed.noop && reviewDrift) {
+                        outcome = 'committed_review_stale';
+                        partialSuccess = true;
+                    }
+                    if (!committed.noop && !reviewDrift && action === "commit_and_push") {
                         try {
                             push = { success: true, ...(await performGitRemoteOperation(resolved.workDir, "push")) };
                             outcome = "committed_and_pushed";
@@ -1391,7 +1399,7 @@ function handleGitApi(pathname, req, res, parsed) {
                 const messageText = outcome === "no_changes" ? "所选文件同步后没有可提交内容，变更状态已刷新"
                     : outcome === "committed" ? "代码已提交到本地仓库"
                         : outcome === "committed_and_pushed" ? "代码已提交并推送到远端"
-                            : `本地提交 ${hash} 已创建，但推送失败`;
+                            : outcome === 'committed_review_stale' ? `本地提交 ${hash} 已创建，但实际内容与审核不符，已停止推送，请重新核对` : `本地提交 ${hash} 已创建，但推送失败`;
                 (0, utils_1.sendJson)(res, {
                     success: true, action, outcome, partialSuccess, message: messageText,
                     commit: committed.noop ? { success: false, noop: true, hash: "" } : { success: true, hash, fullHash: committed.fullHash, blobs: committed.blobs },
@@ -1402,6 +1410,8 @@ function handleGitApi(pathname, req, res, parsed) {
                 });
             }
             catch (error) {
+                if (String(error?.code || '').startsWith('code_review_'))
+                    return (0, utils_1.sendJson)(res, { success: false, error: error.message, errorCode: error.code, review: error.review }, 409);
                 if (["repository_busy", "state_drift"].includes(String(error?.gitErrorCode || "")))
                     return gitApiFailure(res, error, "提交失败", action);
                 if (["remote_missing", "detached_head"].includes(String(error?.gitErrorCode || "")))

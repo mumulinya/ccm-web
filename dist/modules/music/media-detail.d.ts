@@ -6,6 +6,8 @@ export declare function detailIdentity(body: any): {
     track: any;
 } | {
     track: any;
+    owner?: string;
+    accountEpoch?: number;
     v: 1;
     source: import("./search-results").MusicSource;
     sourceId: string;

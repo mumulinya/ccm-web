@@ -25,6 +25,8 @@ function normalizeMusicSourceMode(value) {
         return "bilibili";
     if (mode === "douyin")
         return "douyin";
+    if (mode === 'qq' || mode === 'kugou' || mode === 'navidrome')
+        return mode;
     return "auto";
 }
 function validateMusicIntentDecision(value, requestText, mode) {
@@ -91,9 +93,9 @@ action must be none, search, play, or convert. Playback strategy must be exact_s
 - Chitchat, lyric questions, and player explanations: none.
 - Only an explicit request to watch a video or the song's associated MV may set mediaMode="video" with action="play". Ordinary song playback and search must omit mediaMode. An MV must be the platform-verified association, never a guessed same-title video.
 - Douyin video details, comments, replies, author posts, recommendations, share-link resolution, image downloads, video downloads, OCR or transcription: none with douyinRequest=true. Use normal search/play for music search/play. Otherwise douyinRequest=false.
-sourceMode defaults to auto. Return local, netease, bilibili, or douyin only when the user explicitly names that source in the current message.
+sourceMode defaults to auto. Return local, netease, qq, kugou, navidrome, bilibili, or douyin only when the user explicitly names that source in the current message. Ordinary music uses the local/Netease/QQ/KuGou/Navidrome music workspace. Video watching uses the Bilibili/Douyin video workspace. The model decides mediaMode from the full request.
 The currently selected UI tab is not a source restriction.
-Return: {"action":"none|search|play|convert","douyinRequest":false,"strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili|douyin","confidence":0.0,"reason":""}`;
+Return: {"action":"none|search|play|convert","douyinRequest":false,"mediaMode":"audio|video","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|qq|kugou|navidrome|bilibili|douyin","confidence":0.0,"reason":""}`;
     const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "music_intent",
         identity: {

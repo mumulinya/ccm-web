@@ -61,6 +61,7 @@ exports.reconcileAgentRunLeases = reconcileAgentRunLeases;
 exports.buildAgentRunProjection = buildAgentRunProjection;
 exports.buildTaskAgentRunProjection = buildTaskAgentRunProjection;
 exports.getAgentRunMetrics = getAgentRunMetrics;
+const task_store_read_statements_1 = require("../core/task-store-read-statements");
 const crypto = __importStar(require("crypto"));
 const task_store_1 = require("../core/task-store");
 const agent_run_lifecycle_1 = require("./agent-run-lifecycle");
@@ -223,7 +224,7 @@ function listAgentRuns(filters = {}) {
         add("status", filters.status);
         const limit = Math.min(500, Math.max(1, Number(filters.limit || 100)));
         const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-        return db.prepare(`SELECT * FROM agent_runs ${where} ORDER BY created_at DESC LIMIT ?`).all(...values, limit).map(rowToRun);
+        return (0, task_store_read_statements_1.taskStoreReadStatement)(db, `SELECT * FROM agent_runs ${where} ORDER BY created_at DESC LIMIT ?`).all(...values, limit).map(rowToRun);
     });
 }
 function listAgentRunEvents(runId, limit = 500) {
@@ -404,6 +405,8 @@ function claimAgentRunLeaseInTransaction(db, runId, ownerId, ttlMs = 120_000, re
     const run = resolveRun(db, runId);
     if (!run)
         return { acquired: false, reason: "run_not_found", run: null };
+    if (!require('../system/desktop-update-gate').desktopExecutionAllowed(run.taskId))
+        return { acquired: false, reason: 'desktop_update_pending', run };
     if ((0, agent_run_lifecycle_1.isAgentRunTerminal)(run.status))
         return { acquired: false, reason: "terminal", run };
     const at = now();

@@ -253,6 +253,9 @@ async function runMainAgentSelfVerification(input) {
         throw new Error("主 Agent 自验拒绝使用非自验模式的策略快照");
     }
     const task = input.task || {};
+    for (const project of input.projects || [])
+        if (task.id && project.workDir)
+            await require('../../review/task-integration').reviewTaskWithRepair({ taskId: task.id, project: project.name, root: project.workDir });
     const criteria = cleanList(input.acceptanceCriteria?.length ? input.acceptanceCriteria : String(task.acceptance_criteria || "").split(/\r?\n|；/), 30, 900)
         .map(normalizeAcceptanceCriterionForSignedPolicy);
     if (!criteria.length)

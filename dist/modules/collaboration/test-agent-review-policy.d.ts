@@ -34,6 +34,7 @@ export type TestAgentIncrementalScope = {
     focusedCommands: string[];
     coreRegressionCommands: string[];
     browserCheckNames: string[];
+    fallbackReasons?: string[];
 };
 export declare function normalizeTestAgentAcceptanceEvidencePlan(value: any): TestAgentAcceptanceEvidence[];
 export declare function normalizeTestAgentVerificationProfile(value: any): TestAgentVerificationProfile;
