@@ -42,7 +42,7 @@ const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const agent_communication_v2_1 = require("./agent-communication-v2");
 const agent_cache_affinity_1 = require("./agent-cache-affinity");
-const RECEIPT_FILE = path.join(process.env.CCM_SKILL_FORK_DIR || path.join(os.homedir(), ".ccm"), "skill-fork-receipts.json");
+const RECEIPT_FILE = path.join(process.env.CCM_SKILL_FORK_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "skill-fork-receipts.json");
 function hash(value) { return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex"); }
 function extractObject(text) {
     const fenced = String(text || "").match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];

@@ -187,6 +187,8 @@ async function prepareOfficialPetAssets(skin) {
         return { success: true, bundled: true, skin: skinId };
     if (!OPTIONAL_SKINS.has(skinId))
         throw new Error("该宠物不是可下载的CCM官方皮肤");
+    if (fs.existsSync(path.join(utils_1.PUBLIC_DIR, 'pets', `${skinId}.svg`)))
+        return { success: true, bundled: true, skin: skinId };
     const current = getPetAssetPackStatus();
     if (current.state === "ready" && current.available_skins.includes(skinId))
         return { success: true, cached: true, ...current };

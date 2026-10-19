@@ -36,10 +36,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CCM_DIR = exports.CCM_MIGRATION_SCHEMA = exports.DEFAULT_CCM_DIR = exports.LEGACY_CCM_DIR = void 0;
 exports.ensureCcmRuntimeHomeMigrationSync = ensureCcmRuntimeHomeMigrationSync;
 exports.ensureActiveRuntimePathsNormalizedSync = ensureActiveRuntimePathsNormalizedSync;
+require("./runtime-config-bootstrap");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
+const runtime_directory_config_1 = require("./runtime-directory-config");
 /**
  * CCM's persistent home.  The explicit environment override remains useful
  * for tests, isolated service instances and packaged deployments.
@@ -47,6 +49,9 @@ const child_process_1 = require("child_process");
 exports.LEGACY_CCM_DIR = path.join(os.homedir(), ".cc-connect");
 exports.DEFAULT_CCM_DIR = path.join(os.homedir(), ".ccm");
 exports.CCM_MIGRATION_SCHEMA = "ccm-runtime-home-migration-v1";
+function configuredRuntimeHome() {
+    return (0, runtime_directory_config_1.readDirectoryConfig)()?.dataDirectory || '';
+}
 const RUNTIME_PATH_MIGRATION_SCHEMA = "ccm-runtime-path-normalization-v1";
 function isExcludedLegacyEntry(name) {
     const normalized = String(name || "").toLowerCase();
@@ -70,8 +75,8 @@ function safeCountEntries(root) {
  * The legacy directory is never modified or deleted.
  */
 function ensureCcmRuntimeHomeMigrationSync() {
-    if (process.env.CCM_TASK_STORE_DIR)
-        return { status: "explicit_override", target: path.resolve(process.env.CCM_TASK_STORE_DIR) };
+    if (process.env.CCM_TASK_STORE_DIR || configuredRuntimeHome())
+        return { status: "explicit_override", target: (0, runtime_directory_config_1.resolveDataDirectory)() };
     const legacy = exports.LEGACY_CCM_DIR;
     const target = exports.DEFAULT_CCM_DIR;
     const marker = path.join(target, "migration-v1.json");
@@ -236,7 +241,7 @@ function writeJsonIfChanged(file, packageRoot) {
  * run at every startup, which also repairs stores created by older releases.
  */
 function ensureActiveRuntimePathsNormalizedSync() {
-    if (process.env.CCM_TASK_STORE_DIR)
+    if (process.env.CCM_TASK_STORE_DIR || configuredRuntimeHome())
         return { changedFiles: [], skipped: "explicit_override" };
     const target = exports.DEFAULT_CCM_DIR;
     const packageRoot = resolvePackageRoot();
@@ -291,7 +296,7 @@ function ensureActiveRuntimePathsNormalizedSync() {
     return { changedFiles, packageRoot };
 }
 // Run before exporting the path consumed by eager storage modules.
-exports.CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || exports.DEFAULT_CCM_DIR);
+exports.CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || configuredRuntimeHome() || exports.DEFAULT_CCM_DIR);
 if (!process.env.CCM_TASK_STORE_DIR) {
     try {
         ensureCcmRuntimeHomeMigrationSync();

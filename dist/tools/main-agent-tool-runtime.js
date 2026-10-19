@@ -44,6 +44,7 @@ exports.normalizeMainAgentToolRequests = normalizeMainAgentToolRequests;
 exports.mainAgentToolRequestFingerprint = mainAgentToolRequestFingerprint;
 exports.buildMainAgentLoadedContextItems = buildMainAgentLoadedContextItems;
 exports.executeMainAgentToolRequests = executeMainAgentToolRequests;
+const installed_tool_catalog_1 = require("./installed-tool-catalog");
 const workspace_read_guidance_1 = require("./workspace-read-guidance");
 const deferred_tool_invocation_1 = require("../agents/deferred-tool-invocation");
 const main_agent_tool_prompt_1 = require("./main-agent-tool-prompt");
@@ -147,7 +148,7 @@ function buildMainAgentToolRuntimeContext(input) {
     const contextPolicy = (0, main_agent_context_policy_1.readMainAgentContextPolicy)(input.contextPolicy || {});
     const schemaSurface = input.schemaSurface === "native" ? "native" : "prompt";
     const contextWindow = Math.max(32_000, Math.floor(Number(input.contextWindow || 200_000)));
-    const configured = (0, tool_authorization_1.normalizeToolAuthorization)(input.configuredTools || {});
+    const configured = (0, installed_tool_catalog_1.installedToolGrants)();
     const executionSkills = uniqueNames(input.executionSkills || []);
     const effective = (0, tool_authorization_1.normalizeToolAuthorization)({
         mcp: configured.mcp,

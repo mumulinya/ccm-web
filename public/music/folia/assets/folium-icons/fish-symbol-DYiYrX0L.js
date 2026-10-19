@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`fish-symbol`,size:24,node:[[`path`,{d:`M2 16s9-15 20-4C11 23 2 8 2 8`,key:`h4oh4o`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

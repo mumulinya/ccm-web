@@ -113,7 +113,7 @@ export declare function getPostReviewSpotCheckState(input: MainAgentWorkchainInp
 };
 export declare function collectAcceptanceEvidence(input: MainAgentWorkchainInput): string[];
 export declare function collectIndependentReviewEvidence(input: MainAgentWorkchainInput): string[];
-export declare function checkpointStatus(status: any): "done" | "pending" | "failed" | "warning" | "active";
+export declare function checkpointStatus(status: any): "failed" | "done" | "pending" | "warning" | "active";
 export declare function normalizeWorkchainTodoSteps(input: MainAgentWorkchainInput, stages: any[], terminal: boolean): {
     id: string;
     content: string;
@@ -322,7 +322,7 @@ export declare function buildMainAgentProgressCheckpoints(input: MainAgentWorkch
     };
     items: any[];
 };
-export declare function stageStatus(input: MainAgentWorkchainInput, stage: string): "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "needs_confirmation";
+export declare function stageStatus(input: MainAgentWorkchainInput, stage: string): "completed" | "failed" | "pending" | "in_progress" | "cancelled" | "needs_confirmation";
 export declare function terminalWorkchain(input: MainAgentWorkchainInput): boolean;
 export declare function collectWorkchainVisibleQualityText(value: any, depth?: number): string[];
 export declare function buildFinalSummaryQuality(input: MainAgentWorkchainInput, evidence: ReturnType<typeof collectCompletionEvidence>, terminal: boolean, headline: string, nextAction: string, options?: {

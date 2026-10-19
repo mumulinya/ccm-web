@@ -68,7 +68,7 @@ export declare function revokeDouyinBrowserLogin(): {
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;
@@ -144,7 +144,7 @@ export declare function douyinPlatformStatus(): {
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;

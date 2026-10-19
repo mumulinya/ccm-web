@@ -42,7 +42,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const FILE = process.env.CCM_AGENT_AUTH_EVIDENCE_FILE || path.join(os.homedir(), ".ccm", "agent-auth-evidence-v2.json");
+const FILE = process.env.CCM_AGENT_AUTH_EVIDENCE_FILE || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-auth-evidence-v2.json");
 const TTL_MS = 24 * 60 * 60 * 1000;
 function digest(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");

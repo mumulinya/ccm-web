@@ -1409,7 +1409,7 @@ export declare function recordWorkerContextProviderDispatchOverrideCompletionFor
 export declare function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string): any;
 export declare function uniqueCoordinatorStrings(values?: any[]): string[];
 export declare const REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR: string[];
-export declare function replayRepairWorkItemStatusForCoordinator(value: any): "pending" | "in_progress" | "blocked" | "completed" | "cancelled";
+export declare function replayRepairWorkItemStatusForCoordinator(value: any): "completed" | "pending" | "in_progress" | "blocked" | "cancelled";
 export declare function replayRepairWorkItemOpenForCoordinator(status: any): boolean;
 export declare const API_MICROCOMPACT_NATIVE_PROOF_REPAIR_SOURCES_FOR_COORDINATOR: Set<string>;
 export declare function isApiMicrocompactNativeProofRepairSourceForCoordinator(source: any): boolean;
@@ -1723,8 +1723,8 @@ export declare function classifyReplayRepairBriefConsumptionForCoordinator(brief
     postCompactReceiptMemoryUsageRepairProof?: undefined;
 };
 export declare function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, input?: any, options?: any): any;
-export declare function replayRepairStatusForCoordinator(item: any): "pending" | "in_progress" | "blocked" | "completed" | "cancelled";
-export declare function replayRepairPriorityRankForCoordinator(priority: any): 0 | 1 | 2 | 3;
+export declare function replayRepairStatusForCoordinator(item: any): "completed" | "pending" | "in_progress" | "blocked" | "cancelled";
+export declare function replayRepairPriorityRankForCoordinator(priority: any): 2 | 1 | 0 | 3;
 export declare function candidateNativeBindingForCoordinator(candidate?: any): string[];
 export declare function readyReplayRepairDispatchBriefsForCoordinator(groupId: string): any;
 export declare function replayRepairBriefMatchText(value: any): string;

@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.toolManager = exports.ToolManager = void 0;
 exports.runToolManagerRuntimeSelfTest = runToolManagerRuntimeSelfTest;
+const installed_tool_catalog_1 = require("./installed-tool-catalog");
 const mcp_client_1 = require("./mcp-client");
 const mcp_remote_client_1 = require("./mcp-remote-client");
 const fs = __importStar(require("fs"));
@@ -42,7 +43,7 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../core/db");
-const CCM_DIR = path.join(os.homedir(), ".ccm");
+const CCM_DIR = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"));
 const MCP_DIR = path.join(CCM_DIR, "mcp");
 const SKILLS_DIR = path.join(CCM_DIR, "skills");
 const TOOL_AUDIT_DIR = path.join(CCM_DIR, "agent-runner");
@@ -238,116 +239,78 @@ function deriveMcpAuthStatus(config = {}, diagnosticText = "", elicitationRequir
 function contentHash(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value || {})).digest("hex").slice(0, 16);
 }
+function connectionIdentity(config) {
+    return contentHash({ config, oauth: config?.url ? require("./extension-oauth").extensionOAuthConnectionIdentity(config.name) : "" });
+}
 class ToolManager {
+    installedCheck;
     clients = new Map(); // serverName -> client
     serverConfigs = new Map();
     serverStatuses = new Map();
     tools = [];
     skills = [];
     initialized = false;
-    // 加载所有启用的 MCP 服务器和 Skills
-    async loadTools() {
-        for (const client of this.clients.values()) {
-            try {
-                await client.disconnect();
-            }
-            catch { }
+    connectionIdentities = new Map();
+    connectionAttempts = new Map();
+    constructor(installedCheck = installed_tool_catalog_1.currentInstalledRecordAllowed) {
+        this.installedCheck = installedCheck;
+    }
+    reloadQueue = Promise.resolve();
+    // Retain healthy connections while unrelated extensions initialize. Serialize
+    // reload publications so disable/update cannot race an older connection batch.
+    loadTools() {
+        this.reloadQueue = this.reloadQueue.then(() => this.reloadInstalledTools(), () => this.reloadInstalledTools());
+        return this.reloadQueue;
+    }
+    async reloadInstalledTools() {
+        const configs = this.loadMcpConfigs().filter(config => config.enabled && (0, installed_tool_catalog_1.installedRecordAllowed)("mcp", config) && (config.command || config.url));
+        const next = new Map(configs.map(config => [config.name, config]));
+        const closing = [];
+        for (const name of new Set([...this.serverConfigs.keys(), ...this.clients.keys(), ...this.serverStatuses.keys()])) {
+            if (next.has(name))
+                continue;
+            const client = this.clients.get(name);
+            this.clients.delete(name);
+            this.serverConfigs.delete(name);
+            this.serverStatuses.delete(name);
+            this.connectionIdentities.delete(name);
+            this.connectionAttempts.set(name, (this.connectionAttempts.get(name) || 0) + 1);
+            this.tools = this.tools.filter(tool => tool.serverName !== name);
+            if (client)
+                closing.push(Promise.resolve().then(() => client.disconnect()).catch(() => { }));
         }
-        this.clients.clear();
-        this.serverConfigs.clear();
-        this.serverStatuses.clear();
-        this.tools = [];
-        // 加载 MCP 工具配置
-        const mcpConfigs = this.loadMcpConfigs();
-        for (const config of mcpConfigs) {
-            if (!config.enabled || (!config.command && !config.url))
-                continue;
+        this.skills = this.loadSkillConfigs().filter(skill => skill.enabled && (0, installed_tool_catalog_1.installedRecordAllowed)("skill", skill));
+        this.initialized = true;
+        const connecting = configs.map(async (config) => {
+            if (this.connectionIdentities.get(config.name) === connectionIdentity(config) && this.clients.get(config.name)?.isConnected())
+                return;
             this.serverConfigs.set(config.name, config);
-            const auth = deriveMcpAuthStatus(config);
-            this.serverStatuses.set(config.name, {
-                name: config.name,
-                state: "pending",
-                toolsCount: 0,
-                retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
-                auth,
-            });
-            if (auth.needsUserAuth && auth.authRequired && (!auth.authConfigured || auth.tokenExpired)) {
-                this.serverStatuses.set(config.name, {
-                    name: config.name,
-                    state: "auth_required",
-                    toolsCount: 0,
-                    error: auth.message,
-                    lastErrorAt: new Date().toISOString(),
-                    retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
-                    auth,
-                });
-                console.warn(`[ToolManager] MCP "${config.name}" 需要鉴权: ${auth.message}`);
-                continue;
-            }
-            if (this.clients.has(config.name))
-                continue;
-            let client;
+            this.tools = this.tools.filter(tool => tool.serverName !== config.name);
+            this.serverStatuses.set(config.name, { name: config.name, state: "pending", toolsCount: 0, retryCount: 0, auth: deriveMcpAuthStatus(config) });
+            const attempt = (this.connectionAttempts.get(config.name) || 0) + 1;
             try {
-                client = this.createClient(config);
+                await this.reconnectServer(config.name);
             }
             catch (error) {
-                this.serverStatuses.set(config.name, {
-                    name: config.name,
-                    state: "failed",
-                    toolsCount: 0,
-                    error: String(error?.message || error).slice(0, 500),
-                    lastErrorAt: new Date().toISOString(),
-                    retryCount: 0,
-                    auth,
-                });
-                continue;
-            }
-            const connected = await client.connect();
-            if (connected) {
-                this.clients.set(config.name, client);
-                const serverTools = await client.listTools();
-                for (const t of serverTools) {
-                    this.tools.push({
-                        name: t.name,
-                        description: t.description || "",
-                        serverName: config.name,
-                        inputSchema: t.inputSchema,
-                        annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
-                        meta: t._meta && typeof t._meta === "object" ? t._meta : undefined,
-                    });
+                if (this.connectionAttempts.get(config.name) !== attempt)
+                    return;
+                const client = this.clients.get(config.name);
+                this.clients.delete(config.name);
+                try {
+                    await client?.disconnect();
                 }
-                this.serverStatuses.set(config.name, {
-                    name: config.name,
-                    state: "connected",
-                    toolsCount: serverTools.length,
-                    lastConnectedAt: new Date().toISOString(),
-                    retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
-                    auth: deriveMcpAuthStatus(config, "", client.getDiagnostics().elicitationRequired),
-                });
-                console.log(`[ToolManager] MCP "${config.name}" 已连接, ${serverTools.length} 个工具`);
+                catch { }
+                if (this.connectionAttempts.get(config.name) !== attempt)
+                    return;
+                this.serverStatuses.set(config.name, { name: config.name, state: "failed", toolsCount: 0, retryCount: 0,
+                    error: String(error?.message || error).slice(0, 500), lastErrorAt: new Date().toISOString(), auth: deriveMcpAuthStatus(config) });
             }
-            else {
-                const diagnostics = client.getDiagnostics();
-                const failedAuth = deriveMcpAuthStatus(config, `${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
-                this.serverStatuses.set(config.name, {
-                    name: config.name,
-                    state: failedAuth.needsUserAuth ? "auth_required" : "failed",
-                    toolsCount: 0,
-                    error: failedAuth.needsUserAuth ? failedAuth.message : (diagnostics.lastError || "连接失败"),
-                    lastErrorAt: new Date().toISOString(),
-                    retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
-                    auth: failedAuth,
-                });
-                console.warn(`[ToolManager] MCP "${config.name}" 连接失败`);
-            }
-        }
-        // 加载 Skills
-        this.skills = this.loadSkillConfigs().filter(s => s.enabled);
-        this.initialized = true;
+        });
+        await Promise.allSettled([...closing, ...connecting]);
     }
     createClient(config) {
         if (config?.url) {
-            return new mcp_remote_client_1.McpRemoteClient(String(config.url), config.headers && typeof config.headers === "object" ? config.headers : {}, config.transport === "sse" ? "sse" : "streamable_http");
+            return new mcp_remote_client_1.McpRemoteClient(String(config.url), config.headers && typeof config.headers === "object" ? config.headers : {}, config.transport === "sse" ? "sse" : "streamable_http", String(config.name || ""));
         }
         const command = String(config.executablePath || config.command || "");
         if (config.executablePath) {
@@ -547,7 +510,7 @@ Rules:
         const skill = this.skills.find(item => item.name === skillName && item.enabled !== false);
         if (!skill)
             return { ok: false, name: skillName, error: "skill_unavailable" };
-        if (scope && !isSkillAllowed(scope, skill.name)) {
+        if ((this.initialized && !this.installedCheck("skill", skill.name)) || (scope && !isSkillAllowed(scope, skill.name))) {
             return { ok: false, name: skill.name, error: "skill_unauthorized" };
         }
         return {
@@ -604,7 +567,7 @@ Rules:
                 invokedAt: new Date().toISOString(),
             };
         }
-        if (scope && !isSkillAllowed(scope, skill.name)) {
+        if ((this.initialized && !this.installedCheck("skill", skill.name)) || (scope && !isSkillAllowed(scope, skill.name))) {
             appendSkillInvocationAudit({ type: "skill_unauthorized", skill: skill.name, contentHash: skill.contentHash, ...auditMetaFromScope(scope) });
             return {
                 ok: false,
@@ -652,7 +615,12 @@ Rules:
         return null;
     }
     async reconnectServer(serverName) {
-        const config = this.serverConfigs.get(serverName) || this.loadMcpConfigs().find(item => item?.name === serverName);
+        const attempt = (this.connectionAttempts.get(serverName) || 0) + 1;
+        this.connectionAttempts.set(serverName, attempt);
+        const config = this.loadMcpConfigs().find(item => item?.name === serverName);
+        const identity = connectionIdentity(config);
+        const current = () => this.connectionAttempts.get(serverName) === attempt && this.loadMcpConfigs().some(item => item.name === serverName
+            && item.enabled && (0, installed_tool_catalog_1.installedRecordAllowed)("mcp", item) && connectionIdentity(item) === identity);
         if (!config?.enabled || (!config?.command && !config?.url)) {
             const auth = deriveMcpAuthStatus(config || {});
             this.serverStatuses.set(serverName, {
@@ -684,6 +652,9 @@ Rules:
             await previous?.disconnect();
         }
         catch { }
+        if (!current())
+            return false;
+        this.serverConfigs.set(serverName, config);
         const retryCount = Number(this.serverStatuses.get(serverName)?.retryCount || 0) + 1;
         let client;
         try {
@@ -701,45 +672,71 @@ Rules:
             });
             return false;
         }
-        const connected = await client.connect();
-        if (!connected) {
-            const diagnostics = client.getDiagnostics();
-            const failedAuth = deriveMcpAuthStatus(config, `${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
-            this.clients.delete(serverName);
-            this.tools = this.tools.filter(tool => tool.serverName !== serverName);
+        try {
+            const connected = await client.connect();
+            if (!current()) {
+                try {
+                    await client.disconnect();
+                }
+                catch { }
+                return false;
+            }
+            if (!connected) {
+                const diagnostics = client.getDiagnostics();
+                const failedAuth = deriveMcpAuthStatus(config, `${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
+                this.clients.delete(serverName);
+                this.tools = this.tools.filter(tool => tool.serverName !== serverName);
+                this.serverStatuses.set(serverName, {
+                    name: serverName,
+                    state: failedAuth.needsUserAuth ? "auth_required" : "failed",
+                    toolsCount: 0,
+                    error: failedAuth.needsUserAuth ? failedAuth.message : (diagnostics.lastError || "重连失败"),
+                    lastErrorAt: new Date().toISOString(),
+                    retryCount,
+                    auth: failedAuth,
+                });
+                return false;
+            }
+            const serverTools = await client.listTools();
+            if (!current()) {
+                try {
+                    await client.disconnect();
+                }
+                catch { }
+                return false;
+            }
+            this.clients.set(serverName, client);
+            this.connectionIdentities.set(serverName, identity);
+            this.tools = [
+                ...this.tools.filter(tool => tool.serverName !== serverName),
+                ...serverTools.map((t) => ({
+                    name: t.name,
+                    description: t.description || "",
+                    serverName,
+                    inputSchema: t.inputSchema,
+                    annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
+                    meta: t._meta && typeof t._meta === "object" ? t._meta : undefined,
+                })),
+            ];
             this.serverStatuses.set(serverName, {
                 name: serverName,
-                state: failedAuth.needsUserAuth ? "auth_required" : "failed",
-                toolsCount: 0,
-                error: failedAuth.needsUserAuth ? failedAuth.message : (diagnostics.lastError || "重连失败"),
-                lastErrorAt: new Date().toISOString(),
+                state: "connected",
+                toolsCount: serverTools.length,
+                lastConnectedAt: new Date().toISOString(),
                 retryCount,
-                auth: failedAuth,
+                auth: deriveMcpAuthStatus(config, "", client.getDiagnostics().elicitationRequired),
             });
-            return false;
+            return true;
         }
-        const serverTools = await client.listTools();
-        this.clients.set(serverName, client);
-        this.tools = [
-            ...this.tools.filter(tool => tool.serverName !== serverName),
-            ...serverTools.map((t) => ({
-                name: t.name,
-                description: t.description || "",
-                serverName,
-                inputSchema: t.inputSchema,
-                annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
-                meta: t._meta && typeof t._meta === "object" ? t._meta : undefined,
-            })),
-        ];
-        this.serverStatuses.set(serverName, {
-            name: serverName,
-            state: "connected",
-            toolsCount: serverTools.length,
-            lastConnectedAt: new Date().toISOString(),
-            retryCount,
-            auth: deriveMcpAuthStatus(config, "", client.getDiagnostics().elicitationRequired),
-        });
-        return true;
+        catch (error) {
+            try {
+                await client.disconnect();
+            }
+            catch { }
+            if (!current())
+                return false;
+            throw error;
+        }
     }
     // 解析 Agent 输出中的工具调用
     parseToolCalls(text) {
@@ -771,7 +768,7 @@ Rules:
         if (!tool) {
             return `[错误] 工具 "${toolName}" 不存在`;
         }
-        if (scope && !isMcpToolAllowed(scope, tool)) {
+        if ((this.initialized && !this.installedCheck("mcp", tool.serverName)) || (scope && !isMcpToolAllowed(scope, tool))) {
             appendToolPermissionAudit({
                 type: "mcp_unauthorized_tool_call",
                 tool: toolName,
@@ -788,6 +785,8 @@ Rules:
             if (!reconnected || !client || !client.isConnected())
                 return `[错误] MCP 服务器 "${tool.serverName}" 未连接，自动重连失败`;
         }
+        if ((this.initialized && !this.installedCheck("mcp", tool.serverName)) || (scope && !isMcpToolAllowed(scope, tool)))
+            return `[错误] 工具 "${toolName}" 未授权给当前 Agent 使用`;
         const result = await client.callTool(tool.name, args);
         if (result.isError) {
             const errorText = result.content.map(c => c.text).join("\n");
@@ -910,7 +909,7 @@ exports.ToolManager = ToolManager;
 // 单例
 exports.toolManager = new ToolManager();
 async function runToolManagerRuntimeSelfTest() {
-    const manager = new ToolManager();
+    const manager = new ToolManager(() => true);
     manager.initialized = true;
     manager.tools = [
         { name: "createInvoice", description: "create", serverName: "payments", inputSchema: {} },

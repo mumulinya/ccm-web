@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`thermometer`,size:24,node:[[`path`,{d:`M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z`,key:`17jzev`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

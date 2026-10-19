@@ -17,15 +17,15 @@ function requireFoliaWrite(req) {
 }
 const operations = {
     netease: {
-        read: '/search /cloudsearch /song/detail /song/copyright/rcmd /login/status /user/account /user/detail /user/playlist /playlist/track/all /playlist/detail /album/sublist /artist/detail /artist/album /artist/top/song /artist/songs /song/url/v1 /song/url /lyric/new /song/chorus /cloud/lyric/get /user/cloud /user/cloud/detail /personal/fm /personal/fm/mode /recommend/songs /history/recommend/songs /history/recommend/songs/detail /playlist/detail/dynamic /album/detail/dynamic /album /likelist',
+        read: '/toplist /search /cloudsearch /song/detail /song/copyright/rcmd /login/status /user/account /user/detail /user/playlist /playlist/track/all /playlist/detail /album/sublist /artist/detail /artist/album /artist/top/song /artist/songs /song/url/v1 /song/url /lyric/new /song/chorus /cloud/lyric/get /user/cloud /user/cloud/detail /personal/fm /personal/fm/mode /recommend/songs /history/recommend/songs /history/recommend/songs/detail /playlist/detail/dynamic /album/detail/dynamic /album /likelist',
         write: '/register/anonimous /login/qr/key /login/qr/create /login/qr/check /logout /scrobble/v1 /playlist/tracks /recommend/songs/dislike /playlist/subscribe /album/sub /like /playlist/create /playlist/delete /playlist/update /comment /follow /user/update',
     },
     qq: {
-        read: '/login/status /login/channels /user/detail /user/playlist /user/albums /user/liked-songs /user/playlist-detail /getMusicPlay /getSongListDetail /getSongInfo /getAlbumInfo /getSingerAlbum /getSingerHotsong',
-        write: '/login/qr/key /login/qr/create /login/qr/check /login/qr/cancel /logout',
+        read: '/getTopLists /getRanks /search /login/status /login/channels /user/detail /user/playlist /user/albums /user/liked-songs /user/playlist-detail /getMusicPlay /getSongListDetail /getSongInfo /getAlbumInfo /getSingerAlbum /getSingerHotsong /user/guess-you-like /user/daily-songs /recommend/playlists /user/subscription-status',
+        write: '/login/qr/key /login/qr/create /login/qr/check /login/qr/cancel /logout /user/playlist/tracks /user/playlist/subscribe /user/song/like /user/album/subscribe',
     },
     kugou: {
-        read: '/user/detail /user/vip/detail /user/playlist /user/cloud /user/cloud/url /search /audio /krm/audio /song/url /song/climax /search/lyric /lyric /playlist/track/all /playlist/detail /album/detail /album/songs /artist/detail /artist/albums /artist/audios /everyday/recommend /everyday/history /personal/fm /top/card/youth',
+        read: '/rank/list /rank/audio /user/detail /user/vip/detail /user/playlist /user/cloud /user/cloud/url /search /audio /krm/audio /song/url /song/climax /search/lyric /lyric /playlist/track/all /playlist/detail /album/detail /album/songs /artist/detail /artist/albums /artist/audios /everyday/recommend /everyday/history /personal/fm /top/card/youth',
         write: '/register/dev /login/qr/key /login/qr/create /login/qr/check /logout /youth/union/vip /youth/day/vip /youth/day/vip/upgrade /playlist/add /playlist/del /playlist/tracks/add /playlist/tracks/del /artist/follow',
     },
     navidrome: {

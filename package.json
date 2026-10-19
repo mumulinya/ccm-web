@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "本地优先的多 Agent 协作与自动开发工作区，集成任务编排、记忆上下文、MCP/Skill、TestAgent、Git、飞书、知识库和终端",
   "main": "dist/server.js",
   "bin": {
@@ -124,7 +124,7 @@
     "secretlint": "10.2.2",
     "@secretlint/secretlint-rule-preset-recommend": "10.2.2",
     "@neteasecloudmusicapienhanced/api": "4.40.1",
-    "@yakult-green-tea/qq-music-api": "3.1.4",
+    "@yakult-green-tea/qq-music-api": "3.3.1",
     "kugoumusicapi": "https://github.com/MakcRe/KuGouMusicApi/archive/refs/tags/v1.6.0.tar.gz",
     "qrcode": "^1.5.4"
   },

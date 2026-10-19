@@ -3,13 +3,14 @@ export declare class McpRemoteClient {
     private url;
     private headers;
     private preferredTransport;
+    private serverName;
     private client;
     private transport;
     private connected;
     private tools;
     private lastError;
     private actualTransport;
-    constructor(url: string, headers?: Record<string, string>, preferredTransport?: RemoteTransport);
+    constructor(url: string, headers?: Record<string, string>, preferredTransport?: RemoteTransport, serverName?: string);
     private safeError;
     private transportOptions;
     private connectWith;

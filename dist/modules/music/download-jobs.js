@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.musicDownloadJobs = void 0;
 const crypto = __importStar(require("crypto"));
+const desktop_update_gate_1 = require("../../system/desktop-update-gate");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
@@ -229,6 +230,8 @@ class MusicDownloadJobStore {
         catch { }
     }
     async pump() {
+        if ((0, desktop_update_gate_1.deferDuringDesktopUpdate)(() => { void this.pump(); }))
+            return;
         if (this.pumping)
             return;
         this.pumping = true;

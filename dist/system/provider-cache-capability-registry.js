@@ -51,7 +51,7 @@ const provider_cache_protocol_1 = require("./provider-cache-protocol");
 const credential_store_1 = require("../core/credential-store");
 const REGISTRY_ROOT = process.env.CCM_PROVIDER_CACHE_CAPABILITY_DIR
     ? path.resolve(process.env.CCM_PROVIDER_CACHE_CAPABILITY_DIR)
-    : path.join(os.homedir(), ".ccm", "provider-cache-capability");
+    : path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "provider-cache-capability");
 const REGISTRY_FILE = path.join(REGISTRY_ROOT, "capabilities.json");
 const NORMAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEGRADED_TTL_MS = 15 * 60 * 1000;

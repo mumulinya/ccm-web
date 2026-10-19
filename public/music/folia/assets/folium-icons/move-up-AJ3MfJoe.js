@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`move-up`,size:24,node:[[`path`,{d:`M8 6L12 2L16 6`,key:`1yvkyx`}],[`path`,{d:`M12 2V22`,key:`r89rzk`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

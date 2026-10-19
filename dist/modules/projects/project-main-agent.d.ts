@@ -139,7 +139,7 @@ export declare function projectRequirementPlanProjection(plan: ProjectMainPlan, 
     scope: string[];
     expectedResults: string[];
     exclusions: string[];
-    status: "ready" | "executing" | "blocked" | "completed" | "superseded";
+    status: "completed" | "ready" | "executing" | "blocked" | "superseded";
     createdAt: string;
     updatedAt: string;
 };

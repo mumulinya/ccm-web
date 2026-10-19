@@ -84,6 +84,7 @@ type SemanticDecisionRequest<T> = {
     config?: any;
     cacheAffinity?: CcmAgentCacheAffinityV1;
     retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
     onRetry?: (notice: any) => void;
     onProviderRequestActivity?: (activity: any) => void;
 };

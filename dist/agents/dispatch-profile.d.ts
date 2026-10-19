@@ -65,7 +65,7 @@ export declare function validateDispatchProfileSnapshot(snapshot: any): {
 };
 export declare function resolveDispatchProfileSnapshot(task: any): DispatchProfileSnapshot;
 export declare function canUpgradeDispatchProfile(current: DispatchProfile, next: DispatchProfile): boolean;
-export declare function reworkLimitForDispatchProfile(profile: DispatchProfile): 1 | 2 | 3;
+export declare function reworkLimitForDispatchProfile(profile: DispatchProfile): 2 | 1 | 3;
 export declare function normalizeDispatchPath(value: any): string;
 export declare function canonicalDispatchPath(file: string, workspacePath?: string): string;
 export declare function resolveDispatchScope(task: any): DispatchScope;

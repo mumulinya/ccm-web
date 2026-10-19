@@ -5,7 +5,7 @@ export declare function captureDispatchReworkEvidenceSync(task: any, workspacePa
     declaredFileHash: string;
     contentChecksum: string;
     artifacts: {
-        kind: "receipt" | "file" | "external" | "diff" | "report" | "test_evidence";
+        kind: "receipt" | "file" | "diff" | "external" | "report" | "test_evidence";
         path: string;
         checksum: string;
     }[];
@@ -27,7 +27,7 @@ export declare function captureDispatchReworkEvidence(task: any, workspacePath?:
     declaredFileHash: string;
     contentChecksum: string;
     artifacts: {
-        kind: "receipt" | "file" | "external" | "diff" | "report" | "test_evidence";
+        kind: "receipt" | "file" | "diff" | "external" | "report" | "test_evidence";
         path: string;
         checksum: string;
     }[];

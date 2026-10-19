@@ -39,7 +39,7 @@ const crypto = __importStar(require("crypto"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
-const USAGE_FILE = path.join(process.env.CCM_TOOL_SEARCH_STATE_DIR || path.join(os.homedir(), ".ccm"), "tool-search-usage.json");
+const USAGE_FILE = path.join(process.env.CCM_TOOL_SEARCH_STATE_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "tool-search-usage.json");
 function normalized(value) {
     return String(value || "").toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, " ").trim();
 }

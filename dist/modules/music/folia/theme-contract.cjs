@@ -19,8 +19,10 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // integrations/folia-host/theme-contract.mjs
 var theme_contract_exports = {};
 __export(theme_contract_exports, {
+  THEME_JSON_SCHEMA: () => THEME_JSON_SCHEMA,
   buildThemeSourcePrompt: () => buildThemeSourcePrompt,
   buildThemeSystemPrompt: () => buildThemeSystemPrompt,
+  geminiThemeSchema: () => geminiThemeSchema,
   sanitizeDualTheme: () => sanitizeDualTheme
 });
 module.exports = __toCommonJS(theme_contract_exports);
@@ -255,9 +257,17 @@ var buildThemeSourcePrompt = (snippet, isPureMusic, songTitle) => `Pure instrume
 ${isPureMusic && songTitle ? `Song title: ${songTitle}
 ` : ""}Source snippet:
 ${snippet}`;
+
+// integrations/folia-host/theme-contract.mjs
+function geminiThemeSchema() {
+  const convert = (node) => Object.fromEntries(Object.entries(node).filter(([key]) => ["type", "properties", "required", "items", "enum", "description"].includes(key)).map(([key, value]) => [key, key === "type" ? String(value).toUpperCase() : key === "properties" ? Object.fromEntries(Object.entries(value).map(([name, child]) => [name, convert(child)])) : key === "items" ? convert(value) : value]));
+  return convert(THEME_JSON_SCHEMA);
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  THEME_JSON_SCHEMA,
   buildThemeSourcePrompt,
   buildThemeSystemPrompt,
+  geminiThemeSchema,
   sanitizeDualTheme
 });

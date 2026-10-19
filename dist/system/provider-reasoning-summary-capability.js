@@ -45,7 +45,7 @@ const atomic_json_file_1 = require("../core/atomic-json-file");
 const provider_cache_capability_registry_1 = require("./provider-cache-capability-registry");
 const ROOT = process.env.CCM_PROVIDER_REASONING_SUMMARY_CAPABILITY_DIR
     ? path.resolve(process.env.CCM_PROVIDER_REASONING_SUMMARY_CAPABILITY_DIR)
-    : path.join(os.homedir(), ".ccm", "provider-reasoning-summary-capability");
+    : path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "provider-reasoning-summary-capability");
 const FILE = path.join(ROOT, "capabilities.json");
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 function hash(value) {

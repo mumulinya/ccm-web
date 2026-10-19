@@ -1,5 +1,4 @@
 "use strict";
-// Behavior-freeze module extracted mechanically from the former facade.
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -46,6 +45,8 @@ exports.buildGroupToolContinuitySnapshot = buildGroupToolContinuitySnapshot;
 exports.summarizeGroupToolContinuitySnapshot = summarizeGroupToolContinuitySnapshot;
 exports.persistGroupToolContinuitySnapshot = persistGroupToolContinuitySnapshot;
 exports.readGroupToolContinuitySnapshotSummary = readGroupToolContinuitySnapshotSummary;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
+// Behavior-freeze module extracted mechanically from the former facade.
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
@@ -168,7 +169,7 @@ function buildGroupToolContinuityConfigSources(groupId, memory = {}) {
         addSource("group_member", "member", project, member.tools || {});
         addSource("project_config", "project", project, projectConfigs?.[project]?.tools || {});
     }
-    const configuredTools = (0, group_memory_shared_1.mergeToolGrantSets)(...sources.map(source => source.tools));
+    const configuredTools = (0, installed_tool_catalog_1.installedToolGrants)();
     return {
         groupFound: !!group,
         memberCount: Array.isArray(group?.members) ? group.members.length : 0,

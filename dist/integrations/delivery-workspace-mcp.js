@@ -46,7 +46,7 @@ const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
 const internal_mcp_test_store_1 = require("./internal-mcp-test-store");
 exports.DELIVERY_WORKSPACE_MCP_SERVER_NAME = "ccm__delivery_workspace";
-const ROOT = path.join(os.homedir(), ".ccm", "internal-mcp", "delivery-workspaces");
+const ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "internal-mcp", "delivery-workspaces");
 function buildDeliveryWorkspaceMcpServerConfig(context) {
     return (0, internal_mcp_runtime_1.buildInternalMcpServerConfig)(path.join(__dirname, "delivery-workspace-mcp.js"), context);
 }

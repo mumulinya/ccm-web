@@ -40,7 +40,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const managed_process_tree_1 = require("../system/managed-process-tree");
-const ROOT = path.join(process.env.CCM_INSPECTION_SANDBOX_DIR || path.join(os.homedir(), ".ccm"), "inspection-sandboxes");
+const ROOT = path.join(process.env.CCM_INSPECTION_SANDBOX_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "inspection-sandboxes");
 const EXCLUDED = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".nuxt", ".output", "target", ".venv", "venv"]);
 const SENSITIVE = /(?:^|[-_.])(?:credentials?|secrets?|private[-_.]?key|access[-_.]?key|service[-_.]?account)(?:[-_.]|$)|^\.env(?:\.|$)|^\.(?:npmrc|pypirc|netrc)$|\.(?:pem|p12|pfx|key|keystore|jks)$/i;
 function hash(value) { return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value ?? null)).digest("hex"); }

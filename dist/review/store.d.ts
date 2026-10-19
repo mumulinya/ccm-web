@@ -17,7 +17,7 @@ export declare function taskReviewProjection(task: any): {
     id: string;
     revision: number;
     runId: string;
-    status: "queued" | "completed" | "failed" | "cancelled" | "running" | "recovery_required";
+    status: "completed" | "failed" | "queued" | "cancelled" | "running" | "recovery_required";
     stage: string;
     conclusion: "pending" | "blocked" | "passed" | "not_required" | "incomplete";
     project: string;
@@ -50,7 +50,7 @@ export declare function publicReviewJob(job: ReviewJob): {
     id: string;
     revision: number;
     runId: string;
-    status: "queued" | "completed" | "failed" | "cancelled" | "running" | "recovery_required";
+    status: "completed" | "failed" | "queued" | "cancelled" | "running" | "recovery_required";
     stage: string;
     conclusion: "pending" | "blocked" | "passed" | "not_required" | "incomplete";
     project: string;

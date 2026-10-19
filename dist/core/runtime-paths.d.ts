@@ -1,3 +1,4 @@
+import './runtime-config-bootstrap';
 /**
  * CCM's persistent home.  The explicit environment override remains useful
  * for tests, isolated service instances and packaged deployments.

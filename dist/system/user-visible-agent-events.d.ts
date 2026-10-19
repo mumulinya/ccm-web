@@ -300,7 +300,7 @@ export declare function listTaskAttemptReplayProjections(filter: any): {
         taskId: string;
         attempt: number;
         generation: number;
-        status: "blocked" | "failed" | "cancelled" | "running" | "interrupted" | "success";
+        status: "failed" | "blocked" | "cancelled" | "running" | "interrupted" | "success";
     }[];
     contentStored: boolean;
 };

@@ -47,6 +47,7 @@ const memory_1 = require("../agents/global/memory");
 const sessions_1 = require("../modules/projects/sessions");
 const storage_1 = require("../modules/collaboration/storage");
 const memory_2 = require("../modules/music/memory");
+const music_memory_scope_1 = require("../modules/music/music-memory-scope");
 const session_compaction_core_1 = require("./session-compaction-core");
 const ROOT = path.join(utils_1.CCM_DIR, "context-engine-recovery");
 let hookRegistered = false;
@@ -78,7 +79,7 @@ function canonicalFile(input) {
     else if (exact.scope === "group")
         file = (0, storage_1.getGroupChatSessionMessagesFile)(exact.scopeId, exact.sessionId);
     else if (exact.scope === "music")
-        file = memory_2.MUSIC_AGENT_MEMORY_FILE;
+        file = (0, music_memory_scope_1.musicMemoryFileForSession)(exact.sessionId);
     else
         throw new Error(`不支持的恢复作用域：${exact.scope}`);
     if (!insideCcm(file))

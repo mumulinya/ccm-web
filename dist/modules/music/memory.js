@@ -44,6 +44,7 @@ exports.recordMusicAgentAssistantTurn = recordMusicAgentAssistantTurn;
 exports.clearMusicAgentConversation = clearMusicAgentConversation;
 exports.getPublicMusicAgentMemory = getPublicMusicAgentMemory;
 exports.handleMusicMemoryApi = handleMusicMemoryApi;
+const music_memory_scope_1 = require("./music-memory-scope");
 const crypto = __importStar(require("crypto"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
@@ -90,7 +91,7 @@ function emptyLongTermMemory() {
 function emptyStore() {
     return {
         schema: exports.MUSIC_AGENT_MEMORY_SCHEMA,
-        singletonId: exports.MUSIC_AGENT_SINGLETON_ID,
+        singletonId: (0, music_memory_scope_1.musicMemorySessionId)(),
         transcript: [],
         compaction: null,
         longTermMemory: emptyLongTermMemory(),
@@ -115,20 +116,22 @@ function normalizeStore(value) {
         ...emptyStore(),
         ...source,
         schema: exports.MUSIC_AGENT_MEMORY_SCHEMA,
-        singletonId: exports.MUSIC_AGENT_SINGLETON_ID,
+        singletonId: (0, music_memory_scope_1.musicMemorySessionId)(),
         transcript: (Array.isArray(source.transcript) ? source.transcript : []).map(normalizeMessage).filter((message) => message.content),
         longTermMemory: { ...emptyLongTermMemory(), ...(source.longTermMemory || source.long_term_memory || {}) },
     };
 }
 function loadMusicAgentMemory() {
-    return normalizeStore((0, atomic_json_file_1.readJsonWithBackup)(exports.MUSIC_AGENT_MEMORY_FILE, emptyStore()));
+    return normalizeStore((0, atomic_json_file_1.readJsonWithBackup)((0, music_memory_scope_1.musicMemoryFile)(), emptyStore()));
 }
 function saveMusicAgentMemory(value) {
-    (0, atomic_json_file_1.writeJsonAtomic)(exports.MUSIC_AGENT_MEMORY_FILE, { ...normalizeStore(value), updatedAt: nowIso() });
-    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)("music:music-agent");
+    (0, atomic_json_file_1.writeJsonAtomic)((0, music_memory_scope_1.musicMemoryFile)(), { ...normalizeStore(value), updatedAt: nowIso() });
+    // 旧全局索引不收录已登录用户的私有对话。
+    if ((0, music_memory_scope_1.musicMemorySessionId)() === 'music-agent')
+        (0, conversation_search_dirty_1.markConversationSearchIndexDirty)("music:music-agent");
 }
 function mutateStore(operation) {
-    return (0, atomic_json_file_1.withFileLock)(exports.MUSIC_AGENT_MEMORY_FILE, () => {
+    return (0, atomic_json_file_1.withFileLock)((0, music_memory_scope_1.musicMemoryFile)(), () => {
         const store = loadMusicAgentMemory();
         const result = operation(store);
         saveMusicAgentMemory(store);
@@ -138,7 +141,7 @@ function mutateStore(operation) {
 function compactionState(store) {
     return (0, session_compaction_core_1.normalizeSessionCompactionState)(store?.compaction?.v2 || store?.compaction || {}, {
         scope: "music",
-        sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+        sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
     });
 }
 function normalizeStringArray(value, max = 40) {
@@ -195,7 +198,7 @@ function buildMusicAgentModelContext(currentRequest = "") {
     const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)((0, group_orchestrator_config_1.loadOrchestratorConfig)());
     const payload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
         scope: "music",
-        sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+        sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
         system: { role: "music-agent", model: (0, group_orchestrator_config_1.loadOrchestratorConfig)().model || "" },
         activeSummary: summary,
         recentMessages: visibleMessages,
@@ -204,7 +207,7 @@ function buildMusicAgentModelContext(currentRequest = "") {
     });
     const measurement = (0, session_compaction_core_1.measureSessionContextTokens)({
         scope: "music",
-        sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+        sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
         messages: visibleMessages,
         activeSummary: summary,
         latestProviderUsage: state.latestProviderUsage,
@@ -268,7 +271,7 @@ async function prepareMusicAgentTurn(message, mode = "cloud") {
     };
 }
 async function compactMusicAgentMemoryWithModel(options = {}) {
-    const existing = compactions.get(exports.MUSIC_AGENT_SINGLETON_ID);
+    const existing = compactions.get((0, music_memory_scope_1.musicMemorySessionId)());
     if (existing)
         return existing;
     const operation = (async () => {
@@ -302,7 +305,7 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
                 ...segment.filter((message) => message.role === "user").map((message) => String(message.content || "").slice(0, 500)),
             ].filter(Boolean).slice(-30),
         };
-        const preHooks = await (0, session_compaction_core_1.runSessionCompactionHooks)("pre_compact", { scope: "music", sessionId: exports.MUSIC_AGENT_SINGLETON_ID, previousSummary, trigger: options.force ? "manual" : "auto" });
+        const preHooks = await (0, session_compaction_core_1.runSessionCompactionHooks)("pre_compact", { scope: "music", sessionId: (0, music_memory_scope_1.musicMemorySessionId)(), previousSummary, trigger: options.force ? "manual" : "auto" });
         const system = [
             "你是 CCM 音乐 Agent 对话压缩器。只输出 JSON，不要 Markdown。",
             "摘要用于继续同一个音乐助手上下文，必须合并上一轮摘要，不得覆盖仍有效的偏好、厌恶、点歌要求和未完成事项。",
@@ -334,7 +337,7 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
                     throw new Error("音乐 Agent 模型摘要结构无效");
                 summaryQuality = (0, session_summary_quality_gate_1.evaluateSessionSummaryQuality)({
                     scope: "music",
-                    sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+                    sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
                     summary: candidate,
                     reference: musicReference,
                     previousSummary,
@@ -361,8 +364,8 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
         const secondaryReview = await (0, session_summary_secondary_review_1.reviewSessionSummaryIfSelected)({
             config: (0, group_orchestrator_config_1.loadOrchestratorConfig)(),
             scope: "music",
-            scopeId: exports.MUSIC_AGENT_SINGLETON_ID,
-            sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+            scopeId: (0, music_memory_scope_1.musicMemorySessionId)(),
+            sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
             boundaryGeneration: state.boundaryGeneration + 1,
             summary: candidate,
             reference: musicReference,
@@ -372,16 +375,16 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
         const preservedMessages = transcript.slice(keepStart);
         const boundaryMarker = (0, session_compaction_core_1.buildSessionCompactionBoundaryMarker)({
             scope: "music",
-            sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+            sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
             generation: state.boundaryGeneration + 1,
             summarizedThroughMessageId: segment.at(-1)?.id || "",
             previousSummaryChecksum: state.activeSummaryChecksum,
             preservedMessageIds: preservedMessages.map((message) => message.id),
         });
-        const sessionStartHooks = await (0, session_compaction_core_1.runSessionCompactionHooks)("session_start", { scope: "music", sessionId: exports.MUSIC_AGENT_SINGLETON_ID, summary: candidate, previousSummary, longTermMemory: store.longTermMemory });
+        const sessionStartHooks = await (0, session_compaction_core_1.runSessionCompactionHooks)("session_start", { scope: "music", sessionId: (0, music_memory_scope_1.musicMemorySessionId)(), summary: candidate, previousSummary, longTermMemory: store.longTermMemory });
         const postPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
             scope: "music",
-            sessionId: exports.MUSIC_AGENT_SINGLETON_ID,
+            sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
             system: { role: "music-agent", model: (0, group_orchestrator_config_1.loadOrchestratorConfig)().model || "" },
             activeSummary: candidate,
             recentMessages: preservedMessages,
@@ -452,7 +455,7 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
             };
         });
         const response = { compacted: true, summarySource: "model", beforeTokens, afterTokens: postPayload.totalTokens, threshold, boundaryGeneration: state.boundaryGeneration, postCompactGate: postGate, summaryQuality, secondaryReview };
-        await (0, session_compaction_core_1.runSessionCompactionHooks)("post_compact", { scope: "music", sessionId: exports.MUSIC_AGENT_SINGLETON_ID, result: response });
+        await (0, session_compaction_core_1.runSessionCompactionHooks)("post_compact", { scope: "music", sessionId: (0, music_memory_scope_1.musicMemorySessionId)(), result: response });
         return response;
     })().catch(error => {
         mutateStore(store => {
@@ -460,8 +463,8 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
             store.compaction = { ...(store.compaction || {}), consecutiveFailures: failed.consecutiveFailures, lastFailureAt: failed.lastFailureAt, lastError: failed.lastError, v2: failed };
         });
         throw error;
-    }).finally(() => compactions.delete(exports.MUSIC_AGENT_SINGLETON_ID));
-    compactions.set(exports.MUSIC_AGENT_SINGLETON_ID, operation);
+    }).finally(() => compactions.delete((0, music_memory_scope_1.musicMemorySessionId)()));
+    compactions.set((0, music_memory_scope_1.musicMemorySessionId)(), operation);
     return operation;
 }
 function mergeLongTerm(existing, candidate, sourceMessageIds) {
@@ -487,7 +490,7 @@ function shouldExtractLongTerm(_userMessage) {
     return true;
 }
 function scheduleMusicLongTermMemoryExtraction(userMessage, assistantMessage, sourceMessageIds = []) {
-    if (longTermExtractions.has(exports.MUSIC_AGENT_SINGLETON_ID))
+    if (longTermExtractions.has((0, music_memory_scope_1.musicMemorySessionId)()))
         return { scheduled: false, reason: "already_in_flight" };
     const job = (async () => {
         const store = loadMusicAgentMemory();
@@ -498,10 +501,11 @@ function scheduleMusicLongTermMemoryExtraction(userMessage, assistantMessage, so
         ];
         const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
             kind: "memory_extraction",
-            identity: { scope: "music", scopeId: exports.MUSIC_AGENT_SINGLETON_ID, sessionId: exports.MUSIC_AGENT_SINGLETON_ID },
+            identity: { scope: "music", scopeId: (0, music_memory_scope_1.musicMemorySessionId)(), sessionId: (0, music_memory_scope_1.musicMemorySessionId)() },
             system: [
                 "You are the CCM music long-term memory extractor. Understand complete semantics; never classify mechanically by keywords.",
                 "Save only preferences, dislikes, artists, genres, listening contexts, and playback preferences explicitly stated by the user and useful for later music requests. A single play event or assistant recommendation must use operation=ignore.",
+                "Only explicitly lasting preferences may be saved. Temporary mood, one listening scene, a skip or one feedback adjustment must use operation=ignore; do not infer a lasting taste from them.",
                 "Use operation=supersede to correct an older preference. Every non-ignore candidate must cite an exact message ID and a verbatim quote.",
                 "Return JSON only: {\"candidates\":[{\"type\":\"preference|dislike|artist|genre|listening_context|playback_preference\",\"operation\":\"add|update|supersede|ignore\",\"text\":\"fact\",\"evidenceMessageIds\":[],\"evidenceQuotes\":[],\"confidence\":0.0,\"applicableScope\":\"music-agent\",\"supersedes\":[]}]}",
             ].join("\n"),
@@ -570,8 +574,8 @@ function scheduleMusicLongTermMemoryExtraction(userMessage, assistantMessage, so
             };
         });
         return { updated: false, error: String(error?.message || error), semanticDecisionReceipt: error?.semanticDecisionReceipt || null };
-    }).finally(() => longTermExtractions.delete(exports.MUSIC_AGENT_SINGLETON_ID));
-    longTermExtractions.set(exports.MUSIC_AGENT_SINGLETON_ID, job);
+    }).finally(() => longTermExtractions.delete((0, music_memory_scope_1.musicMemorySessionId)()));
+    longTermExtractions.set((0, music_memory_scope_1.musicMemorySessionId)(), job);
     return { scheduled: true, reason: "model_extraction_scheduled" };
 }
 function recordMusicAgentAssistantTurn(content, input = {}) {

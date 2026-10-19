@@ -94,6 +94,8 @@ function beginFoliaLoginRequest(owner, provider, endpoint, req, body) {
 function noteFoliaProfile(owner, provider, endpoint, data) {
     if (!(endpoint === '/login/status' && provider !== 'kugou' || endpoint === '/user/detail' && provider === 'kugou'))
         return;
+    if (provider === 'kugou' && (Number(data?.status) !== 1 || Number(data?.error_code || 0) !== 0))
+        return;
     const raw = provider === 'kugou' ? data?.data?.user_info || data?.data?.userinfo || data?.data?.profile || data?.data : data?.data?.profile;
     if (!raw) {
         if ([301, 401, 403].includes(Number(data.code)) || endpoint === '/login/status' && data.code === 200)
@@ -101,7 +103,10 @@ function noteFoliaProfile(owner, provider, endpoint, data) {
         return;
     }
     const info = raw.info || raw;
-    const id = raw.userId || raw.str_musicid || raw.musicid || raw.uin || raw.userid || raw.user_id || raw.id || info.str_musicid || info.musicid || info.uin || '';
+    // 固定酷狗详情接口不回 userid；仅在平台明确成功且有资料时使用当前已保存会话身份。
+    const kugouId = provider === 'kugou' && Number(data.status) === 1 && Number(data.error_code || 0) === 0 && raw.nickname
+        ? (0, accounts_1.account)(owner, provider).sessionHints?.userid : '';
+    const id = raw.userId || raw.str_musicid || raw.musicid || raw.uin || raw.userid || raw.user_id || raw.id || info.str_musicid || info.musicid || info.uin || kugouId || '';
     if (provider !== 'qq' && !id)
         return;
     const profile = { id: String(id).slice(0, 160), nickname: String(raw.nickname || raw.nick_name || raw.username || raw.nick || raw.name || info.nickname || info.nick || info.name || '').slice(0, 120) };

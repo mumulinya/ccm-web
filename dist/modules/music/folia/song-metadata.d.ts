@@ -18,6 +18,8 @@ export declare function cleanFoliaSong(song: any, track: any): {
         mediaId: any;
         providerData: {
             [k: string]: string;
+        } | {
+            deviceId: any;
         };
     };
 };

@@ -23,11 +23,11 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
     userMessage?: string;
     coordinatorOutput?: string;
 }): any;
-export declare function testAgentStatusToReceiptStatus(status: any): "done" | "blocked" | "failed" | "partial";
+export declare function testAgentStatusToReceiptStatus(status: any): "failed" | "done" | "blocked" | "partial";
 export declare function readTestAgentVerdictArtifact(report: TestAgentReport): TestAgentVerdict | null;
 export declare function resolveTestAgentDecisionVerdict(report: TestAgentReport, artifactVerdict?: TestAgentVerdict | null): TestAgentVerdict;
 export declare function testAgentDecisionReceiptStatus(report: TestAgentReport, verdict: TestAgentVerdict | null): any;
-export declare function testAgentDecisionReviewVerdict(report: TestAgentReport, verdict: TestAgentVerdict | null): "blocked" | "failed" | "partial" | "unknown" | "passed" | "needs_recheck" | "needs_environment";
+export declare function testAgentDecisionReviewVerdict(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "blocked" | "partial" | "unknown" | "passed" | "needs_recheck" | "needs_environment";
 export declare function testAgentDecisionLabel(report: TestAgentReport, verdict: TestAgentVerdict | null): "待确认" | "需要返工" | "可以接受" | "需要人工确认" | "需要重新复验" | "需要补齐环境条件" | "未给出";
 export declare function collectTestAgentVerdictGapLines(verdict: TestAgentVerdict | null): string[];
 export declare function collectTestAgentVerdictNextActions(verdict: TestAgentVerdict | null): string[];

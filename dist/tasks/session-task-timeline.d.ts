@@ -320,7 +320,7 @@ export declare function snapshotTaskContextForBoundary(taskId: string, reason?: 
 };
 export declare function projectPriorTaskSummaries(index: CcmSessionTaskIndexV1, currentTaskId?: string): {
     taskId: string;
-    status: "blocked" | "completed" | "failed" | "cancelled" | "open" | "interrupted";
+    status: "completed" | "failed" | "blocked" | "cancelled" | "open" | "interrupted";
     title: string;
     goal: string;
     result: string;

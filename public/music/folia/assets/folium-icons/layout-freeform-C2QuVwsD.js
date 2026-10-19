@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`layout-freeform`,size:24,node:[[`rect`,{width:`7`,height:`7`,x:`3`,y:`3`,rx:`1`,key:`1g98yp`}],[`rect`,{width:`7`,height:`7`,x:`14`,y:`4`,rx:`1`,key:`n7b4zl`}],[`rect`,{width:`7`,height:`7`,x:`4`,y:`14`,rx:`1`,key:`1ngf42`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

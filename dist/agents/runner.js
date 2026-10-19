@@ -39,6 +39,7 @@ exports.validateAgentRunnerSessionLifecycleFence = validateAgentRunnerSessionLif
 exports.validateExternalRunnerRuntimeToolGate = validateExternalRunnerRuntimeToolGate;
 exports.runAgentRunnerRequestFile = runAgentRunnerRequestFile;
 exports.runAgentRunnerSelfTest = runAgentRunnerSelfTest;
+const installed_tool_catalog_1 = require("../tools/installed-tool-catalog");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -287,7 +288,7 @@ function readCurrentToolScope(request) {
         return { ok: false, reason: "外部 Runner 请求缺少 projectName，无法复验 MCP/Skill 授权范围" };
     }
     const configs = (0, db_1.loadProjectConfigs)();
-    const projectTools = normalizeToolSelection(configs?.[projectName]?.tools || {});
+    const projectTools = (0, installed_tool_catalog_1.currentInstalledToolGrants)();
     if (!groupId) {
         return { ok: true, tools: projectTools, scope: { scope: "project", projectName } };
     }
@@ -297,7 +298,7 @@ function readCurrentToolScope(request) {
     }
     return {
         ok: true,
-        tools: mergeToolSelections(group.tools || {}, projectTools),
+        tools: projectTools,
         scope: { scope: "group-project", groupId, projectName },
     };
 }
@@ -309,7 +310,7 @@ function validateRunnerToolScope(request, requestedTools, options = {}) {
         : readCurrentToolScope(request);
     if (!current?.ok)
         return { ok: false, reason: current?.reason || "无法读取当前 MCP/Skill 授权范围", current };
-    if (!sameToolSelection(current.tools, requestedTools)) {
+    if (!(0, installed_tool_catalog_1.isToolSelectionSubset)(requestedTools, current.tools)) {
         return {
             ok: false,
             reason: "当前项目/群聊 MCP/Skill 授权已变化，外部 Runner 拒绝使用排队时的旧快照",
@@ -336,11 +337,11 @@ function expectedTaskExecutionRoleSkills(task) {
     }).map(item => item.name).sort();
 }
 function validateRuntimeToolSnapshotV2(request, snapshot, currentScope, options = {}) {
-    if (snapshot.schema !== "ccm-runtime-tool-authorization-snapshot-v2")
+    if (!["ccm-runtime-tool-authorization-snapshot-v2", "ccm-runtime-tool-authorization-snapshot-v3"].includes(snapshot.schema))
         return { ok: true, legacy: true };
     const identity = snapshot.scopeIdentity || {};
     const core = {
-        schema: "ccm-runtime-tool-authorization-snapshot-v2",
+        schema: snapshot.schema,
         snapshotId: String(snapshot.snapshotId || ""),
         catalogRevision: String(snapshot.catalogRevision || ""),
         configuredTools: normalizeToolSelection(snapshot.configuredTools || {}),
@@ -368,7 +369,7 @@ function validateRuntimeToolSnapshotV2(request, snapshot, currentScope, options 
         || (requestSession && String(identity.exactSessionId || "") !== requestSession)) {
         return { ok: false, reason: "运行时MCP/Skill授权快照与当前项目、群聊、任务、会话或运行时不匹配" };
     }
-    if (!sameToolSelection(core.configuredTools, currentScope?.tools || {})) {
+    if (!(0, installed_tool_catalog_1.isToolSelectionSubset)(core.configuredTools, currentScope?.tools || {})) {
         return { ok: false, reason: "当前项目/群聊MCP/Skill配置已变化，拒绝使用旧授权快照" };
     }
     const task = requestTaskId

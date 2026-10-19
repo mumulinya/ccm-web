@@ -59,7 +59,7 @@ const evidence_policy_1 = require("./evidence-policy");
 const presented_plan_quality_1 = require("./presented-plan-quality");
 exports.CCM_PLANNING_SESSION_SCHEMA = "ccm-planning-session-v1";
 exports.CCM_PLAN_REVIEW_RECEIPT_SCHEMA = "ccm-plan-review-receipt-v1";
-const STORE_FILE = path.join(os.homedir(), ".ccm", "planning-sessions.json");
+const STORE_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "planning-sessions.json");
 function stable(value) {
     if (Array.isArray(value))
         return value.map(stable);

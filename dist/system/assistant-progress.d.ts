@@ -2,7 +2,7 @@ export type AssistantProgressKind = "before_tools" | "key_finding" | "direction_
 export declare const USER_VISIBLE_PROGRESS_MAX_CHARS = 240;
 export declare function normalizeAssistantProgressKind(value: any, fallback?: AssistantProgressKind): AssistantProgressKind;
 export declare function sanitizeAssistantProgressText(value: any, max?: number): string;
-export declare function assistantProgressToolFamily(nameInput: any): "agent" | "read" | "search" | "git" | "verify" | "tool" | "knowledge";
+export declare function assistantProgressToolFamily(nameInput: any): "agent" | "git" | "read" | "search" | "verify" | "tool" | "knowledge";
 export declare function buildAssistantProgressFallback(requests: any[], context?: {
     target?: any;
     goal?: any;

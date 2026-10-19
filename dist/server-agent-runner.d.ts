@@ -1,7 +1,16 @@
 export declare function createAgentRunnerRuntime(deps: any): {
     buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string, options?: any) => {
         prompt: string;
-        allowedTools: any;
+        allowedTools: {
+            skill: any[];
+            configuredTools: {
+                mcp: any[];
+                skill: any[];
+            };
+            executionRoleSkills: any;
+            enforceExecutionRoleSkills: boolean;
+            mcp: any[];
+        };
         audit: any;
         workEvent: {
             id: string;

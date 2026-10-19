@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`iteration-cw`,size:24,node:[[`path`,{d:`M4 10a8 8 0 1 1 8 8H4`,key:`svv66n`}],[`path`,{d:`m8 22-4-4 4-4`,key:`6g7gki`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

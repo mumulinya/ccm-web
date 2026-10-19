@@ -300,7 +300,7 @@ function runtimeToolSnapshotFromAudit(audit = {}, allowedTools = {}) {
     const executionRoleSkills = (0, collaboration_1.uniqueStrings)(allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || []);
     const effectiveTools = normalize(allowedTools || audit.requested || {});
     return {
-        schema: "ccm-runtime-tool-authorization-snapshot-v2",
+        schema: "ccm-runtime-tool-authorization-snapshot-v3",
         snapshotId: audit.snapshotId || "",
         snapshotPath: audit.snapshotPath || "",
         mcpConfigPath: audit.mcpConfigPath || "",

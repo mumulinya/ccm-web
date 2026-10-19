@@ -52,8 +52,8 @@ export declare function buildGroupToolContinuityConfigSources(groupId: string, m
     groupFound: boolean;
     memberCount: any;
     configuredTools: {
-        mcp: string[];
-        skill: string[];
+        mcp: any[];
+        skill: any[];
     };
     configuredSources: any[];
 };

@@ -1,5 +1,4 @@
 "use strict";
-// group-memory-context.ts — merged from 7 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -62,6 +61,7 @@ exports.renderGroupMemoryContextBundle = renderGroupMemoryContextBundle;
 exports.buildGlobalGroupMemoryContext = buildGlobalGroupMemoryContext;
 exports.renderGlobalGroupMemoryContextBundle = renderGlobalGroupMemoryContextBundle;
 exports.buildGroupContextPacket = buildGroupContextPacket;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const context_budget_1 = require("../../system/context-budget");
@@ -697,10 +697,7 @@ function buildGroupPostCompactDynamicContextCatalog(groupId, memory = {}, option
     const group = options.group || (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === String(groupId || "")) || null;
     const grants = options.allowedTools
         || options.allowed_tools
-        || group?.tools
-        || memory?.toolContinuity?.allowedTools
-        || memory?.toolContinuity?.allowed_tools
-        || { mcp: [], skill: [] };
+        || (0, installed_tool_catalog_1.installedToolGrants)();
     const scope = normalizeDynamicContextToolScope(grants);
     const toolCatalog = tool_manager_1.toolManager.getPostCompactDynamicToolCatalog(scope);
     const runtimeMap = new Map((0, runtime_1.getPublicAgentRuntimes)().map(runtime => [runtime.id, runtime]));
@@ -858,7 +855,7 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
         const groupRecord = options.group || (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === id) || null;
         const effectiveContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(loadedConfig, groupRecord?.context_policy || groupRecord?.contextPolicy || {}).effective;
         const groupToolScope = {
-            ...normalizeDynamicContextToolScope(groupRecord?.tools || {}),
+            ...(0, installed_tool_catalog_1.installedToolGrants)(),
             auditContext: { runtime: "group-main-agent", groupId: id, sessionId, source: "post-compact-restore" },
         };
         const nextBoundaryGeneration = Math.max(0, Number(memory?.compactBoundary?.boundaryGeneration

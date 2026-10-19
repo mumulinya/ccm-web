@@ -1,0 +1,12 @@
+export declare const ACTIVE_PHASES: string[];
+export declare function jobFile(): string;
+export declare function readJob(): any;
+export declare function saveJob(job: any): any;
+export declare function alive(pid: number): boolean;
+export declare function lockJob(id: string): void;
+export declare function releaseJob(id: string): void;
+export declare function reserveDirectory(directory: string, job: any): void;
+export declare function retireDirectory(directory: string, job: any): void;
+export declare function directoryExecutionBlocked(directory: string): boolean;
+export declare function holdDirectoryActivation(directory: string, instanceId: string): void;
+export declare function assertDirectoryReservation(directory: string): void;

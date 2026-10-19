@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`squircle`,size:24,node:[[`path`,{d:`M12 3c7.2 0 9 1.8 9 9s-1.8 9-9 9-9-1.8-9-9 1.8-9 9-9`,key:`garfkc`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

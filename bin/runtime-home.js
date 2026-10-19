@@ -1,3 +1,5 @@
+require("../dist/core/runtime-config-bootstrap");
+const { readDirectoryConfig } = require("../dist/core/runtime-directory-config");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -8,9 +10,10 @@ const DEFAULT_CCM_DIR = path.join(os.homedir(), ".ccm");
 const MIGRATION_SCHEMA = "ccm-runtime-home-migration-v1";
 const MIGRATION_FILE = "migration-v1.json";
 const PATH_MIGRATION_FILE = "runtime-path-migration-v1.json";
+function configuredRuntimeHome() { return readDirectoryConfig()?.dataDirectory || ""; }
 
 function resolveCcmRuntimeHome() {
-  return path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_CCM_DIR);
+  return path.resolve(process.env.CCM_TASK_STORE_DIR || configuredRuntimeHome() || DEFAULT_CCM_DIR);
 }
 
 function copyLegacyRuntimeHome(source, target) {
@@ -29,7 +32,7 @@ function copyLegacyRuntimeHome(source, target) {
 }
 
 function ensureCcmRuntimeHomeMigration() {
-  if (process.env.CCM_TASK_STORE_DIR) return { status: "overridden", source: LEGACY_CCM_DIR, target: resolveCcmRuntimeHome() };
+  if (process.env.CCM_TASK_STORE_DIR || configuredRuntimeHome()) return { status: "overridden", source: LEGACY_CCM_DIR, target: resolveCcmRuntimeHome() };
   const source = path.resolve(LEGACY_CCM_DIR);
   const target = path.resolve(DEFAULT_CCM_DIR);
   const marker = path.join(target, MIGRATION_FILE);
@@ -71,7 +74,7 @@ function ensureCcmRuntimeHomeMigration() {
 }
 
 function rewriteActiveRuntimePaths(target) {
-  if (process.env.CCM_TASK_STORE_DIR) return { changedFiles: [], skipped: "explicit_override" };
+  if (process.env.CCM_TASK_STORE_DIR || configuredRuntimeHome()) return { changedFiles: [], skipped: "explicit_override" };
   const packageRoot = path.resolve(__dirname, "..");
   const legacyPackage = path.join(LEGACY_CCM_DIR, "ccm", "ccm-package");
   const legacySource = path.join(LEGACY_CCM_DIR, "ccm");

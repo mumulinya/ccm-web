@@ -1217,14 +1217,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -1241,14 +1241,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1286,14 +1286,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1331,14 +1331,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1376,14 +1376,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -1400,14 +1400,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1445,14 +1445,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1490,14 +1490,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1535,14 +1535,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -1559,14 +1559,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1604,14 +1604,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1649,14 +1649,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -1695,14 +1695,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -1862,14 +1862,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -2029,14 +2029,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -2229,14 +2229,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2260,14 +2260,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2291,14 +2291,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2348,14 +2348,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2379,14 +2379,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2410,14 +2410,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2467,14 +2467,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2498,14 +2498,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2529,14 +2529,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -2931,7 +2931,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -2945,7 +2945,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -2962,7 +2962,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -2998,7 +2998,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -5918,14 +5918,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -5942,14 +5942,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -5987,14 +5987,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6032,14 +6032,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6077,14 +6077,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -6101,14 +6101,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6146,14 +6146,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6191,14 +6191,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6236,14 +6236,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -6260,14 +6260,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6305,14 +6305,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6350,14 +6350,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -6396,14 +6396,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -6563,14 +6563,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -6730,14 +6730,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -6930,14 +6930,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -6961,14 +6961,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -6992,14 +6992,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7049,14 +7049,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7080,14 +7080,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7111,14 +7111,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7168,14 +7168,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7199,14 +7199,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7230,14 +7230,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -7632,7 +7632,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -7646,7 +7646,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -7663,7 +7663,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -7699,7 +7699,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -10619,14 +10619,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -10643,14 +10643,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -10688,14 +10688,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -10733,14 +10733,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -10778,14 +10778,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -10802,14 +10802,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -10847,14 +10847,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -10892,14 +10892,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -10937,14 +10937,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -10961,14 +10961,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -11006,14 +11006,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -11051,14 +11051,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -11097,14 +11097,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -11264,14 +11264,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -11431,14 +11431,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -11631,14 +11631,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11662,14 +11662,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11693,14 +11693,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11750,14 +11750,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11781,14 +11781,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11812,14 +11812,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11869,14 +11869,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11900,14 +11900,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -11931,14 +11931,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -12333,7 +12333,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -12347,7 +12347,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -12364,7 +12364,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -12400,7 +12400,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -15320,14 +15320,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -15344,14 +15344,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15389,14 +15389,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15434,14 +15434,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15479,14 +15479,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -15503,14 +15503,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15548,14 +15548,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15593,14 +15593,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15638,14 +15638,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -15662,14 +15662,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15707,14 +15707,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15752,14 +15752,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -15798,14 +15798,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -15965,14 +15965,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -16132,14 +16132,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -16332,14 +16332,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16363,14 +16363,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16394,14 +16394,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16451,14 +16451,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16482,14 +16482,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16513,14 +16513,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16570,14 +16570,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16601,14 +16601,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -16632,14 +16632,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -17034,7 +17034,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -17048,7 +17048,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -17065,7 +17065,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -17101,7 +17101,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -20021,14 +20021,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -20045,14 +20045,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20090,14 +20090,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20135,14 +20135,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20180,14 +20180,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -20204,14 +20204,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20249,14 +20249,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20294,14 +20294,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20339,14 +20339,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         flowTypeCount: z.ZodNumber;
@@ -20363,14 +20363,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20408,14 +20408,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20453,14 +20453,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             criteriaCount: z.ZodNumber;
@@ -20499,14 +20499,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -20666,14 +20666,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -20833,14 +20833,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         sessionCount: z.ZodNumber;
@@ -21033,14 +21033,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21064,14 +21064,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21095,14 +21095,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21152,14 +21152,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21183,14 +21183,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21214,14 +21214,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21271,14 +21271,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21302,14 +21302,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21333,14 +21333,14 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -21735,7 +21735,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -21749,7 +21749,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -21766,7 +21766,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -21802,7 +21802,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             run?: number;
             toolCallIds?: string[];
             checkId?: string;
-            resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+            resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
             evidenceRequired?: boolean;
             linkedToolCallCount?: number;
             failedToolCallCount?: number;
@@ -23538,14 +23538,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }>, "many">;
@@ -23557,14 +23557,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }>, "many">;
@@ -23572,15 +23572,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -23588,15 +23588,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -23611,14 +23611,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }>, "many">;
@@ -23630,14 +23630,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }>, "many">;
@@ -23645,15 +23645,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -23661,15 +23661,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -24894,14 +24894,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -24918,14 +24918,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -24963,14 +24963,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25008,14 +25008,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25053,14 +25053,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -25077,14 +25077,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25122,14 +25122,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25167,14 +25167,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25212,14 +25212,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -25236,14 +25236,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25281,14 +25281,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25326,14 +25326,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -25372,14 +25372,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -25539,14 +25539,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -25706,14 +25706,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -25906,14 +25906,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -25937,14 +25937,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -25968,14 +25968,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26025,14 +26025,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26056,14 +26056,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26087,14 +26087,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26144,14 +26144,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26175,14 +26175,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26206,14 +26206,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -26608,7 +26608,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -26622,7 +26622,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -26639,7 +26639,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -26675,7 +26675,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -29595,14 +29595,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -29619,14 +29619,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29664,14 +29664,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29709,14 +29709,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29754,14 +29754,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -29778,14 +29778,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29823,14 +29823,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29868,14 +29868,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29913,14 +29913,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -29937,14 +29937,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -29982,14 +29982,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -30027,14 +30027,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -30073,14 +30073,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -30240,14 +30240,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -30407,14 +30407,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -30607,14 +30607,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30638,14 +30638,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30669,14 +30669,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30726,14 +30726,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30757,14 +30757,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30788,14 +30788,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30845,14 +30845,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30876,14 +30876,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -30907,14 +30907,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -31309,7 +31309,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -31323,7 +31323,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -31340,7 +31340,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -31376,7 +31376,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -34296,14 +34296,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -34320,14 +34320,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34365,14 +34365,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34410,14 +34410,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34455,14 +34455,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -34479,14 +34479,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34524,14 +34524,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34569,14 +34569,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34614,14 +34614,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -34638,14 +34638,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34683,14 +34683,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34728,14 +34728,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -34774,14 +34774,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -34941,14 +34941,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -35108,14 +35108,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -35308,14 +35308,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35339,14 +35339,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35370,14 +35370,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35427,14 +35427,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35458,14 +35458,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35489,14 +35489,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35546,14 +35546,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35577,14 +35577,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -35608,14 +35608,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -36010,7 +36010,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -36024,7 +36024,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -36041,7 +36041,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -36077,7 +36077,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -38997,14 +38997,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -39021,14 +39021,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39066,14 +39066,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39111,14 +39111,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39156,14 +39156,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -39180,14 +39180,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39225,14 +39225,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39270,14 +39270,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39315,14 +39315,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -39339,14 +39339,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39384,14 +39384,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39429,14 +39429,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -39475,14 +39475,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -39642,14 +39642,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -39809,14 +39809,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -40009,14 +40009,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40040,14 +40040,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40071,14 +40071,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40128,14 +40128,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40159,14 +40159,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40190,14 +40190,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40247,14 +40247,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40278,14 +40278,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40309,14 +40309,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -40711,7 +40711,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -40725,7 +40725,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -40742,7 +40742,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -40778,7 +40778,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -43698,14 +43698,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -43722,14 +43722,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -43767,14 +43767,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -43812,14 +43812,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -43857,14 +43857,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -43881,14 +43881,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -43926,14 +43926,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -43971,14 +43971,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -44016,14 +44016,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             flowTypeCount: z.ZodNumber;
@@ -44040,14 +44040,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -44085,14 +44085,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -44130,14 +44130,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -44176,14 +44176,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -44343,14 +44343,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -44510,14 +44510,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 blocked: z.ZodNumber;
                 skipped: z.ZodNumber;
             }, "strip", z.ZodTypeAny, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }, {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             }>;
             sessionCount: z.ZodNumber;
@@ -44710,14 +44710,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44741,14 +44741,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44772,14 +44772,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44829,14 +44829,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44860,14 +44860,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44891,14 +44891,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44948,14 +44948,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -44979,14 +44979,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -45010,14 +45010,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -45412,7 +45412,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -45426,7 +45426,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -45443,7 +45443,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -45479,7 +45479,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -47197,13 +47197,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             failed: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strict", z.ZodTypeAny, {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         }, {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         }>;
@@ -47236,13 +47236,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             failed: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strict", z.ZodTypeAny, {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         }, {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         }>;
@@ -47275,13 +47275,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             failed: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strict", z.ZodTypeAny, {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         }, {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         }>;
@@ -47310,13 +47310,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     durationMs?: number;
     startedAt?: string;
-    outcome?: "blocked" | "failed" | "partial" | "passed";
+    outcome?: "failed" | "blocked" | "partial" | "passed";
     report?: Record<string, any>;
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "blocked" | "failed" | "partial" | "passed";
+        status?: "failed" | "blocked" | "partial" | "passed";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         artifacts?: {
@@ -47459,9 +47459,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             networkLogPath: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">[];
         httpConcurrencySummary?: {
-            blocked?: number;
             completed?: number;
             failed?: number;
+            blocked?: number;
             items?: z.objectOutputType<{
                 project: z.ZodString;
                 name: z.ZodString;
@@ -47551,14 +47551,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -47590,9 +47590,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -47652,9 +47652,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -47689,14 +47689,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -47794,7 +47794,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -47905,8 +47905,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         browserActionEffectSummary?: {
-            unavailable?: number;
             failed?: number;
+            unavailable?: number;
+            changed?: number;
             unchanged?: number;
             items?: z.objectOutputType<{
                 project: z.ZodString;
@@ -47923,7 +47924,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 actionTypes: z.ZodRecord<z.ZodString, z.ZodNumber>;
                 changedSignals: z.ZodRecord<z.ZodString, z.ZodNumber>;
             }, z.ZodTypeAny, "passthrough">[];
-            changed?: number;
             checks?: number;
             changedSignals?: Record<string, number>;
             detailSuppressed?: number;
@@ -47934,10 +47934,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            skipped?: number;
-            status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
-            blocked?: number;
             failed?: number;
+            skipped?: number;
+            status?: "failed" | "blocked" | "missing" | "verified" | "unlinked" | "waived";
+            blocked?: number;
             http?: number;
             browser?: number;
             items?: z.objectOutputType<{
@@ -48156,15 +48156,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -48173,15 +48173,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -48190,8 +48190,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         status?: "failed" | "passed";
         schema?: "ccm-test-agent-artifact-verification-v1";
         summary?: {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         };
@@ -48215,13 +48215,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     durationMs?: number;
     startedAt?: string;
-    outcome?: "blocked" | "failed" | "partial" | "passed";
+    outcome?: "failed" | "blocked" | "partial" | "passed";
     report?: Record<string, any>;
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "blocked" | "failed" | "partial" | "passed";
+        status?: "failed" | "blocked" | "partial" | "passed";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         artifacts?: {
@@ -48364,9 +48364,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             networkLogPath: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">[];
         httpConcurrencySummary?: {
-            blocked?: number;
             completed?: number;
             failed?: number;
+            blocked?: number;
             items?: z.objectInputType<{
                 project: z.ZodString;
                 name: z.ZodString;
@@ -48456,14 +48456,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -48495,9 +48495,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -48557,9 +48557,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -48594,14 +48594,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -48699,7 +48699,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -48810,8 +48810,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         browserActionEffectSummary?: {
-            unavailable?: number;
             failed?: number;
+            unavailable?: number;
+            changed?: number;
             unchanged?: number;
             items?: z.objectInputType<{
                 project: z.ZodString;
@@ -48828,7 +48829,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 actionTypes: z.ZodRecord<z.ZodString, z.ZodNumber>;
                 changedSignals: z.ZodRecord<z.ZodString, z.ZodNumber>;
             }, z.ZodTypeAny, "passthrough">[];
-            changed?: number;
             checks?: number;
             changedSignals?: Record<string, number>;
             detailSuppressed?: number;
@@ -48839,10 +48839,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            skipped?: number;
-            status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
-            blocked?: number;
             failed?: number;
+            skipped?: number;
+            status?: "failed" | "blocked" | "missing" | "verified" | "unlinked" | "waived";
+            blocked?: number;
             http?: number;
             browser?: number;
             items?: z.objectInputType<{
@@ -49061,15 +49061,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -49078,15 +49078,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -49095,8 +49095,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         status?: "failed" | "passed";
         schema?: "ccm-test-agent-artifact-verification-v1";
         summary?: {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         };
@@ -49120,13 +49120,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     durationMs?: number;
     startedAt?: string;
-    outcome?: "blocked" | "failed" | "partial" | "passed";
+    outcome?: "failed" | "blocked" | "partial" | "passed";
     report?: Record<string, any>;
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "blocked" | "failed" | "partial" | "passed";
+        status?: "failed" | "blocked" | "partial" | "passed";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         artifacts?: {
@@ -49269,9 +49269,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             networkLogPath: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">[];
         httpConcurrencySummary?: {
-            blocked?: number;
             completed?: number;
             failed?: number;
+            blocked?: number;
             items?: z.objectOutputType<{
                 project: z.ZodString;
                 name: z.ZodString;
@@ -49361,14 +49361,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -49400,9 +49400,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -49462,9 +49462,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -49499,14 +49499,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -49604,7 +49604,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -49715,8 +49715,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         browserActionEffectSummary?: {
-            unavailable?: number;
             failed?: number;
+            unavailable?: number;
+            changed?: number;
             unchanged?: number;
             items?: z.objectOutputType<{
                 project: z.ZodString;
@@ -49733,7 +49734,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 actionTypes: z.ZodRecord<z.ZodString, z.ZodNumber>;
                 changedSignals: z.ZodRecord<z.ZodString, z.ZodNumber>;
             }, z.ZodTypeAny, "passthrough">[];
-            changed?: number;
             checks?: number;
             changedSignals?: Record<string, number>;
             detailSuppressed?: number;
@@ -49744,10 +49744,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            skipped?: number;
-            status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
-            blocked?: number;
             failed?: number;
+            skipped?: number;
+            status?: "failed" | "blocked" | "missing" | "verified" | "unlinked" | "waived";
+            blocked?: number;
             http?: number;
             browser?: number;
             items?: z.objectOutputType<{
@@ -49966,15 +49966,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -49983,15 +49983,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -50000,8 +50000,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         status?: "failed" | "passed";
         schema?: "ccm-test-agent-artifact-verification-v1";
         summary?: {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         };
@@ -50025,13 +50025,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     durationMs?: number;
     startedAt?: string;
-    outcome?: "blocked" | "failed" | "partial" | "passed";
+    outcome?: "failed" | "blocked" | "partial" | "passed";
     report?: Record<string, any>;
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "blocked" | "failed" | "partial" | "passed";
+        status?: "failed" | "blocked" | "partial" | "passed";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         artifacts?: {
@@ -50174,9 +50174,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             networkLogPath: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">[];
         httpConcurrencySummary?: {
-            blocked?: number;
             completed?: number;
             failed?: number;
+            blocked?: number;
             items?: z.objectInputType<{
                 project: z.ZodString;
                 name: z.ZodString;
@@ -50266,14 +50266,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 criteriaCount: z.ZodNumber;
@@ -50305,9 +50305,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -50367,9 +50367,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             }, z.ZodTypeAny, "passthrough">[];
             total?: number;
             statusCounts?: {
+                failed?: number;
                 skipped?: number;
                 blocked?: number;
-                failed?: number;
                 passed?: number;
             };
             actionCount?: number;
@@ -50404,14 +50404,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                     blocked: z.ZodNumber;
                     skipped: z.ZodNumber;
                 }, "strip", z.ZodTypeAny, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }, {
+                    failed?: number;
                     skipped?: number;
                     blocked?: number;
-                    failed?: number;
                     passed?: number;
                 }>;
                 failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -50509,7 +50509,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 run?: number;
                 toolCallIds?: string[];
                 checkId?: string;
-                resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+                resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
                 evidenceRequired?: boolean;
                 linkedToolCallCount?: number;
                 failedToolCallCount?: number;
@@ -50620,8 +50620,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         browserActionEffectSummary?: {
-            unavailable?: number;
             failed?: number;
+            unavailable?: number;
+            changed?: number;
             unchanged?: number;
             items?: z.objectInputType<{
                 project: z.ZodString;
@@ -50638,7 +50639,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 actionTypes: z.ZodRecord<z.ZodString, z.ZodNumber>;
                 changedSignals: z.ZodRecord<z.ZodString, z.ZodNumber>;
             }, z.ZodTypeAny, "passthrough">[];
-            changed?: number;
             checks?: number;
             changedSignals?: Record<string, number>;
             detailSuppressed?: number;
@@ -50649,10 +50649,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            skipped?: number;
-            status?: "blocked" | "failed" | "missing" | "verified" | "unlinked" | "waived";
-            blocked?: number;
             failed?: number;
+            skipped?: number;
+            status?: "failed" | "blocked" | "missing" | "verified" | "unlinked" | "waived";
+            blocked?: number;
             http?: number;
             browser?: number;
             items?: z.objectInputType<{
@@ -50871,15 +50871,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -50888,15 +50888,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
-            code?: string;
             path?: string;
+            code?: string;
             message?: string;
             severity?: "warning" | "error";
         }[];
@@ -50905,8 +50905,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         status?: "failed" | "passed";
         schema?: "ccm-test-agent-artifact-verification-v1";
         summary?: {
-            skipped?: number;
             failed?: number;
+            skipped?: number;
             total?: number;
             passed?: number;
         };

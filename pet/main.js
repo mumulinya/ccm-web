@@ -3,7 +3,13 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const crypto = require('crypto');
-const { buildInternalApiHeaders } = require('../dist/modules/system/internal-api-auth.js');
+const net = require('net');
+const launchToken = process.env.CCM_PET_LAUNCH_TOKEN;
+if (!launchToken || !process.env.CCM_PET_CONTROL_PIPE) throw new Error('请通过 CCM 启动桌面宠物');
+let control;
+function report(type, extra = {}) {
+  control?.write(JSON.stringify({ type, token: launchToken, pid: process.pid, ...extra }) + '\n');
+}
 
 // Transparent Electron windows need GPU compositing on normal desktops. Software
 // rendering is reserved for explicit compatibility mode and headless Linux.
@@ -26,12 +32,26 @@ process.on('uncaughtException', (err) => { console.error('[pet] uncaughtExceptio
 process.on('unhandledRejection', (err) => { console.error('[pet] unhandledRejection:', err); });
 
 const PET_DIR = path.join(__dirname);
-const PET_ASSETS_DIR = path.resolve(__dirname, '..', 'public', 'pets');
-const API_BASE = `http://localhost:${CCM_PORT}`;
-const PETS_FILE = path.join(CCM_DIR, 'pets.json');
-const PID_FILE = path.join(CCM_DIR, 'pids', 'pet.pid');
-const RUNTIME_FILE = path.join(CCM_DIR, 'pids', 'pet-runtime.json');
+const PET_ASSETS_DIR = path.resolve(process.env.CCM_PET_ASSETS_DIR || path.join(__dirname, '..', 'public', 'pets'));
+const API_BASE = `http://127.0.0.1:${CCM_PORT}`;
 const PET_CLIENT_ID = `desktop-pet:${os.hostname()}:${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
+const runtimeVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8')).version;
+const assetRoots = [path.join(CCM_DIR, 'pet-assets/custom'), path.join(CCM_DIR, 'pet-assets/versions', runtimeVersion), PET_ASSETS_DIR];
+control = net.createConnection(process.env.CCM_PET_CONTROL_PIPE);
+control.on('connect', () => report('hello'));
+let controlBuffer = '';
+control.on('data', chunk => {
+  controlBuffer += chunk.toString();
+  if (controlBuffer.length > 4096) return app.quit();
+  let end;
+  while ((end = controlBuffer.indexOf('\n')) >= 0) {
+    const line = controlBuffer.slice(0, end); controlBuffer = controlBuffer.slice(end + 1);
+    try { const message = JSON.parse(line); if (message.token === launchToken && message.type === 'stop') app.quit(); } catch {}
+  }
+});
+control.on('error', () => app.quit());
+control.on('close', () => app.quit());
+if (!app.requestSingleInstanceLock()) app.exit(3);
 
 const petWindows = new Map(); // agentName -> BrowserWindow
 const petWindowTypes = new Map(); // agentName -> pet type currently loaded in the window
@@ -123,7 +143,13 @@ function clampWindowPosition(win, x, y, agent) {
 
 // === HTTP 工具 ===
 function signedHeaders(method, urlPath, extra = {}) {
-  return { ...extra, ...buildInternalApiHeaders('desktop-pet', method, urlPath) };
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(18).toString('base64url');
+  const secret = fs.readFileSync(path.join(CCM_DIR, 'auth/internal-api-secret'), 'utf8').trim();
+  const signature = crypto.createHmac('sha256', secret)
+    .update(['ccm-internal-api-v1', 'desktop-pet', method, urlPath, timestamp, nonce].join('\n')).digest('base64url');
+  return { ...extra, 'X-CCM-Internal-Caller': 'desktop-pet', 'X-CCM-Internal-Timestamp': timestamp,
+    'X-CCM-Internal-Nonce': nonce, 'X-CCM-Internal-Signature': signature, 'X-CCM-Pet-Token': launchToken };
 }
 
 function httpGet(urlPath) {
@@ -226,6 +252,17 @@ let sseReq = null;
 let sseReconnectTimer = null;
 let sseReconnectAttempt = 0;
 let shuttingDown = false;
+let sseReady = false;
+let initialized = false;
+function reportReady() {
+  if (initialized && sseReady && [...petWindows.values()].every(win => win.petReady)) {
+    report('ready', { clientId: PET_CLIENT_ID, windows: petWindows.size,
+      surfaces: [...petWindows.entries()].map(([agent, win]) => ({ agent, visible: win.isVisible(),
+        alwaysOnTop: win.isAlwaysOnTop(), transparent: true, background: win.getBackgroundColor(), bounds: win.getBounds(),
+        contextIsolation: win.webContents.getLastWebPreferences().contextIsolation,
+        nodeIntegration: win.webContents.getLastWebPreferences().nodeIntegration })) });
+  }
+}
 
 function scheduleSseReconnect(reason) {
   if (shuttingDown || sseReconnectTimer) return;
@@ -285,11 +322,14 @@ function connectSSE() {
   }, (res) => {
     if (res.statusCode !== 200) {
       res.resume();
+      if ([401, 403].includes(res.statusCode)) return app.quit();
       sseReq = null;
       scheduleSseReconnect(`HTTP ${res.statusCode}`);
       return;
     }
     console.log('[pet] SSE 连接成功');
+    sseReady = true;
+    reportReady();
     sseReconnectAttempt = 0;
     let buffer = '';
     res.on('data', (chunk) => {
@@ -323,6 +363,7 @@ function connectSSE() {
       }
     });
     res.on('end', () => {
+      sseReady = false;
       // 处理缓冲区剩余数据
       if (buffer.trim()) {
         try {
@@ -349,9 +390,11 @@ function connectSSE() {
       sseReq = null;
       scheduleSseReconnect('server ended');
     });
+    res.on('error', error => { sseReady = false; sseReq = null; scheduleSseReconnect(error.message); });
   });
   sseReq = request;
   request.on('error', error => {
+    sseReady = false;
     sseReq = null;
     scheduleSseReconnect(error.message);
   });
@@ -408,7 +451,7 @@ function createPetWindow(agent, petType, label = petLabels.get(agent) || agent) 
     resizable: false,
     hasShadow: false,
     focusable: false,
-    title: '',
+    title: `CCM 宠物 · ${label}`,
     icon: path.resolve(__dirname, '..', 'public', 'ccm-app-icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -436,6 +479,9 @@ function createPetWindow(agent, petType, label = petLabels.get(agent) || agent) 
     });
     win.showInactive();
   });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', event => event.preventDefault());
+  win.webContents.on('render-process-gone', () => { report('error', { error: '宠物渲染进程退出' }); app.quit(); });
 
   win.on('closed', () => {
     if (petWindows.get(agent) === win) {
@@ -516,9 +562,15 @@ async function syncPets() {
       destroyPetWindow(name);
     }
   }
+  reportReady();
 }
 
 // === IPC 处理 ===
+ipcMain.on('pet-ready', (event, error) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && error) { report('error', { error: String(error).slice(0, 160) }); return app.quit(); }
+  if (win && findAgentByWebContents(event.sender.id)) { win.petReady = true; reportReady(); }
+});
 ipcMain.handle('get-config', () => config);
 ipcMain.handle('ack-notification', async (_, notification) => {
   const deliveryId = String(notification?.delivery_id || '').trim();
@@ -537,19 +589,20 @@ ipcMain.handle('get-asset-path', (_, filename) => {
   const safeName = String(filename || '').replace(/\\/g, '/');
   if (safeName.includes('..') || path.isAbsolute(safeName)) return null;
   const resolveSafeAsset = candidate => {
+    for (const root of assetRoots) {
     try {
-      const full = path.resolve(PET_ASSETS_DIR, candidate);
-      const relative = path.relative(path.resolve(PET_ASSETS_DIR), full);
+      const full = path.resolve(root, candidate);
+      const relative = path.relative(path.resolve(root), full);
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
       if (!['.svg', '.png', '.apng', '.webp', '.json'].includes(path.extname(full).toLowerCase())) return null;
       const stat = fs.lstatSync(full);
       if (!stat.isFile() || stat.isSymbolicLink()) return null;
       const real = fs.realpathSync(full);
-      const realRelative = path.relative(fs.realpathSync(PET_ASSETS_DIR), real);
+      const realRelative = path.relative(fs.realpathSync(root), real);
       return realRelative.startsWith('..') || path.isAbsolute(realRelative) ? null : real;
-    } catch {
-      return null;
+    } catch {}
     }
+    return null;
   };
   const filePath = resolveSafeAsset(safeName);
   if (filePath) return filePath;
@@ -715,31 +768,15 @@ ipcMain.on('hide-pet', async (_, agent) => {
 // === 应用生命周期 ===
 app.whenReady().then(async () => {
   console.log('[pet] Electron 已启动，正在连接 ccm 服务...');
-  // 写入 PID 文件
-  if (!fs.existsSync(path.dirname(PID_FILE))) fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
-  fs.writeFileSync(PID_FILE, String(process.pid));
-  const runtimeTemp = `${RUNTIME_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(runtimeTemp, JSON.stringify({
-    schema: 'ccm-pet-runtime-v2',
-    pid: process.pid,
-    port: CCM_PORT,
-    clientId: PET_CLIENT_ID,
-    status: 'ready',
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }, null, 2));
-  try { fs.renameSync(runtimeTemp, RUNTIME_FILE); }
-  catch {
-    try { fs.unlinkSync(RUNTIME_FILE); } catch {}
-    fs.renameSync(runtimeTemp, RUNTIME_FILE);
-  }
-
   try {
     await loadConfig();
     await syncPets();
   } catch (error) {
     console.error('[pet] 初始化配置失败:', error.message);
+    report('error', { error: error.message });
+    return app.quit();
   }
+  initialized = true;
   connectSSE();
   console.log('[pet] 初始化完成');
 
@@ -753,8 +790,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   shuttingDown = true;
-  try { fs.unlinkSync(PID_FILE); } catch {}
-  try { fs.unlinkSync(RUNTIME_FILE); } catch {}
+  control?.end();
   if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
   if (sseReq) sseReq.destroy();
 });

@@ -1,3 +1,4 @@
+import { type MarketplaceTransactionV2 } from "./marketplace-transactions";
 export declare const CCM_DIR: string;
 export declare const SMITHERY_CONFIG_FILE: string;
 export declare const MAX_CATALOG_BYTES: number;
@@ -241,21 +242,7 @@ export declare function buildMarketplaceRuntimeCatalog(store?: MarketplaceInstal
     skills: any[];
     skillPackagesDir: string;
 };
-export declare function maybeAutoResyncMarketplaceRuntime(impact: any, options?: any, store?: MarketplaceInstallStore): {
-    schema: string;
-    success: boolean;
-    requestedAt: string;
-    error: string;
-    summary: {
-        scanned: number;
-        selected: number;
-        created: number;
-        resynced: number;
-        skipped: number;
-        failed: number;
-    };
-    items: any;
-};
+export declare function maybeAutoResyncMarketplaceRuntime(impact: any, options?: any, store?: MarketplaceInstallStore): any;
 export declare function previewToolCatalogMutationImpact(input: {
     action: string;
     type: string;
@@ -330,21 +317,7 @@ export declare function completeToolCatalogMutationLifecycle(input: {
         snapshots: any;
         truncated: boolean;
     };
-    runtimeResync: {
-        schema: string;
-        success: boolean;
-        requestedAt: string;
-        error: string;
-        summary: {
-            scanned: number;
-            selected: number;
-            created: number;
-            resynced: number;
-            skipped: number;
-            failed: number;
-        };
-        items: any;
-    };
+    runtimeResync: any;
 };
 export declare function loadInstallations(): InstallationRecord[];
 export declare function saveInstallations(items: InstallationRecord[]): void;
@@ -610,6 +583,300 @@ export declare function runMarketplaceSelfTest(): Promise<{
         };
     };
 }>;
+export declare function resolveMarketplaceItemForInstall(rawItem: any, mode?: "install" | "update", options?: any): Promise<any>;
+export declare function buildMarketplaceMcpToolRecord(item: any, now: string): any;
+export declare function validateStdioMarketplaceItem(item: any): any;
+export declare function buildMarketplaceSkillRecord(item: any, staged: any, packagePath: string, checksum: string, now: string): {
+    name: any;
+    type: string;
+    description: any;
+    prompt: any;
+    enabled: boolean;
+    version: any;
+    author: any;
+    packagePath: string;
+    skillFile: string;
+    packageStats: any;
+    contentHash: string;
+    origin: string;
+    scope: string;
+    sourceType: string;
+    immutable: boolean;
+    deletable: boolean;
+    editable: boolean;
+    disableable: boolean;
+    systemManaged: boolean;
+    roleSkill: boolean;
+    marketplace: {
+        source: any;
+        itemId: any;
+        homepage: any;
+        catalogRevision: any;
+        materialHash: any;
+        installationId: any;
+        installationRevision: any;
+    };
+    updated_at: string;
+};
+export declare function createMarketplaceInstallTransaction(rawItem: any, mode: "install" | "update", principal: {
+    userId: string;
+    sessionId: string;
+}): Promise<{
+    transaction: MarketplaceTransactionV2;
+    activationToken: string;
+}>;
+export declare function activateMarketplaceTransaction(input: any, principal: {
+    userId: string;
+    sessionId: string;
+}): Promise<{
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    duplicate: boolean;
+} | {
+    name: string;
+    type: string;
+    action: string;
+    removed: boolean;
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: any;
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    duplicate?: undefined;
+} | {
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: any;
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    duplicate?: undefined;
+} | {
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: any;
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    record: {
+        schema: string;
+        installationId: string;
+        key: string;
+        name: string;
+        type: "mcp" | "skill";
+        version: string;
+        checksum: string;
+        source: {
+            id: string;
+            label: string;
+            kind: any;
+            trust: any;
+            url: string;
+            credentialConfigured: boolean;
+        };
+        sourceProof: {
+            schema: string;
+            itemId: string;
+            type: string;
+            name: string;
+            version: string;
+            source: {
+                id: string;
+                label: string;
+                kind: any;
+                trust: any;
+                url: string;
+                credentialConfigured: boolean;
+            };
+            materialKind: string;
+            materialHash: string;
+            checksum: string;
+            envKeys: any;
+            headerKeys: any;
+            packageStats: {
+                files: number;
+                totalBytes: number;
+                treeHash: string;
+            };
+        };
+        installedAt: string;
+        updatedAt: string;
+        state: "failed" | "active" | "quarantined_legacy" | "resync_required";
+        materialTreeHash: string;
+        catalogRevision: string;
+        transport: string;
+        activatedBy: string;
+        activatedAt: string;
+        runtimeState: string;
+        resyncState: string;
+    };
+    duplicate?: undefined;
+}>;
 export declare function installMarketplaceItemWithStore(rawItem: any, store?: MarketplaceInstallStore, mode?: "install" | "update", options?: any): Promise<{
     item: any;
     record: InstallationRecord;
@@ -646,21 +913,7 @@ export declare function installMarketplaceItemWithStore(rawItem: any, store?: Ma
         snapshots: any;
         truncated: boolean;
     };
-    runtimeResync: {
-        schema: string;
-        success: boolean;
-        requestedAt: string;
-        error: string;
-        summary: {
-            scanned: number;
-            selected: number;
-            created: number;
-            resynced: number;
-            skipped: number;
-            failed: number;
-        };
-        items: any;
-    };
+    runtimeResync: any;
     sourceProof: any;
 }>;
 export declare function uninstallMarketplaceItemWithStore(payload: any, store?: MarketplaceInstallStore, options?: any): Promise<{
@@ -699,21 +952,147 @@ export declare function uninstallMarketplaceItemWithStore(payload: any, store?: 
         snapshots: any;
         truncated: boolean;
     };
-    runtimeResync: {
-        schema: string;
-        success: boolean;
-        requestedAt: string;
+    runtimeResync: any;
+}>;
+export declare function createAndMaybeActivateMarketplaceTransaction(payload: any, mode: "install" | "update", principal: {
+    userId: string;
+    sessionId: string;
+}): Promise<{
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
         error: string;
-        summary: {
-            scanned: number;
-            selected: number;
-            created: number;
-            resynced: number;
-            skipped: number;
-            failed: number;
-        };
-        items: any;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
     };
+    duplicate: boolean;
+} | {
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: any;
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    duplicate?: undefined;
+} | {
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    duplicate: boolean;
+    action: "install" | "update";
+    activation_token?: undefined;
+    quarantined?: undefined;
+    requires_activation?: undefined;
+} | {
+    transaction: {
+        schema: "ccm-marketplace-transaction-v2";
+        id: string;
+        action: "install" | "update" | "uninstall";
+        state: import("./marketplace-transactions").MarketplaceTransactionState;
+        type: "mcp" | "skill";
+        name: string;
+        source: any;
+        sourceFingerprint: string;
+        materialHash: string;
+        commandChecksum: string;
+        catalogRevision: string;
+        preview: any;
+        installationId: string;
+        runtimeState: string;
+        resyncState: string;
+        error: string;
+        checkpoints: string[];
+        activationExpiresAt: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+    activation_token: string;
+    action: "install" | "update";
+    quarantined: boolean;
+    requires_activation: boolean;
+    duplicate?: undefined;
 }>;
 export declare function handleMarketplaceApi(pathname: string, req: any, res: any, parsed: any): boolean;
 export {};

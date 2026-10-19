@@ -96,7 +96,7 @@ function isSafeSandboxRoot(candidate) {
         return false;
     const resolved = path.resolve(candidate);
     const temp = path.resolve(os.tmpdir());
-    const ccm = path.resolve(process.env.CCM_DIR || path.join(os.homedir(), ".ccm"));
+    const ccm = path.resolve(process.env.CCM_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")));
     const inside = (root) => {
         const relative = path.relative(root, resolved);
         return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));

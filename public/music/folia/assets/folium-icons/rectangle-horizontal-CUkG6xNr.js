@@ -1,0 +1,1 @@
+import{rc as e}from"../lucide-icons-CFBY1lqE.js";var t={name:`rectangle-horizontal`,size:24,node:[[`rect`,{width:`20`,height:`12`,x:`2`,y:`6`,rx:`2`,key:`9lu3g6`}]]};t.node;var n=e(t);export{t as __iconData,n as default};

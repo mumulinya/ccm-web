@@ -5,6 +5,7 @@ exports.pickBestCandidateByScore = pickBestCandidateByScore;
 exports.selectMusicTrack = selectMusicTrack;
 const state_1 = require("./state");
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
+const music_memory_scope_1 = require("./music-memory-scope");
 const MUSIC_MATCH_MIN_SCORE = 80;
 function normalizeTrackSearchText(value) {
     return String(value || "")
@@ -175,7 +176,7 @@ Return: {"index":0,"reject":false,"reason":"short evidence basis"}`;
                 identity: {
                     scope: "music",
                     scopeId: "music-player",
-                    sessionId: "music-singleton",
+                    sessionId: (0, music_memory_scope_1.musicMemorySessionId)(),
                 },
                 system: `${system}\nReturn a brief user-facing explanation of the selected song without mentioning candidate indexes or internal protocols.`,
                 input: {

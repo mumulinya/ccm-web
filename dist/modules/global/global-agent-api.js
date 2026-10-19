@@ -1137,7 +1137,7 @@ function createGlobalAgentApi(deps) {
             void readJsonRequest(req)
                 .then(payload => (0, global_agent_tool_authorization_1.saveGlobalAgentToolAuthorization)(payload))
                 .then(result => sendJson(res, { success: true, ...result }))
-                .catch((error) => sendJson(res, { success: false, error: error?.message || "保存全局 Agent 工具配置失败" }, 400));
+                .catch((error) => sendJson(res, { success: false, error: error?.message || "保存全局 Agent 工具配置失败", code: error?.code }, error?.statusCode || 400));
             return true;
         }
         if (pathname === "/api/global-agent/tools/self-test" && req.method === "GET") {

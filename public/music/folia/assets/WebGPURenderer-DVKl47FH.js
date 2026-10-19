@@ -1,0 +1,1 @@
+import{WebGPURenderer as e}from"./lib-CLFm8Phk.js";export{e as WebGPURenderer};

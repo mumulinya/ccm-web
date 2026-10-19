@@ -99,7 +99,7 @@ export declare function runQuickTaskVerification(input: {
     verification_results: {
         id: string;
         command: string;
-        status: "blocked" | "failed" | "timed_out" | "passed";
+        status: "failed" | "blocked" | "timed_out" | "passed";
         exit_code: number;
         duration_ms: number;
         error: string;

@@ -1,0 +1,1 @@
+var e=e=>!Number.isFinite(e)||e<=0?32:Math.max(32,Math.round(e*.5-132)),t=(t,n)=>{if(!Number.isFinite(t))return 32;let r=e(n);return Math.min(r,Math.max(32,Math.round(t)))},n=(e,t)=>t+e-32,r=(e,t)=>32+t*(e-32+80);export{r as i,e as n,n as r,t};

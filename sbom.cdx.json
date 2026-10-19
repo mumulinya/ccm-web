@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:576ad435-eabb-45a6-a871-ba1403ef5597",
+  "serialNumber": "urn:uuid:10b4c1b5-f457-4dcd-a20c-6a83e8265023",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-10-16T03:42:45.927Z",
+    "timestamp": "2026-10-19T14:30:12.877Z",
     "component": {
       "type": "application",
       "name": "@mumulinya167/cc-web",
-      "version": "5.0.0"
+      "version": "5.1.0"
     }
   },
   "components": [
@@ -141,7 +141,7 @@
     {
       "type": "library",
       "name": "@yakult-green-tea/qq-music-api",
-      "version": "3.1.4",
+      "version": "3.3.1",
       "scope": "required"
     },
     {

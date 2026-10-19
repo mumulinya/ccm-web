@@ -37,13 +37,12 @@ exports.getSlashCommandSummary = getSlashCommandSummary;
 exports.getSlashCommandContractSnapshot = getSlashCommandContractSnapshot;
 exports.runSlashCommandSelfTest = runSlashCommandSelfTest;
 exports.handleSlashCommandsApi = handleSlashCommandsApi;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
-const storage_1 = require("../collaboration/storage");
-const global_agent_tool_authorization_1 = require("../global/global-agent-tool-authorization");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const CUSTOM_COMMANDS_FILE = path.join(utils_1.CCM_DIR, "configs", "slash-commands.json");
 const AUDIT_FILE = path.join(utils_1.CCM_DIR, "logs", "slash-command-audit.jsonl");
@@ -240,15 +239,7 @@ function loadCustomCommands() {
     }
 }
 function authorizedSkillNames(scope, context = {}) {
-    if (scope === "global")
-        return new Set(((0, global_agent_tool_authorization_1.loadGlobalAgentToolAuthorization)()?.tools?.skill || []).map((name) => String(name).trim()).filter(Boolean));
-    if (scope === "project") {
-        const project = String(context?.project || "").trim();
-        return new Set(((0, db_1.loadProjectConfigs)()?.[project]?.tools?.skill || []).map((name) => String(name).trim()).filter(Boolean));
-    }
-    const groupId = String(context?.groupId || "").trim();
-    const group = (0, storage_1.loadGroups)().find((item) => String(item.id) === groupId);
-    return new Set((group?.tools?.skill || []).map((name) => String(name).trim()).filter(Boolean));
+    return new Set((0, installed_tool_catalog_1.installedToolGrants)().skill);
 }
 function loadSkillCommands(scope, context = {}) {
     const authorized = authorizedSkillNames(scope, context);

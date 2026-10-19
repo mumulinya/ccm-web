@@ -41,6 +41,8 @@ exports.resolveGlobalAgentExecutionSkillsFromRun = resolveGlobalAgentExecutionSk
 exports.buildGlobalAgentToolRuntimeContext = buildGlobalAgentToolRuntimeContext;
 exports.executeGlobalAgentAuthorizedTool = executeGlobalAgentAuthorizedTool;
 exports.runGlobalAgentToolAuthorizationSelfTest = runGlobalAgentToolAuthorizationSelfTest;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
+const installed_tool_catalog_2 = require("../../tools/installed-tool-catalog");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -97,35 +99,15 @@ function writeStore(store) {
     fs.renameSync(temp, GLOBAL_AGENT_TOOL_AUTHORIZATION_FILE);
 }
 function loadGlobalAgentToolAuthorization() {
-    return readStore();
+    return { ...readStore(), tools: (0, installed_tool_catalog_2.installedToolGrants)() };
 }
 function getGlobalAgentToolAuthorizationPayload() {
     const store = readStore();
-    return { ...store, ...(0, tool_authorization_1.buildToolAuthorizationPayload)(store.tools) };
+    return { ...store, ...(0, installed_tool_catalog_1.buildInstalledToolAvailabilityPayload)() };
 }
 async function saveGlobalAgentToolAuthorization(input = {}) {
-    const previous = readStore();
-    const tools = (0, tool_authorization_1.normalizeToolAuthorization)(input?.tools || input);
-    const actor = cleanActor(input?.actor || input?.updated_by || input?.updatedBy || "api");
-    const payload = await (0, tool_authorization_1.buildFreshToolAuthorizationPayload)(tools);
-    const store = {
-        schema: "ccm-global-agent-tool-authorization-v1",
-        tools,
-        updated_at: new Date().toISOString(),
-        updated_by: actor,
-    };
-    writeStore(store);
-    const authorizationChange = (0, tool_authorization_1.recordToolAuthorizationChange)({
-        scope: "global",
-        scopeId: "global-agent",
-        previous: previous.tools,
-        next: tools,
-        actor,
-        source: "/api/global-agent/tools",
-        toolAudit: payload.tool_audit,
-        authorizationReadiness: payload.authorization_readiness,
-    });
-    return { ...store, ...payload, authorization_change: authorizationChange };
+    (0, installed_tool_catalog_2.rejectLegacyToolSelection)(input);
+    return getGlobalAgentToolAuthorizationPayload();
 }
 function resolveGlobalAgentExecutionSkills(input = {}) {
     return (0, role_skills_1.buildRoleSkillPrompt)("global-agent", String(input.message || ""), {

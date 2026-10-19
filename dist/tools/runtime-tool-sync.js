@@ -1,5 +1,4 @@
 "use strict";
-// runtime-tool-sync.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -77,6 +76,9 @@ exports.resyncRecentRuntimeToolSnapshots = resyncRecentRuntimeToolSnapshots;
 exports.buildRuntimeToolSyncPrompt = buildRuntimeToolSyncPrompt;
 exports.detectInvokedSkillsFromText = detectInvokedSkillsFromText;
 exports.recordRuntimeToolSyncAudit = recordRuntimeToolSyncAudit;
+const extension_runtime_delivery_1 = require("./extension-runtime-delivery");
+const extension_runtime_config_1 = require("./extension-runtime-config");
+// runtime-tool-sync.ts — merged from 2 part files (behavior-freeze merge).
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -309,12 +311,12 @@ function getRuntimeToolCatalogRevision(catalog = {}, selection = null) {
     const requestedSkills = selection ? uniqueNames(selection?.skill) : [];
     const serverSet = new Set(requestedServers);
     const skillSet = new Set(requestedSkills);
-    const selectedMcp = requestedServers.length
+    const selectedMcp = selection ? requestedServers.length
         ? mcpTools.filter(tool => serverSet.has(String(tool?.name || "")))
-        : mcpTools;
-    const selectedSkills = requestedSkills.length
+        : [] : mcpTools;
+    const selectedSkills = selection ? requestedSkills.length
         ? skills.filter(skill => skillSet.has(String(skill?.name || "")))
-        : skills;
+        : [] : skills;
     const payload = {
         schema: "ccm-runtime-tool-catalog-revision-v1",
         requestedServers: requestedServers.slice().sort(),
@@ -1526,7 +1528,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                 continue;
             }
             try {
-                mcpServers[serverName] = toMcpServer(tool);
+                mcpServers[serverName] = (0, extension_runtime_config_1.buildExtensionProxyConfig)(tool, options.internalMcpServers) || toMcpServer(tool);
                 audit.synced.mcp.push(tool.name);
                 audit.mcp_statuses?.push({
                     name: tool.name,
@@ -1671,6 +1673,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
         audit.errors.push(error?.message || String(error));
     }
     audit.dispatch_gate = buildRuntimeToolDispatchGate(audit);
+    (0, extension_runtime_delivery_1.recordExtensionRuntimeDelivery)({ audit, workDir, agentType, allowedTools, options });
     return audit;
 }
 function syncRuntimeTools(workDir, agentType, allowedTools, options = {}) {

@@ -301,7 +301,7 @@ export declare function buildInlineTaskRuntime(task: any): {
         };
         artifact_summary: {
             count: number;
-            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+            kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
         };
         dependency_state: {
             dependencyId: string;
@@ -397,7 +397,7 @@ export declare function buildInlineTaskRuntime(task: any): {
         };
         artifact_summary: {
             count: number;
-            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+            kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
         };
         dependency_state: {
             dependencyId: string;
@@ -493,7 +493,7 @@ export declare function buildInlineTaskRuntime(task: any): {
         };
         artifact_summary: {
             count: number;
-            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+            kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
         };
         dependency_state: {
             dependencyId: string;
@@ -598,7 +598,7 @@ export declare function updateGroupTaskInlineStatus(task: any, status: string, d
         };
         artifact_summary: {
             count: number;
-            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+            kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
         };
         dependency_state: {
             dependencyId: string;
@@ -696,7 +696,7 @@ export declare function updateGroupTaskInlineStatus(task: any, status: string, d
         };
         artifact_summary: {
             count: number;
-            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+            kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
         };
         dependency_state: {
             dependencyId: string;
@@ -794,7 +794,7 @@ export declare function updateGroupTaskInlineStatus(task: any, status: string, d
         };
         artifact_summary: {
             count: number;
-            kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+            kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
         };
         dependency_state: {
             dependencyId: string;

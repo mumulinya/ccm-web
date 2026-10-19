@@ -9,7 +9,7 @@ export declare function buildTaskAwareSessionProjection(input: {
     priorTaskMessageIds: string[];
     priorTaskSummaries: {
         taskId: string;
-        status: "blocked" | "completed" | "failed" | "cancelled" | "open" | "interrupted";
+        status: "completed" | "failed" | "blocked" | "cancelled" | "open" | "interrupted";
         startSequence: number;
         endSequence: number;
         checksum: string;

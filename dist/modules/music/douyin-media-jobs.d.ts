@@ -44,7 +44,7 @@ export declare function listDouyinMediaJobs(): {
  */
 export declare function getDouyinTranscription(awemeId: string): {
     id: string;
-    status: "done" | "queued" | "failed" | "cancelled" | "running" | "waiting_confirmation";
+    status: "failed" | "done" | "queued" | "cancelled" | "running" | "waiting_confirmation";
     phase: string;
     error: string;
     result: any;

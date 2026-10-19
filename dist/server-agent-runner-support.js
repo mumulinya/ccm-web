@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAgentRunnerSupport = createAgentRunnerSupport;
+const installed_tool_catalog_1 = require("./tools/installed-tool-catalog");
+const extension_runtime_bindings_1 = require("./tools/extension-runtime-bindings");
 // Support helpers extracted from server-agent-runner.ts (behavior-freeze).
 // Contains tool/verification/external-runner plumbing used by the three orchestrators.
 const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
@@ -58,7 +60,7 @@ function createAgentRunnerSupport(deps) {
                 } } : {}),
         };
         const authorizationCore = {
-            schema: "ccm-runtime-tool-authorization-snapshot-v2",
+            schema: "ccm-runtime-tool-authorization-snapshot-v3",
             snapshotId: String(runtimeToolSnapshot.snapshotId || ""),
             catalogRevision: String(runtimeToolSnapshot.catalogRevision || ""),
             configuredTools: normalizeToolSelection(runtimeToolSnapshot.configuredTools || {}),
@@ -70,6 +72,7 @@ function createAgentRunnerSupport(deps) {
         Object.assign(runtimeToolSnapshot, authorizationCore, {
             authorizationSignature: (0, internal_mcp_runtime_1.signInternalMcpEvidence)(authorizationCore),
         });
+        (0, extension_runtime_bindings_1.registerExtensionRuntimeBinding)(runtimeToolSnapshot, executionInfo || {});
         const runtimeToolDispatchGate = executionInfo?.runtimeToolDispatchGate
             || executionInfo?.runtime_tool_dispatch_gate
             || runtimeToolSnapshot.dispatchGate
@@ -193,7 +196,7 @@ function createAgentRunnerSupport(deps) {
     }
     function getProjectToolSelection(projectName) {
         const configs = loadProjectConfigs();
-        return normalizeToolSelection(configs?.[projectName]?.tools || {});
+        return (0, installed_tool_catalog_1.installedToolGrants)();
     }
     function findRuntimeToolSnapshotPath(mcpConfigPath = "") {
         const configPath = String(mcpConfigPath || "").trim();
@@ -221,7 +224,7 @@ function createAgentRunnerSupport(deps) {
         const executionRoleSkills = Array.from(new Set((allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || []).map((item) => String(item || "").trim()).filter(Boolean)));
         const effectiveTools = normalizeToolSelection(allowedTools || audit.requested || {});
         return {
-            schema: "ccm-runtime-tool-authorization-snapshot-v2",
+            schema: "ccm-runtime-tool-authorization-snapshot-v3",
             snapshotId: String(audit.snapshotId || audit.snapshot_id || ""),
             snapshotPath: String(audit.snapshotPath || audit.snapshot_path || ""),
             mcpConfigPath: String(audit.mcpConfigPath || audit.mcp_config_path || ""),
@@ -318,14 +321,14 @@ function createAgentRunnerSupport(deps) {
         }, null, 2) + "\n```";
     }
     function buildProjectToolContext(projectName, workDir = "", agentType = "claudecode", options = {}) {
-        const configuredTools = normalizeToolSelection(getProjectToolSelection(projectName));
+        const configuredTools = (0, installed_tool_catalog_1.installedToolGrants)();
         const selectedRoleSkills = Array.isArray(options.selectedRoleSkills) ? options.selectedRoleSkills : [];
         const roleSkillNames = selectedRoleSkills.map((item) => String(item?.name || item || "").trim()).filter(Boolean);
         const toolAuth = buildToolAuthorizationPayload({
             mcp: configuredTools.mcp,
             skill: Array.from(new Set([...configuredTools.skill, ...roleSkillNames])),
         });
-        const allowedTools = toolAuth.tools;
+        const allowedTools = { ...configuredTools, skill: Array.from(new Set([...configuredTools.skill, ...roleSkillNames])), configuredTools, executionRoleSkills: roleSkillNames, enforceExecutionRoleSkills: true };
         const audit = syncRuntimeTools(workDir, agentType, allowedTools, {
             authorizationReadiness: toolAuth.authorization_readiness,
             internalMcpServers: options.internalMcpServers || {},

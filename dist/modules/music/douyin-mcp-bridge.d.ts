@@ -60,7 +60,7 @@ declare function createOwnedRuntime(owner: string): {
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;
@@ -87,7 +87,7 @@ declare function createOwnedRuntime(owner: string): {
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;
@@ -109,7 +109,7 @@ declare function createOwnedRuntime(owner: string): {
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;
@@ -128,7 +128,7 @@ declare function createOwnedRuntime(owner: string): {
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;
@@ -151,7 +151,7 @@ declare function createOwnedRuntime(owner: string): {
             connected: boolean;
             authenticated: boolean;
             verified: boolean;
-            loginState: "failed" | "waiting" | "idle" | "authenticated";
+            loginState: "waiting" | "failed" | "idle" | "authenticated";
             loginStartedAt: string;
             error: string;
             installHint: string;
@@ -186,7 +186,7 @@ export declare const douyinMcpGetLoginQrcode: (...args: Parameters<ReturnType<ty
     connected: boolean;
     authenticated: boolean;
     verified: boolean;
-    loginState: "failed" | "waiting" | "idle" | "authenticated";
+    loginState: "waiting" | "failed" | "idle" | "authenticated";
     loginStartedAt: string;
     error: string;
     installHint: string;
@@ -213,7 +213,7 @@ export declare const douyinMcpStatus: (...args: Parameters<ReturnType<typeof cre
     connected: boolean;
     authenticated: boolean;
     verified: boolean;
-    loginState: "failed" | "waiting" | "idle" | "authenticated";
+    loginState: "waiting" | "failed" | "idle" | "authenticated";
     loginStartedAt: string;
     error: string;
     installHint: string;
@@ -235,7 +235,7 @@ export declare const startDouyinMcpLogin: (...args: Parameters<ReturnType<typeof
     connected: boolean;
     authenticated: boolean;
     verified: boolean;
-    loginState: "failed" | "waiting" | "idle" | "authenticated";
+    loginState: "waiting" | "failed" | "idle" | "authenticated";
     loginStartedAt: string;
     error: string;
     installHint: string;
@@ -254,7 +254,7 @@ export declare const revokeDouyinMcpLogin: (...args: Parameters<ReturnType<typeo
     connected: boolean;
     authenticated: boolean;
     verified: boolean;
-    loginState: "failed" | "waiting" | "idle" | "authenticated";
+    loginState: "waiting" | "failed" | "idle" | "authenticated";
     loginStartedAt: string;
     error: string;
     installHint: string;
@@ -277,7 +277,7 @@ export declare const runDouyinMcpBridgeSelfTest: (...args: Parameters<ReturnType
         connected: boolean;
         authenticated: boolean;
         verified: boolean;
-        loginState: "failed" | "waiting" | "idle" | "authenticated";
+        loginState: "waiting" | "failed" | "idle" | "authenticated";
         loginStartedAt: string;
         error: string;
         installHint: string;

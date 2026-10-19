@@ -42,7 +42,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const crypto_1 = require("crypto");
-const ROOT = path.join(os.homedir(), ".ccm", "private");
+const ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "private");
 const LEASE_FILE = path.join(ROOT, "knowledge-index-v3.lease.json");
 const DEFAULT_LEASE_MS = 15 * 60_000;
 function readLease() {

@@ -46,7 +46,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
 exports.OPERATION_REGISTRY_SCHEMA = "ccm-operation-registry-v1";
-const STORE_FILE = path.join(process.env.CCM_OPERATION_REGISTRY_DIR || path.join(os.homedir(), ".ccm"), "operation-registry.json");
+const STORE_FILE = path.join(process.env.CCM_OPERATION_REGISTRY_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "operation-registry.json");
 function text(value, max = 500) { return String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/(api[_-]?key|token|password|secret|authorization)\s*[:=]\s*[^\s,;]+/ig, "$1=[redacted]").trim().slice(0, max); }
 function hash(value) { return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex"); }
 function now() { return new Date().toISOString(); }

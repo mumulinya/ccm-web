@@ -4,7 +4,7 @@ export declare function getGroupApiMicrocompactNativeApplyRequestTelemetryLedger
 export declare function getGroupCompactFileReferenceLedgerFile(groupId: string): string;
 export declare function normalizeCompactFileReferencePath(value: any): string;
 export declare function compactFileReferenceId(groupId: string, type: string, filePath: string): string;
-export declare function compactFileReferenceKind(filePath: string): "directory" | "file";
+export declare function compactFileReferenceKind(filePath: string): "file" | "directory";
 export declare function compactFileReferenceEntry(groupId: string, type: string, filePath: any, reason: string, extra?: any): any;
 export declare function uniqueCompactFileReferences(refs?: any[], limit?: number): any[];
 export declare function buildGroupCompactFileReferences(groupId: string, input?: any): {

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.neteaseCoverRelayUrl = neteaseCoverRelayUrl;
 exports.readFoliaCover = readFoliaCover;
 const platform_http_1 = require("../platform-http");
+const cover_image_1 = require("./cover-image");
 const cache = new Map();
 const pending = new Map();
 const unavailableUntil = new Map();
@@ -18,10 +19,10 @@ function neteaseCoverRelayUrl(url) {
     return 'https://wsrv.nl/?url=' + encodeURIComponent(url.toString());
 }
 function requireImage(result) {
-    const mime = String(result.headers['content-type'] || '').split(';')[0].toLowerCase();
-    if (result.statusCode !== 200 || !/^image\/(jpeg|png|webp|gif)$/.test(mime))
+    const mime = (0, cover_image_1.foliaImageMime)(result.headers['content-type'], result.buffer);
+    if (result.statusCode !== 200 || !/^image\/(jpeg|png|webp|gif|avif)$/.test(mime))
         throw new Error('音乐平台未返回有效封面');
-    return result;
+    return { ...result, headers: { ...result.headers, 'content-type': mime } };
 }
 function remember(key, result) {
     while (cache.size && (cache.size >= 128 || cacheBytes + result.buffer.length > LIMIT)) {
@@ -63,7 +64,7 @@ async function readFoliaCover(url, relayEnabled = false) {
             if (!relay || !(unavailableUntil.get(url.hostname) > Date.now())) {
                 try {
                     const result = requireImage(await (0, platform_http_1.musicPlatformRequest)({ url: url.toString(), allowedHosts: [url.hostname],
-                        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': url.hostname.endsWith('126.net') ? 'https://music.163.com/' : url.hostname === 'y.gtimg.cn' ? 'https://y.qq.com/' : 'https://www.kugou.com/' },
+                        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': url.hostname.endsWith('126.net') ? 'https://music.163.com/' : url.hostname === 'y.gtimg.cn' ? 'https://y.qq.com/' : url.hostname.endsWith('.kuwo.cn') ? 'https://bodian.kuwo.cn/' : 'https://www.kugou.com/' },
                         timeoutMs: relay ? 5000 : 10000, retries: relay ? 0 : 1, maxBytes: 8 * 1024 * 1024 }));
                     unavailableUntil.delete(url.hostname);
                     return remember(key, { ...result, coverReader: 'direct' });

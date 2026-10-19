@@ -49,7 +49,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const tool_manager_1 = require("./tool-manager");
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
-const TOOL_AUTHORIZATION_AUDIT_FILE = path.join(os.homedir(), ".ccm", "agent-runner", "tool-authorization-changes.jsonl");
+const TOOL_AUTHORIZATION_AUDIT_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner", "tool-authorization-changes.jsonl");
 function asArray(value) {
     if (Array.isArray(value))
         return value;

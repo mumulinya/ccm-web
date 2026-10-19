@@ -560,7 +560,7 @@ async function loadV2Sprite(state) {
 }
 
 // 通过 IPC 接收初始化参数
-window.petBridge.onInitPet((data) => {
+window.petBridge.onInitPet(async (data) => {
   agentName = data.agent || 'unknown';
   agentLabel = '';
   petType = data.type || 'yuexinmiao';
@@ -569,7 +569,7 @@ window.petBridge.onInitPet((data) => {
   petSize = data.size || 120;
   document.documentElement.dataset.petType = petType;
   setPetName(data.label || data.displayName);
-  loadSVG(petType, currentState);
+  await loadSVG(petType, currentState);
   applyState(currentState);
   // 应用保存的大小
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
@@ -580,6 +580,19 @@ window.petBridge.onInitPet((data) => {
     img.style.height = spriteSize + 'px';
   }
   requestAnimationFrame(positionResizeHandle);
+  const visual = svgContainer.querySelector('img');
+  try {
+    if (visual) await visual.decode();
+    else if (isV2Pet()) {
+      const atlas = new Image();
+      atlas.src = getComputedStyle(svgContainer.querySelector('[data-pet-visual]')).backgroundImage.slice(5, -2);
+      await atlas.decode();
+    } else throw new Error('missing pet visual');
+  } catch {
+    window.petBridge.ready('初始宠物资源无法解码');
+    return;
+  }
+  window.petBridge.ready();
 });
 
 // 状态配置

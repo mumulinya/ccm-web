@@ -54,7 +54,11 @@ const provider_status_1 = require("./provider-status");
 const cover_1 = require("./cover");
 const api_1 = require("../video/api");
 const cover_settings_1 = require("./cover-settings");
+const bodian_1 = require("./bodian");
 const navidrome_settings_1 = require("./navidrome-settings");
+const sync_settings_1 = require("./sync-settings");
+const ai_settings_1 = require("./ai-settings");
+const ai_runtime_1 = require("./ai-runtime");
 // 独立路由模块，现有 music.ts 只负责装配。
 async function jsonBody(req, maxBytes = 1024 * 1024) {
     let total = 0;
@@ -75,6 +79,34 @@ function handleFoliaApi(pathname, req, res) {
         return false;
     void (async () => {
         const owner = foliaOwner(req), route = pathname.slice('/api/music/folia'.length), parsed = new URL(req.url, 'http://ccm.local');
+        if (route === '/ai/config' && req.method === 'GET')
+            return (0, utils_1.sendJson)(res, { config: (0, ai_settings_1.readFoliaAiConfig)(owner) });
+        if (route === '/ai/config' && req.method === 'PUT') {
+            (0, authorization_1.requireFoliaWrite)(req);
+            return (0, utils_1.sendJson)(res, { config: (0, ai_settings_1.saveFoliaAiConfig)(owner, await jsonBody(req, 32768)) });
+        }
+        if (route === '/ai/test' && req.method === 'POST') {
+            (0, authorization_1.requireFoliaWrite)(req);
+            return (0, utils_1.sendJson)(res, await (0, ai_runtime_1.testFoliaAi)(owner, await jsonBody(req, 32768)));
+        }
+        if (route === '/sync/config' && req.method === 'GET')
+            return (0, utils_1.sendJson)(res, { config: (0, sync_settings_1.readFoliaSyncConfig)(owner) });
+        if (route === '/sync/config' && req.method === 'PUT') {
+            (0, authorization_1.requireFoliaWrite)(req);
+            return (0, utils_1.sendJson)(res, { config: (0, sync_settings_1.saveFoliaSyncConfig)(owner, await jsonBody(req, 32768)) });
+        }
+        if (route === '/sync/request' && req.method === 'POST') {
+            (0, authorization_1.requireFoliaWrite)(req);
+            return (0, utils_1.sendJson)(res, await (0, sync_settings_1.requestFoliaSync)(owner, await jsonBody(req, 4 * 1024 * 1024)));
+        }
+        if (route === '/sync/test' && req.method === 'POST') {
+            (0, authorization_1.requireFoliaWrite)(req);
+            return (0, utils_1.sendJson)(res, await (0, sync_settings_1.requestFoliaSync)(owner, await jsonBody(req, 32768), fetch, true));
+        }
+        if (route === '/bodian' && req.method === 'POST') {
+            (0, authorization_1.requireFoliaWrite)(req);
+            return (0, utils_1.sendJson)(res, await (0, bodian_1.requestFoliaBodian)(owner, await jsonBody(req, 32768)));
+        }
         if (route === '/cover' && req.method === 'GET')
             return (0, cover_1.sendFoliaCover)(parsed.searchParams.get('url') || '', res, owner);
         if (route === '/cover-settings' && req.method === 'GET')
@@ -88,11 +120,19 @@ function handleFoliaApi(pathname, req, res) {
         if (route === '/login/cancel' && req.method === 'POST') {
             (0, authorization_1.requireFoliaWrite)(req);
             const input = await jsonBody(req);
+            if (input.provider === 'bodian') {
+                const result = await (0, bodian_1.requestFoliaBodian)(owner, { operation: 'login_qr_cancel', params: { key: input.key || '' } });
+                return (0, utils_1.sendJson)(res, { success: result.ok });
+            }
             return (0, utils_1.sendJson)(res, (0, login_fence_1.cancelFoliaLogin)(owner, input.provider, input));
         }
         if (route === '/login/clear' && req.method === 'POST') {
             (0, authorization_1.requireFoliaWrite)(req);
             const input = await jsonBody(req);
+            if (input.provider === 'bodian') {
+                await (0, bodian_1.requestFoliaBodian)(owner, { operation: 'logout' });
+                return (0, utils_1.sendJson)(res, { success: true });
+            }
             if (!['netease', 'qq', 'kugou'].includes(input.provider))
                 throw new Error('不支持的账号音源');
             (0, login_fence_1.clearFoliaSession)(owner, input.provider);
@@ -103,9 +143,9 @@ function handleFoliaApi(pathname, req, res) {
         if (route === '/lyric-proxy' && ['GET', 'POST'].includes(req.method))
             return (0, auxiliary_1.foliaLyricProxy)(req, res, req.method === 'POST' ? await jsonBody(req) : undefined);
         if (['/generate-theme', '/generate-theme_openai'].includes(route) && req.method === 'POST')
-            return (0, utils_1.sendJson)(res, await (0, auxiliary_1.foliaTheme)(await jsonBody(req)));
+            return (0, utils_1.sendJson)(res, await (0, auxiliary_1.foliaTheme)(await jsonBody(req), owner));
         if (route === '/segment-lyrics' && req.method === 'POST')
-            return (0, utils_1.sendJson)(res, await (0, auxiliary_1.foliaSegmentLyrics)(await jsonBody(req)));
+            return (0, utils_1.sendJson)(res, await (0, auxiliary_1.foliaSegmentLyrics)(await jsonBody(req), owner));
         if (route === '/library' && req.method === 'GET')
             return (0, utils_1.sendJson)(res, { success: true, state: (0, workspace_catalog_1.musicLibraryProjection)((0, library_1.readFoliaLibrary)(owner)) });
         if (route === '/library' && req.method === 'PUT') {

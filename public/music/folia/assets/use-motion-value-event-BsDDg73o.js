@@ -1,1 +1,0 @@
-import{r as e}from"./rolldown-runtime-hePW80VL.js";import{ii as t}from"./folia-icons-C-1JgITt.js";var n=e(t(),1);function r(e,t,r){(0,n.useInsertionEffect)(()=>e.on(t,r),[e,t,r])}export{r as t};

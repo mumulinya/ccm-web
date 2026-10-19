@@ -12,8 +12,9 @@ const song_metadata_1 = require("./song-metadata");
 const native_local_state_1 = require("./native-local-state");
 const workspace_catalog_1 = require("./workspace-catalog");
 const video_library_1 = require("./video-library");
+const device_catalog_1 = require("./device-catalog");
 // Folia 音乐库：来源身份、服务端 CAS 与一次性旧库迁移。
-exports.FOLIA_PROVIDERS = ['local', 'netease', 'qq', 'kugou', 'navidrome'];
+exports.FOLIA_PROVIDERS = ['local', 'netease', 'qq', 'kugou', 'navidrome', 'bodian', 'device-local'];
 function trackKey(track) { return JSON.stringify([track.provider, track.instanceId, track.sourceId]); }
 function cleanTrack(input, legacyImport = false) {
     if (!input || !exports.FOLIA_PROVIDERS.includes(input.provider) || !String(input.sourceId || '') || String(input.sourceId).length > 512)
@@ -26,6 +27,8 @@ function cleanTrack(input, legacyImport = false) {
             (0, workspace_catalog_1.requireMusicFilename)(input.filename);
         track.filename = input.filename;
     }
+    if (input.provider === 'device-local' && (!/^[a-f0-9-]{36}$/.test(track.sourceId) || !/^[a-f0-9-]{36}$/.test(track.instanceId)))
+        throw new Error('无效设备歌曲引用');
     // 仅保留展示与来源身份，不把临时 URL、cookie 或运行时对象写入权威库。
     if (input.song)
         track.song = (0, song_metadata_1.cleanFoliaSong)(input.song, track);
@@ -67,6 +70,8 @@ function updateFoliaLibrary(owner, input) {
         if (!Number.isInteger(input.expectedRevision) || input.expectedRevision !== row.revision)
             throw Object.assign(new Error('音乐库已由其他窗口更新，请刷新后重试'), { statusCode: 409, state });
         const change = input.state || {};
+        if (input.deviceMutation !== undefined)
+            state.deviceCatalog = (0, device_catalog_1.applyDeviceCatalogMutation)(state.deviceCatalog, input.deviceMutation);
         if (input.localSong) {
             const local = (0, native_local_state_1.cleanFoliaLocalState)(input.localSong);
             state.nativeLocal = { ...state.nativeLocal, [local.filename]: local.data };

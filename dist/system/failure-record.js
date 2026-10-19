@@ -45,7 +45,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
 exports.FAILURE_RECORD_SCHEMA = "ccm-failure-record-v1";
-const STORE_FILE = path.join(process.env.CCM_FAILURE_RECORD_DIR || path.join(os.homedir(), ".ccm"), "failure-records.json");
+const STORE_FILE = path.join(process.env.CCM_FAILURE_RECORD_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "failure-records.json");
 function text(value, max = 500) { return String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/(api[_-]?key|token|password|secret|authorization)\s*[:=]\s*[^\s,;]+/ig, "$1=[redacted]").trim().slice(0, max); }
 function list(value, max = 40) { return [...new Set((Array.isArray(value) ? value : value == null ? [] : [value]).map(item => text(item, 500)).filter(Boolean))].slice(0, max); }
 function hash(value) { return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex"); }

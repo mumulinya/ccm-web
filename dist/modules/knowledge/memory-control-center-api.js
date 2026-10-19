@@ -56,6 +56,7 @@ exports.findMemoryEvidence = findMemoryEvidence;
 exports.rollbackMemory = rollbackMemory;
 exports.recordMemoryOperation = recordMemoryOperation;
 exports.memoryCenterExactGroupSessionScope = memoryCenterExactGroupSessionScope;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
@@ -108,25 +109,7 @@ function normalizeAvailableContextNames(value) {
             : item)).filter(Boolean))].slice(0, 100);
 }
 function scopeConfiguredContextTools(scope, scopeId, memory) {
-    try {
-        if (scope === "global_session" || scope === "global") {
-            const store = require("../global/global-agent-tool-authorization").loadGlobalAgentToolAuthorization();
-            return store?.tools || {};
-        }
-        if (scope === "group") {
-            const groupId = parseGroupMemoryScopeId(scopeId, memory).groupId;
-            const group = require("../collaboration/storage").loadGroups()
-                .find((item) => String(item?.id || "") === String(groupId || ""));
-            return group?.tools || {};
-        }
-        if (scope === "project" || scope === "project_session") {
-            const separator = scopeId.indexOf("::");
-            const projectId = (0, memory_control_center_types_1.cleanId)(scope === "project_session" && separator >= 0 ? scopeId.slice(0, separator) : memory?.project || scopeId);
-            return (0, db_1.loadProjectConfigs)()?.[projectId]?.tools || {};
-        }
-    }
-    catch { }
-    return {};
+    return (0, installed_tool_catalog_1.installedToolGrants)();
 }
 function estimateAvailableContextTokens(value) {
     if (!value)

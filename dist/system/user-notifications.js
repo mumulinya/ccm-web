@@ -317,7 +317,8 @@ function resolveUserNotificationsByDedupeKey(dedupeKey) {
     });
 }
 function listPendingPetDeliveries(options) {
-    const recipientIds = resolveRecipients(options.recipient_user_ids);
+    const recipientIds = options.recipient_user_ids === undefined ? resolveRecipients()
+        : [...new Set(options.recipient_user_ids)].filter(id => (0, local_auth_1.listActiveLocalAuthUsers)().some(user => user.id === id));
     if (!recipientIds.length)
         return [];
     const placeholders = recipientIds.map(() => "?").join(",");

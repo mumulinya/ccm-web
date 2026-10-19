@@ -41,7 +41,7 @@ const crypto = __importStar(require("crypto"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
-const FILE = path.join(process.env.CCM_PROVIDER_CAPABILITY_DIR || path.join(os.homedir(), ".ccm"), "provider-native-tool-capabilities.json");
+const FILE = path.join(process.env.CCM_PROVIDER_CAPABILITY_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "provider-native-tool-capabilities.json");
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 function hash(value) { return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex"); }
 function providerNativeToolIdentity(config, family) {

@@ -6,7 +6,7 @@ export declare const PLAN_STEP_LIBRARY: Record<string, PlanStepText>;
 export declare function planStepText(id: string, overrides?: Partial<PlanStepText>): PlanStepText;
 export declare function readTaskPlanMode(task: any): any;
 export declare function extractPlanModeWorkSteps(planMode: any): any;
-export declare function planWorkStepLiveStatus(phase: string, task: any): "pending" | "in_progress" | "reviewing" | "reworking" | "completed" | "cancelled" | "needs_confirmation";
+export declare function planWorkStepLiveStatus(phase: string, task: any): "completed" | "pending" | "in_progress" | "reviewing" | "reworking" | "cancelled" | "needs_confirmation";
 export interface PlanWorkStepSpec {
     id: string;
     content: string;

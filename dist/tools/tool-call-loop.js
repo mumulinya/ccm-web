@@ -40,7 +40,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const TOOL_LOOP_AUDIT_FILE = path.join(os.homedir(), ".ccm", "agent-runner", "tool-call-loop.jsonl");
+const TOOL_LOOP_AUDIT_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner", "tool-call-loop.jsonl");
 function stableValue(value) {
     if (Array.isArray(value))
         return value.map(stableValue);

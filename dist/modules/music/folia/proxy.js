@@ -43,6 +43,7 @@ const runtime_1 = require("./runtime");
 const accounts_1 = require("./accounts");
 const platform_http_1 = require("../platform-http");
 const login_fence_1 = require("./login-fence");
+const provider_cookie_1 = require("./provider-cookie");
 // 配套 API 的同源边界：不转发浏览器 IP、Cookie 或任意目标地址。
 async function proxyFoliaProvider(owner, provider, endpoint, req, res, body) {
     if (!/^\/[a-zA-Z0-9_/-]*$/.test(endpoint) || endpoint.includes('..'))
@@ -60,9 +61,9 @@ async function proxyFoliaProvider(owner, provider, endpoint, req, res, body) {
     }
     const state = (0, accounts_1.account)(owner, provider);
     if (state.cookieMarker)
-        target.searchParams.set('cookie', (0, accounts_1.revealProviderValue)(owner, provider, state.cookieMarker));
+        target.searchParams.set('cookie', (0, provider_cookie_1.foliaProviderCookie)(provider, String((0, accounts_1.revealProviderValue)(owner, provider, state.cookieMarker))));
     if (logoutCookie && provider !== 'qq')
-        target.searchParams.set('cookie', logoutCookie);
+        target.searchParams.set('cookie', (0, provider_cookie_1.foliaProviderCookie)(provider, logoutCookie));
     const headers = { 'Content-Type': 'application/json' };
     if (provider === 'qq' && state.cookieMarker) {
         const cookie = String((0, accounts_1.revealProviderValue)(owner, provider, state.cookieMarker));
@@ -97,20 +98,21 @@ async function proxyFoliaProvider(owner, provider, endpoint, req, res, body) {
     res.writeHead(response.status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(safe));
 }
-async function requestFoliaProvider(owner, provider, endpoint, params) {
+async function requestFoliaProvider(owner, provider, endpoint, params, options = {}) {
     const port = await (0, runtime_1.ensureFoliaProvider)(provider), url = new URL(endpoint, `http://127.0.0.1:${port}`);
     for (const [key, value] of Object.entries(params))
         if (value !== undefined)
             url.searchParams.set(key, String(value));
     const state = (0, accounts_1.account)(owner, provider), headers = {};
     if (state.cookieMarker) {
-        const cookie = String((0, accounts_1.revealProviderValue)(owner, provider, state.cookieMarker));
+        const cookie = (0, provider_cookie_1.foliaProviderCookie)(provider, String((0, accounts_1.revealProviderValue)(owner, provider, state.cookieMarker)));
         if (provider === 'qq')
             headers['X-QQ-Session'] = /qqmusic_session=([^;]+)/.exec(cookie)?.[1] || cookie;
         else
             url.searchParams.set('cookie', cookie);
     }
-    const response = await fetch(url, { headers, signal: AbortSignal.timeout(15_000), redirect: 'error' });
+    const timeout = AbortSignal.timeout(options.timeoutMs || 15_000);
+    const response = await fetch(url, { headers, signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout, redirect: 'error' });
     const data = await response.json();
     if (!response.ok)
         throw new Error(data.message || data.msg || `音源请求失败（${response.status}）`);

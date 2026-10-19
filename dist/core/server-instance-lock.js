@@ -43,6 +43,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const runtime_paths_1 = require("./runtime-paths");
+const runtime_directory_job_1 = require("./runtime-directory-job");
 function processAlive(pid) {
     if (!Number.isFinite(pid) || pid <= 0)
         return false;
@@ -163,6 +164,7 @@ function archiveDeadLock(file) {
     }
 }
 function acquireCcmServerInstanceLock(port, listenHost = "127.0.0.1", options = {}) {
+    (0, runtime_directory_job_1.assertDirectoryReservation)(path.resolve(process.env.CCM_TASK_STORE_DIR || runtime_paths_1.CCM_DIR));
     const file = getLockFile();
     const entry = entryIdentity();
     const token = crypto.randomBytes(24).toString("hex");

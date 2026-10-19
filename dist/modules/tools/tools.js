@@ -53,6 +53,8 @@ exports.deleteSharedFile = deleteSharedFile;
 exports.readSkillManual = readSkillManual;
 exports.loadCustomSkills = loadCustomSkills;
 exports.handleToolsAndMetricsApi = handleToolsAndMetricsApi;
+const extension_state_1 = require("../../tools/extension-state");
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
 const metrics_performance_summary_1 = require("../../system/metrics-performance-summary");
 // tools.ts — merged from 3 part files (behavior-freeze merge).
 const fs = __importStar(require("fs"));
@@ -84,14 +86,14 @@ const performance_provider_cache_metrics_1 = require("../../system/performance-p
 const access_policy_1 = require("../system/access-policy");
 // ===== merged from tools-part-01-part-01.ts =====
 const { toolManager } = require("../../tools/tool-manager");
-const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".ccm", "tools", "catalog-operations.jsonl");
+const TOOL_CATALOG_AUDIT_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "tools", "catalog-operations.jsonl");
 const TOOL_INVOCATION_AUDIT_FILES = {
-    toolLoop: path.join(os.homedir(), ".ccm", "agent-runner", "tool-call-loop.jsonl"),
-    skillInvocations: path.join(os.homedir(), ".ccm", "agent-runner", "skill-invocations.jsonl"),
-    permissionViolations: path.join(os.homedir(), ".ccm", "agent-runner", "tool-permission-violations.jsonl"),
+    toolLoop: path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner", "tool-call-loop.jsonl"),
+    skillInvocations: path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner", "skill-invocations.jsonl"),
+    permissionViolations: path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner", "tool-permission-violations.jsonl"),
 };
-const MARKETPLACE_OPERATIONS_AUDIT_FILE = path.join(os.homedir(), ".ccm", "marketplace", "operations.jsonl");
-const AGENT_RUNNER_DIR = path.join(os.homedir(), ".ccm", "agent-runner");
+const MARKETPLACE_OPERATIONS_AUDIT_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "marketplace", "operations.jsonl");
+const AGENT_RUNNER_DIR = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner");
 const AGENT_PROBE_STATUS_FILE = path.join(AGENT_RUNNER_DIR, "probe-status.json");
 const AGENT_PROBE_TARGET_STATUS_DIR = path.join(AGENT_RUNNER_DIR, "probe-targets");
 const REAL_CLI_PROBE_SUCCESS_FRESH_MS = 24 * 60 * 60 * 1000;
@@ -1543,7 +1545,7 @@ function resolveCatalogAuthorizationScope(query = {}) {
     if (!scope)
         return null;
     if (scope === "global") {
-        return { scope: "global", scopeId: "global-agent", tools: (0, tool_authorization_1.normalizeToolAuthorization)((0, global_agent_tool_authorization_1.loadGlobalAgentToolAuthorization)()?.tools || {}) };
+        return { scope: "global", scopeId: "global-agent", tools: (0, installed_tool_catalog_1.installedToolGrants)() };
     }
     if (scope === "project") {
         const project = String(query?.project || query?.project_id || "").trim();
@@ -1552,7 +1554,7 @@ function resolveCatalogAuthorizationScope(query = {}) {
         const config = (0, db_1.loadProjectConfigs)()?.[project];
         if (!config)
             throw new Error("项目不存在");
-        return { scope: "project", scopeId: project, tools: (0, tool_authorization_1.normalizeToolAuthorization)(config?.tools || {}) };
+        return { scope: "project", scopeId: project, tools: (0, installed_tool_catalog_1.installedToolGrants)() };
     }
     if (scope === "group") {
         const groupId = String(query?.group_id || query?.groupId || query?.id || "").trim();
@@ -1561,7 +1563,7 @@ function resolveCatalogAuthorizationScope(query = {}) {
         const group = (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === groupId);
         if (!group)
             throw new Error("群聊不存在");
-        return { scope: "group", scopeId: groupId, tools: (0, tool_authorization_1.normalizeToolAuthorization)(group?.tools || {}) };
+        return { scope: "group", scopeId: groupId, tools: (0, installed_tool_catalog_1.installedToolGrants)() };
     }
     throw new Error("工具目录作用域无效");
 }
@@ -1700,9 +1702,11 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 projects: (0, db_1.loadProjectConfigs)(),
                 groups: (0, storage_1.loadGroups)(),
                 runtimeReadiness,
+                buildPayload: installed_tool_catalog_1.buildInstalledToolAvailabilityPayload,
             });
             (0, utils_1.sendJson)(res, {
                 success: true,
+                availabilityMode: "installed",
                 ...inventory,
                 main_agent_catalog: {
                     schema: "ccm-main-agent-tool-catalog-v2",
@@ -1819,6 +1823,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 const payload = body ? JSON.parse(body) : {};
                 const type = payload.type === "skill" ? "skill" : "mcp";
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                (0, extension_state_1.assertExtensionMemberEditable)(pathname.startsWith("/api/skills") ? "skill" : "mcp", name);
                 (0, utils_1.sendJson)(res, { success: true, ...(0, marketplace_1.previewToolCatalogMutationImpact)({ action: payload.action || "preview", type, name }) });
             }
             catch (e) {
@@ -1887,8 +1892,10 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
             try {
                 const payload = JSON.parse(body || "{}");
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                (0, extension_state_1.assertExtensionMemberEditable)(pathname.startsWith("/api/skills") ? "skill" : "mcp", name);
                 if ((0, internal_mcp_registry_1.isInternalMcpName)(name))
                     return (0, utils_1.sendJson)(res, { success: false, error: "内部 MCP 随项目安装并由系统管理，不能在外部 MCP 连接中心编辑" }, 409);
+                (0, extension_state_1.assertExtensionMemberEditable)("mcp", name);
                 const previous = (0, db_1.loadMcpTools)().find(item => String(item.name) === name) || null;
                 if (payload.createOnly === true && previous)
                     return (0, utils_1.sendJson)(res, { success: false, error: "同名 MCP 服务器已存在" }, 409);
@@ -1923,6 +1930,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(rawName);
                 if ((0, internal_mcp_registry_1.isInternalMcpName)(name))
                     return (0, utils_1.sendJson)(res, { success: false, error: "内部 MCP 是项目运行链路的一部分，不能删除" }, 409);
+                (0, extension_state_1.assertExtensionMemberEditable)("mcp", name);
                 const previous = (0, db_1.loadMcpTools)().find(item => String(item.name) === name) || null;
                 const impact = (0, marketplace_1.previewToolCatalogMutationImpact)({ action: "delete", type: "mcp", name });
                 (0, db_1.deleteMcpTool)(name);
@@ -1982,6 +1990,8 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
             try {
                 const payload = JSON.parse(body || "{}");
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                (0, extension_state_1.assertExtensionMemberEditable)(pathname.startsWith("/api/skills") ? "skill" : "mcp", name);
+                (0, extension_state_1.assertExtensionMemberEditable)("skill", name);
                 const previous = (0, db_1.loadSkills)().find(item => String(item.name) === name) || null;
                 if (payload.createOnly === true && previous)
                     return (0, utils_1.sendJson)(res, { success: false, error: "同名 Prompt Skill 已存在" }, 409);
@@ -2025,6 +2035,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
             try {
                 const { name: rawName } = JSON.parse(body || "{}");
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(rawName);
+                (0, extension_state_1.assertExtensionMemberEditable)("skill", name);
                 const previous = (0, db_1.loadSkills)().find(item => String(item.name) === name) || null;
                 const impact = (0, marketplace_1.previewToolCatalogMutationImpact)({ action: "delete", type: "skill", name });
                 (0, db_1.deleteSkill)(name);

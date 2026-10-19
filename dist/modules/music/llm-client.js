@@ -11,6 +11,7 @@ async function callMusicLlm(config, prompt, options = {}) {
         maxTokens: options.maxTokens || 120,
         temperature: options.temperature ?? 0.4,
         defaultTimeoutMs: options.timeoutMs || 10_000,
+        ...(options.retryTotalTimeoutMs ? { retryTotalTimeoutMs: options.retryTotalTimeoutMs } : {}),
         httpErrorPrefix: "音乐助手模型请求失败",
         providerContextCache: {
             scope: "workspace", scopeId: "workspace", sessionId: "music-assistant",

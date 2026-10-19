@@ -50,7 +50,7 @@ const model_token_preflight_1 = require("./model-token-preflight");
 const provider_cache_protocol_1 = require("./provider-cache-protocol");
 const agent_cache_affinity_1 = require("./agent-cache-affinity");
 const DECISION_DIR = process.env.CCM_SEMANTIC_DECISION_DIR
-    || path.join(os.homedir(), ".ccm", "semantic-decisions");
+    || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "semantic-decisions");
 const inFlight = new Map();
 const completed = new Map();
 function stable(value) {
@@ -150,6 +150,7 @@ async function runSemanticDecision(request) {
                     reasoningEffort: request.reasoningEffort,
                     defaultTimeoutMs: Number(config.timeoutMs || 120_000),
                     retryScope: `semantic:${request.kind}`,
+                    signal: request.signal,
                     retryProfile: request.retryProfile,
                     providerContextCache,
                     onUsage: usage => { modelUsage = usage; },
@@ -162,6 +163,7 @@ async function runSemanticDecision(request) {
                     reasoningEffort: request.reasoningEffort,
                     defaultTimeoutMs: Number(config.timeoutMs || 120_000),
                     retryScope: `semantic:${request.kind}`,
+                    signal: request.signal,
                     retryProfile: request.retryProfile,
                     providerContextCache,
                     onUsage: usage => { modelUsage = usage; },

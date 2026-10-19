@@ -1,5 +1,4 @@
 "use strict";
-// marketplace.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -79,9 +78,20 @@ exports.stageSkillPackage = stageSkillPackage;
 exports.installStagedPackage = installStagedPackage;
 exports.localMarketplaceItems = localMarketplaceItems;
 exports.runMarketplaceSelfTest = runMarketplaceSelfTest;
+exports.resolveMarketplaceItemForInstall = resolveMarketplaceItemForInstall;
+exports.buildMarketplaceMcpToolRecord = buildMarketplaceMcpToolRecord;
+exports.validateStdioMarketplaceItem = validateStdioMarketplaceItem;
+exports.buildMarketplaceSkillRecord = buildMarketplaceSkillRecord;
+exports.createMarketplaceInstallTransaction = createMarketplaceInstallTransaction;
+exports.activateMarketplaceTransaction = activateMarketplaceTransaction;
 exports.installMarketplaceItemWithStore = installMarketplaceItemWithStore;
 exports.uninstallMarketplaceItemWithStore = uninstallMarketplaceItemWithStore;
+exports.createAndMaybeActivateMarketplaceTransaction = createAndMaybeActivateMarketplaceTransaction;
 exports.handleMarketplaceApi = handleMarketplaceApi;
+const extension_runtime_bindings_1 = require("../../tools/extension-runtime-bindings");
+const extension_catalog_1 = require("./extension-catalog");
+const extension_single_validation_1 = require("./extension-single-validation");
+// marketplace.ts — merged from 2 part files (behavior-freeze merge).
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
@@ -102,7 +112,7 @@ const atomic_json_file_1 = require("../../core/atomic-json-file");
 // ===== merged from marketplace-part-01.ts =====
 const { toolManager } = require("../../tools/tool-manager");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
-exports.CCM_DIR = path.join(os.homedir(), ".ccm");
+exports.CCM_DIR = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"));
 const INSTALLATIONS_FILE = path.join(exports.CCM_DIR, "marketplace", "installations.json");
 const MARKETPLACE_OPERATIONS_FILE = path.join(exports.CCM_DIR, "marketplace", "operations.jsonl");
 const SOURCES_FILE = path.join(exports.CCM_DIR, "marketplace", "sources.json");
@@ -338,7 +348,7 @@ function buildMarketplaceAuthorizationImpact(input, store = {}) {
     const name = cleanImpactText(input.name, 240);
     const scopes = [];
     const addScope = (scope, id, label, tools) => {
-        const normalized = (0, tool_authorization_1.normalizeToolAuthorization)(tools || {});
+        const normalized = (0, tool_authorization_1.normalizeToolAuthorization)(store.loadProjectConfigs || store.loadGroups ? tools || {} : { mcp: type === "mcp" ? [name] : [], skill: type === "skill" ? [name] : [] });
         const grants = type === "mcp"
             ? { mcp: normalized.mcp.filter(grant => mcpGrantTargetsMarketplaceServer(grant, name)), skill: [] }
             : { mcp: [], skill: normalized.skill.filter(grant => skillGrantTargetsMarketplaceSkill(grant, name)) };
@@ -531,6 +541,8 @@ function buildMarketplaceRuntimeCatalog(store = {}) {
     };
 }
 function maybeAutoResyncMarketplaceRuntime(impact, options = {}, store = {}) {
+    if (!store.loadInstallations)
+        return require("../../tools/extension-runtime-delivery").deferredInstalledRuntimeDelivery();
     if (!marketplaceAutoResyncRequested(options?.autoResync))
         return null;
     const snapshots = Array.isArray(impact?.snapshots) ? impact.snapshots : [];
@@ -597,6 +609,8 @@ function previewToolCatalogMutationImpact(input, store = {}) {
     };
 }
 function completeToolCatalogMutationLifecycle(input, store = {}) {
+    if (!store.loadInstallations && ["delete", "uninstall", "toggle", "update"].includes(input.action))
+        (0, extension_runtime_bindings_1.revokeExtensionRuntimeBindings)([{ kind: input.type, name: input.name }]);
     const preview = previewToolCatalogMutationImpact(input, store);
     const runtimeResync = maybeAutoResyncMarketplaceRuntime(preview.runtimeImpact, {
         autoResync: input?.autoResync !== false,
@@ -1016,6 +1030,8 @@ function publicMarketplaceSources() {
 }
 function normalizeMarketplaceItem(item, fallbackSource) {
     const type = String(item?.type || "").toLowerCase();
+    if (type === "plugin")
+        return (0, extension_catalog_1.normalizePluginCatalogItem)(item, fallbackSource);
     if (!["mcp", "skill"].includes(type))
         throw new Error("商城条目 type 必须为 mcp 或 skill");
     const name = String(item?.name || item?.displayName || item?.slug || "").trim();
@@ -1265,6 +1281,8 @@ function decorateInstallState(items) {
     const installedMcp = new Map((0, db_1.loadMcpTools)().map(item => [String(item.name), item]));
     const installedSkills = new Map((0, db_1.loadSkills)().map(item => [String(item.name), item]));
     return items.map(item => {
+        if (item.type === "plugin")
+            return (0, extension_catalog_1.decoratePluginCatalogItem)(item);
         const record = installations.find(entry => entry.key === installationKey(item.type, item.name));
         const resourcePresent = item.type === "mcp" ? installedMcp.has(item.name) : installedSkills.has(item.name);
         const installed = resourcePresent && !!record && (record.state || "quarantined_legacy") === "active";
@@ -2210,7 +2228,7 @@ function buildMarketplaceMcpToolRecord(item, now) {
         transport,
         executablePath: item.executablePath || undefined,
         headers: item.headers && typeof item.headers === "object" ? protectMarketplaceHeaders(item.name, item.headers) : undefined,
-        env: item.env || "",
+        env: protectMarketplaceEnv(item.name, item.env),
         enabled: item.enabled !== false,
         version: item.version,
         author: item.author,
@@ -2610,13 +2628,7 @@ async function activateMarketplaceTransactionUnderLock(input, principal) {
                 materialHash: transaction.materialHash,
             }, staged, packagePath, transaction.materialHash, new Date().toISOString()));
         }
-        await toolManager.loadTools();
-        const toolState = transaction.type === "mcp"
-            ? toolManager.getToolList().servers.find((server) => server.name === transaction.name)
-            : { connected: true };
-        if (transaction.type === "mcp" && !toolState?.connected) {
-            throw Object.assign(new Error(toolState?.error || "MCP 初始化或 tools/list 测试失败"), { code: "MCP_ACTIVATION_TEST_FAILED" });
-        }
+        await (0, extension_single_validation_1.validateStandaloneActivation)(transaction.type, item);
         const sourceProof = buildMarketplaceSourceProof(item, {
             checksum: transaction.materialHash,
             packageStats: transaction.preview?.packageStats,
@@ -2664,6 +2676,7 @@ async function activateMarketplaceTransactionUnderLock(input, principal) {
             resyncState: "ready",
             checkpoints: [...current.checkpoints, "resource_installed", "tool_manager_ready", "runtime_resynced", "committed"],
         }));
+        await toolManager.loadTools();
         appendMarketplaceOperationAudit({
             action: transaction.action,
             key: nextRecord.key,
@@ -3182,6 +3195,8 @@ async function uninstallMarketplaceItemWithStore(payload, store = {}, options = 
             statusCode: 409,
         });
     }
+    if (!store.loadInstallations)
+        (0, extension_runtime_bindings_1.revokeExtensionRuntimeBindings)([{ kind: type, name }]);
     if (type === "mcp")
         deleteMcp(name);
     else {

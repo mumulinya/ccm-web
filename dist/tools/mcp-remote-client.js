@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.McpRemoteClient = void 0;
+const extension_oauth_1 = require("./extension-oauth");
 const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
 const streamableHttp_js_1 = require("@modelcontextprotocol/sdk/client/streamableHttp.js");
 const sse_js_1 = require("@modelcontextprotocol/sdk/client/sse.js");
@@ -10,16 +11,18 @@ class McpRemoteClient {
     url;
     headers;
     preferredTransport;
+    serverName;
     client = null;
     transport = null;
     connected = false;
     tools = [];
     lastError = "";
     actualTransport;
-    constructor(url, headers = {}, preferredTransport = "streamable_http") {
+    constructor(url, headers = {}, preferredTransport = "streamable_http", serverName = "") {
         this.url = url;
         this.headers = headers;
         this.preferredTransport = preferredTransport;
+        this.serverName = serverName;
         this.actualTransport = preferredTransport;
     }
     safeError(value) {
@@ -29,10 +32,15 @@ class McpRemoteClient {
         const headers = { ...this.headers };
         return {
             requestInit: { headers },
-            fetch: (input, init) => (0, secure_public_network_1.securePublicFetch)(input, { ...(init || {}), headers: { ...headers, ...(init?.headers || {}) } }, {
-                maxBytes: 8 * 1024 * 1024,
-                timeoutMs: 30_000,
-            }),
+            authProvider: (0, extension_oauth_1.extensionOAuthProvider)(this.serverName, this.url),
+            fetch: (input, init) => {
+                const merged = new Headers(headers);
+                new Headers(init?.headers || {}).forEach((value, key) => merged.set(key, value));
+                return (0, secure_public_network_1.securePublicFetch)(input, { ...(init || {}), headers: merged }, {
+                    maxBytes: 8 * 1024 * 1024,
+                    timeoutMs: 30_000,
+                });
+            },
             reconnectionOptions: {
                 maxReconnectionDelay: 5000,
                 initialReconnectionDelay: 500,
@@ -48,16 +56,21 @@ class McpRemoteClient {
         const instance = transport === "sse"
             ? new sse_js_1.SSEClientTransport(new URL(this.url), options)
             : new streamableHttp_js_1.StreamableHTTPClientTransport(new URL(this.url), options);
-        await Promise.race([
-            client.connect(instance),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("MCP remote initialize timeout")), 30_000)),
-        ]);
-        const listed = await Promise.race([
-            client.listTools({}),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("MCP remote tools/list timeout")), 30_000)),
-        ]);
         this.client = client;
         this.transport = instance;
+        const bounded = async (operation, label) => {
+            let timer;
+            try {
+                return await Promise.race([operation, new Promise((_, reject) => {
+                        timer = setTimeout(() => reject(new Error(`MCP remote ${label} timeout`)), 30_000);
+                    })]);
+            }
+            finally {
+                clearTimeout(timer);
+            }
+        };
+        await bounded(client.connect(instance), "initialize");
+        const listed = await bounded(client.listTools({}), "tools/list");
         this.tools = Array.isArray(listed?.tools) ? listed.tools : [];
         this.actualTransport = transport;
     }

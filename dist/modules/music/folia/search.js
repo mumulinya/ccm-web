@@ -11,7 +11,7 @@ const context_1 = require("./context");
 const accounts_1 = require("./accounts");
 // 模型给出媒体类型与来源后，按来源适配公开候选，不运行本地意图规则。
 const all = ['local', 'netease', 'qq', 'kugou', 'navidrome', 'bilibili', 'douyin'];
-async function searchFoliaPlaybackCandidates(intent) {
+async function searchFoliaPlaybackCandidates(intent, options = {}) {
     const query = intent.strategy === 'random' ? '热门 华语 音乐 推荐' : intent.searchQuery;
     const owner = (0, context_1.currentFoliaOwner)();
     const requested = intent.sourceMode === 'auto' ? intent.mediaMode === 'video' ? ['bilibili', 'douyin'] : ['local', 'netease', 'qq', 'kugou', 'navidrome'] : [intent.sourceMode];
@@ -23,19 +23,19 @@ async function searchFoliaPlaybackCandidates(intent) {
         if (source === 'bilibili' || source === 'douyin')
             return (0, search_results_1.signSearchResults)(source, query, await (source === 'bilibili' ? (0, bilibili_1.biliSearch)(query) : (0, douyin_1.douyinSearch)(query)), 12).map((row) => ({ source, sourceId: String(row.bvid || row.awemeId), title: row.title, artist: row.author || row.artist || '', duration: row.duration, downloadToken: row.downloadToken }));
         if (source === 'netease') {
-            const data = await (0, proxy_1.requestFoliaProvider)(owner, source, '/search', { keywords: query, limit: 20, type: 1 });
+            const data = await (0, proxy_1.requestFoliaProvider)(owner, source, '/search', { keywords: query, limit: 20, type: 1 }, options);
             if (data.code !== 200)
                 throw new Error(data.msg || '网易云搜索失败');
             return (data.result?.songs || []).map((song) => ({ source, sourceId: String(song.id), title: song.name, artist: (song.artists || song.ar || []).map((a) => a.name).join(' / '), song: { id: song.id, name: song.name, artists: song.artists || song.ar, album: song.album || song.al, durationMs: song.duration || song.dt } }));
         }
         if (source === 'qq') {
-            const data = await (0, platform_http_1.musicPlatformJson)({ url: 'https://u.y.qq.com/cgi-bin/musicu.fcg', allowedHosts: ['u.y.qq.com'], method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'okhttp/3.14.9' }, body: JSON.stringify({ comm: { ct: 11, cv: '1003006', tmeAppID: 'qqmusiclight' }, request: { method: 'DoSearchForQQMusicLite', module: 'music.search.SearchCgiService', param: { query, search_type: 0, num_per_page: 20, page_num: 1, highlight: 0 } } }) });
-            if (data.code !== 0 || data.request?.code !== 0)
+            const data = await (0, proxy_1.requestFoliaProvider)(owner, source, '/search', { keyword: query.slice(0, 60), type: 'song', page: 1, limit: 20 }, options);
+            if (data.code !== 200 || !Array.isArray(data.items))
                 throw new Error('QQ 搜索暂时不可用');
-            return (data.request.data?.body?.item_song || []).map((song) => ({ source, sourceId: String(song.mid), title: song.name, artist: (song.singer || []).map((a) => a.name).join(' / '), song: { id: song.mid, name: song.name, artists: song.singer, album: song.album, durationMs: Number(song.interval || 0) * 1000 } }));
+            return data.items.map((song) => ({ source, sourceId: String(song.mid), title: song.name, artist: (song.singer || []).map((a) => a.name).join(' / '), song: { id: song.mid, name: song.name, artists: song.singer, album: song.album, durationMs: Number(song.interval || 0) * 1000 } }));
         }
         if (source === 'kugou') {
-            const data = await (0, proxy_1.requestFoliaProvider)(owner, source, '/search', { keywords: query, keyword: query, type: 'song', page: 1, pagesize: 20 });
+            const data = await (0, proxy_1.requestFoliaProvider)(owner, source, '/search', { keywords: query, keyword: query, type: 'song', page: 1, pagesize: 20 }, options);
             if (data.error_code || data.status === 0)
                 throw new Error(data.error || '酷狗搜索失败');
             return (data.data?.lists || data.data?.info || data.data?.list || []).map((song) => ({ source, sourceId: String(song.FileHash || song.hash), title: song.SongName || song.songname || song.FileName, artist: song.SingerName || song.singername || '', song: { id: song.FileHash || song.hash, name: song.SongName || song.songname || song.FileName, artists: [{ id: 0, name: song.SingerName || song.singername || '' }], album: { id: song.AlbumID || 0, name: song.AlbumName || '' }, sourceRef: { kind: 'online', providerId: 'kugou', mediaId: song.FileHash || song.hash, providerData: { albumId: song.AlbumID || 0, hash: song.FileHash || song.hash } } } }));

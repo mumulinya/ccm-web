@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOrCreateLocalSetupCode = getOrCreateLocalSetupCode;
+exports.isLocalSessionActive = isLocalSessionActive;
 exports.resolveLocalAuthSession = resolveLocalAuthSession;
 exports.verifyBrowserCsrf = verifyBrowserCsrf;
 exports.roleCapabilities = roleCapabilities;
@@ -253,6 +254,12 @@ function revokeSessionById(sessionId, reason) { (0, atomic_json_file_1.withFileL
     session.revokedAt = now();
     session.revokedReason = reason;
 } saveSessions(store); }); }
+// A detached companion may retain the launching session ID, never its cookie.
+function isLocalSessionActive(sessionId, userId) {
+    const session = peekSessions().sessions.find(item => item.id === sessionId && item.userId === userId);
+    return !!session && !session.revokedAt && Date.parse(session.expiresAt) > Date.now()
+        && peekUsers().users.some(user => user.id === userId && !user.disabledAt);
+}
 function resolveLocalAuthSession(req) {
     const token = parseCookies(req)[SESSION_COOKIE];
     if (!token)

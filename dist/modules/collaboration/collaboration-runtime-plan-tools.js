@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-runtime-plan-tools.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -79,6 +78,8 @@ exports.normalizeProjectConfigList = normalizeProjectConfigList;
 exports.getProjectAgentCapabilityProfile = getProjectAgentCapabilityProfile;
 exports.collectProjectPolicyViolations = collectProjectPolicyViolations;
 exports.buildAgentToolContext = buildAgentToolContext;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
+// collaboration-runtime-plan-tools.ts — merged from 2 part files (behavior-freeze merge).
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
@@ -1356,7 +1357,7 @@ function buildAgentToolContext(ctx, group, projectName, taskText = "", selectedS
         selectedSkillNames,
         modelDecision: { actionRequired: true, selectedSkills: selectedSkillNames },
     });
-    const configuredTools = (0, tool_authorization_1.normalizeToolAuthorization)(mergeToolSelections(group?.tools || {}, getProjectToolSelection(projectName)));
+    const configuredTools = (0, installed_tool_catalog_1.installedToolGrants)();
     const executionRoleSkills = selectedRoleSkills.map(skill => skill.name);
     const allowedTools = {
         ...(0, tool_authorization_1.normalizeToolAuthorization)(mergeToolSelections(configuredTools, { skill: executionRoleSkills })),

@@ -43,6 +43,8 @@ exports.reconcileProjectFeishuConnections = reconcileProjectFeishuConnections;
 exports.startFeishuChannelSupervisorForServer = startFeishuChannelSupervisorForServer;
 exports.stopFeishuChannelSupervisorForServer = stopFeishuChannelSupervisorForServer;
 exports.handleProjectsApi = handleProjectsApi;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
+const installed_tool_catalog_2 = require("../../tools/installed-tool-catalog");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -1760,10 +1762,10 @@ type = "${finalPlatform}"${platformOptionsToml}
         const configuredCommands = normalizeVerificationCommands(configs[project]?.verification_commands || configs[project]?.verificationCommands || []);
         const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
         const profile = normalizeProjectAgentProfile(configs[project] || {});
-        const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(configs[project]?.tools || {});
+        const toolAuth = (0, installed_tool_catalog_1.buildInstalledToolAvailabilityPayload)(configs[project]?.tools || {});
         const contextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), configs[project]?.context_policy || configs[project]?.contextPolicy || {});
         (0, utils_1.sendJson)(res, {
-            tools: toolAuth.tools,
+            availabilityMode: toolAuth.availabilityMode, tools: toolAuth.tools,
             tool_audit: toolAuth.tool_audit,
             authorization_readiness: toolAuth.authorization_readiness,
             connection_preflight: toolAuth.connection_preflight,
@@ -1782,7 +1784,8 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("end", async () => {
             try {
                 const payload = JSON.parse(body);
-                const { tools, verification_commands, verificationCommands } = payload;
+                (0, installed_tool_catalog_2.rejectLegacyToolSelection)(payload);
+                const { verification_commands, verificationCommands } = payload;
                 const project = requireActiveProjectName(payload.project);
                 if (!allowProject(project, "manage"))
                     return;
@@ -1790,8 +1793,7 @@ type = "${finalPlatform}"${platformOptionsToml}
                 if (!configs[project])
                     configs[project] = {};
                 const previousTools = (0, tool_authorization_1.normalizeToolAuthorization)(configs[project].tools || {});
-                const normalizedTools = (0, tool_authorization_1.normalizeToolAuthorization)(tools);
-                configs[project].tools = normalizedTools;
+                const normalizedTools = (0, installed_tool_catalog_2.installedToolGrants)();
                 if ((0, main_agent_context_policy_1.mainAgentContextPolicyUpdatePresent)(payload)) {
                     configs[project].context_policy = (0, main_agent_context_policy_1.updateMainAgentContextPolicyOverride)(configs[project].context_policy || configs[project].contextPolicy || {}, (0, main_agent_context_policy_1.contextPolicyUpdateSource)(payload), (0, group_orchestrator_config_1.loadOrchestratorConfig)());
                     delete configs[project].contextPolicy;
@@ -1805,7 +1807,7 @@ type = "${finalPlatform}"${platformOptionsToml}
                 configs[project].forbidden_paths = profile.forbidden_paths;
                 configs[project].delivery_contract = profile.delivery_contract;
                 (0, db_1.saveProjectConfigs)(configs);
-                const toolAuth = await (0, tool_authorization_1.buildFreshToolAuthorizationPayload)(normalizedTools);
+                const toolAuth = (0, installed_tool_catalog_1.buildInstalledToolAvailabilityPayload)(normalizedTools);
                 const authorizationChange = (0, tool_authorization_1.recordToolAuthorizationChange)({
                     scope: "project",
                     scopeId: project,
@@ -1816,10 +1818,10 @@ type = "${finalPlatform}"${platformOptionsToml}
                     toolAudit: toolAuth.tool_audit,
                     authorizationReadiness: toolAuth.authorization_readiness,
                 });
-                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), configs[project].context_policy || {}), ...profile });
+                (0, utils_1.sendJson)(res, { success: true, availabilityMode: toolAuth.availabilityMode, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), configs[project].context_policy || {}), ...profile });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { error: e.message, code: e.code }, e.statusCode || 400);
             }
         });
         return true;

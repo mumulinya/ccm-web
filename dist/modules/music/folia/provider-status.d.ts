@@ -9,6 +9,7 @@ export declare function foliaProviderStatus(owner: string): {
     providers: {
         provider: string;
         configured: boolean;
+        desktopOnly: boolean;
         hasSession: boolean;
         profile: any;
         checkedAt: any;

@@ -14,6 +14,9 @@ exports.callClaudeAgent = callClaudeAgent;
 exports.runMusicAgentIntentSelfTest = runMusicAgentIntentSelfTest;
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
+const assistant_context_1 = require("./assistant-context");
+const recommendation_types_1 = require("./recommendation-types");
+const music_memory_scope_1 = require("./music-memory-scope");
 exports.RANDOM_MUSIC_KEYWORD = "__random__";
 function normalizeMusicSourceMode(value) {
     const mode = String(value || "").trim().toLowerCase();
@@ -45,31 +48,34 @@ function validateMusicIntentDecision(value, requestText, mode) {
     const artist = String(value?.artist || "").trim().slice(0, 100);
     const mood = String(value?.mood || "").trim().slice(0, 100);
     const genre = String(value?.genre || "").trim().slice(0, 100);
+    const recommendation = (0, recommendation_types_1.normalizeRecommendationIntent)(value?.recommendation);
     let searchQuery = String(value?.searchQuery || value?.search_query || "").trim().slice(0, 160);
     if (strategy === "random")
         searchQuery = exports.RANDOM_MUSIC_KEYWORD;
     if (["play", "search", "convert"].includes(action) && !searchQuery)
         searchQuery = artist || genre;
+    if (recommendation && ['play', 'search'].includes(action) && !searchQuery)
+        searchQuery = recommendation.feeling || recommendation.mood;
     if (["play", "search", "convert"].includes(action) && !searchQuery)
         throw new Error("模型没有返回可执行的音乐搜索条件");
     return {
         schema: "ccm-music-intent-decision-v2",
         action: action,
         douyinRequest: action === 'none' && value?.douyinRequest === true,
-        mediaMode: action === 'play' && value?.mediaMode === 'video' ? 'video' : undefined,
+        mediaMode: ['play', 'search'].includes(action) && value?.mediaMode === 'video' ? 'video' : undefined,
         strategy: strategy,
         originalRequest: String(requestText || "").trim().slice(0, 2_000),
         searchQuery,
         artist,
         mood,
         genre,
-        // mode 只是兼容旧客户端的上下文，不是来源过滤器。只有模型从当前消息
-        // 识别到明确平台并返回 sourceMode 时才限制来源，否则始终三端自动搜索。
+        // 来源仍由模型决定；新客户端提供经过白名单规范化的频道上下文作为默认范围。
         sourceMode: normalizeMusicSourceMode(value?.sourceMode),
         randomize: strategy === "artist_random" || strategy === "mood_recommendation" || strategy === "genre_recommendation" || strategy === "random",
         strictMatch: strategy === "exact_song",
         confidence: Math.max(0, Math.min(1, Number(value?.confidence || 0))),
         reason: String(value?.reason || "统一大模型已生成音乐意图").trim().slice(0, 500),
+        ...(recommendation ? { recommendation } : {}),
     };
 }
 async function resolveMusicIntentDecisionV2(input) {
@@ -77,6 +83,7 @@ async function resolveMusicIntentDecisionV2(input) {
     if (!message)
         throw new Error("音乐请求不能为空");
     const mode = normalizeMusicSourceMode(input.mode);
+    const uiContext = (0, assistant_context_1.normalizeMusicAssistantContext)(input.uiContext);
     const recent = normalizeMusicAgentMessages(input.history || [], "", 8).map(item => ({
         role: item.role,
         content: item.content.slice(0, 800),
@@ -85,29 +92,33 @@ async function resolveMusicIntentDecisionV2(input) {
 action must be none, search, play, or convert. Playback strategy must be exact_song, artist_random, mood_recommendation, genre_recommendation, or random; non-play actions must use strategy none.
 - An explicit song title: play + exact_song.
 - An artist only: play + artist_random; do not guess a fixed song.
-- A mood, activity, or scene: play + mood_recommendation with a short searchable theme.
-- A genre, language, or type: play + genre_recommendation.
+- A mood, activity, scene or recommendation request without explicit playback: search + strategy none + recommendation metadata.
+- An explicit emotion-based or genre play request: play + mood_recommendation or genre_recommendation.
 - An unrestricted explicit play request: play + random with searchQuery __random__.
 - A search, recommendation list, or availability question: search.
 - Download, transcode, or conversion: convert.
 - Chitchat, lyric questions, and player explanations: none.
-- Only an explicit request to watch a video or the song's associated MV may set mediaMode="video" with action="play". Ordinary song playback and search must omit mediaMode. An MV must be the platform-verified association, never a guessed same-title video.
-- Douyin video details, comments, replies, author posts, recommendations, share-link resolution, image downloads, video downloads, OCR or transcription: none with douyinRequest=true. Use normal search/play for music search/play. Otherwise douyinRequest=false.
-sourceMode defaults to auto. Return local, netease, qq, kugou, navidrome, bilibili, or douyin only when the user explicitly names that source in the current message. Ordinary music uses the local/Netease/QQ/KuGou/Navidrome music workspace. Video watching uses the Bilibili/Douyin video workspace. The model decides mediaMode from the full request.
-The currently selected UI tab is not a source restriction.
-Return: {"action":"none|search|play|convert","douyinRequest":false,"mediaMode":"audio|video","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|qq|kugou|navidrome|bilibili|douyin","confidence":0.0,"reason":""}`;
+- Use mediaMode="video" for video search/play when explicitly requested or when uiContext defaults to video. An explicit request to listen to music overrides that default. An associated MV must be platform-verified, never a guessed same-title video.
+- Ordinary video search/play, including Douyin, MUST use action=search/play + mediaMode=video and douyinRequest=false; return normal candidate cards. Only advanced Douyin details, comments, replies, author posts, home-feed reading, share-link resolution, downloads, OCR or transcription use none with douyinRequest=true. Music search/play also uses normal search/play. Otherwise douyinRequest=false.
+Without uiContext, sourceMode defaults to auto; return a specific provider only when explicitly requested in the current message. Ordinary music uses local/Netease/QQ/KuGou/Navidrome; video watching uses Bilibili/Douyin. Legacy mode alone is not a source restriction.
+${assistant_context_1.musicAssistantContextPolicy}
+${recommendation_types_1.recommendationPolicy}
+For a followup on recommendationContext retain its original sourceMode, mood and constraints unless the CURRENT user explicitly changes them. A select/less operation must reference the batch; do not invent missing prior recommendations.
+Return: {"action":"none|search|play|convert","douyinRequest":false,"mediaMode":"audio|video","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|qq|kugou|navidrome|bilibili|douyin","recommendation":null,"confidence":0.0,"reason":""}`;
     const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "music_intent",
         identity: {
             scope: "music",
             scopeId: "music-agent",
-            sessionId: String(input.sessionId || "music-singleton"),
+            sessionId: String(input.sessionId || (0, music_memory_scope_1.musicMemorySessionId)()),
             ...(input.requestId ? { taskId: String(input.requestId) } : {}),
         },
         system,
-        input: { message, mode, recent },
+        input: { message, mode, recent, ...(uiContext ? { uiContext } : {}), ...(input.recommendationContext ? { recommendationContext: input.recommendationContext } : {}), ...(input.preferences ? { preferences: input.preferences } : {}) },
         config: input.config,
-        maxTokens: 500,
+        maxTokens: 800,
+        reasoningEffort: 'low',
+        signal: input.signal,
         validate: (value) => validateMusicIntentDecision(value, message, mode),
         confidence: value => value.confidence,
     });
@@ -278,9 +289,9 @@ function normalizeMusicAgentMessages(history = [], currentMessage = "", limit = 
         result.shift();
     return result;
 }
-async function classifyMusicAgentAction(cfg, message, mode, history = []) {
+async function classifyMusicAgentAction(cfg, message, mode, history = [], uiContext, recommendationContext, preferences, execution) {
     try {
-        const decision = await resolveMusicIntentDecisionV2({ config: cfg, message, mode, history });
+        const decision = await resolveMusicIntentDecisionV2({ config: cfg, message, mode, history, uiContext, recommendationContext, preferences, ...execution });
         const actionType = decision.action === "play"
             ? "play_music"
             : decision.action === "search"
@@ -346,6 +357,10 @@ function writeSse(res, data) {
 }
 async function callClaudeAgent(cfg, system, messages, res, _chatMode, _options = {}) {
     const isAnthropicCompat = shouldUseAnthropicMusicApi(cfg);
+    const emit = (event) => { if (!_options.signal?.aborted) {
+        _options.onEvent?.(event);
+        writeSse(res, event);
+    } };
     try {
         const normalized = normalizeMusicAgentMessages(messages, "", 20);
         const text = isAnthropicCompat
@@ -356,11 +371,12 @@ async function callClaudeAgent(cfg, system, messages, res, _chatMode, _options =
                 temperature: 0.2,
                 defaultTimeoutMs: Number(cfg?.timeoutMs || 120_000),
                 retryScope: "music_conversation",
+                signal: _options.signal,
                 providerContextCache: {
-                    scope: "music", scopeId: "music-agent", sessionId: "music-singleton", source: "music_conversation",
-                    requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
+                    scope: "music", scopeId: "music-agent", sessionId: (0, music_memory_scope_1.musicMemorySessionId)(), source: "music_conversation",
+                    requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "music", scopeId: "music-agent", exactSessionId: (0, music_memory_scope_1.musicMemorySessionId)() },
                 },
-                requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
+                requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "music", scopeId: "music-agent", exactSessionId: (0, music_memory_scope_1.musicMemorySessionId)() },
             })
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(cfg, {
                 messages: [{ role: "system", content: system }, ...normalized],
@@ -368,19 +384,20 @@ async function callClaudeAgent(cfg, system, messages, res, _chatMode, _options =
                 temperature: 0.2,
                 defaultTimeoutMs: Number(cfg?.timeoutMs || 120_000),
                 retryScope: "music_conversation",
+                signal: _options.signal,
                 providerContextCache: {
-                    scope: "music", scopeId: "music-agent", sessionId: "music-singleton", source: "music_conversation",
-                    requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
+                    scope: "music", scopeId: "music-agent", sessionId: (0, music_memory_scope_1.musicMemorySessionId)(), source: "music_conversation",
+                    requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "music", scopeId: "music-agent", exactSessionId: (0, music_memory_scope_1.musicMemorySessionId)() },
                 },
-                requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
+                requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "music", scopeId: "music-agent", exactSessionId: (0, music_memory_scope_1.musicMemorySessionId)() },
             });
-        writeSse(res, { type: "text", text });
-        writeSse(res, { type: "done" });
+        emit({ type: "text", text });
+        emit({ type: "done" });
         res.end();
     }
     catch (error) {
-        writeSse(res, { type: "error", text: error?.message || "音乐助手暂时不可用" });
-        writeSse(res, { type: "done" });
+        emit({ type: "error", text: error?.message || "音乐助手暂时不可用" });
+        emit({ type: "done" });
         res.end();
     }
 }

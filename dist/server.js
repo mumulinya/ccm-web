@@ -34,6 +34,12 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+const installed_tool_catalog_1 = require("./tools/installed-tool-catalog");
+const extension_packages_1 = require("./modules/tools/extension-packages");
+const extensions_api_1 = require("./modules/tools/extensions-api");
+require("./core/runtime-config-bootstrap");
+const runtime_data_directory_1 = require("./system/runtime-data-directory");
+const runtime_directory_job_1 = require("./core/runtime-directory-job");
 const dispatch_receipt_template_1 = require("./agents/dispatch-receipt-template");
 const desktop_update_gate_1 = require("./system/desktop-update-gate");
 const dispatch_profile_1 = require("./agents/dispatch-profile");
@@ -187,7 +193,8 @@ const project_feishu_turn_queue_1 = require("./modules/projects/project-feishu-t
 const project_session_compaction_1 = require("./modules/projects/project-session-compaction");
 const server_pet_activity_1 = require("./server-pet-activity");
 const pet_agent_milestones_1 = require("./system/pet-agent-milestones");
-const pet_asset_pack_1 = require("./modules/pets/pet-asset-pack");
+const pet_asset_storage_1 = require("./modules/pets/pet-asset-storage");
+const pet_runtime_1 = require("./modules/pets/pet-runtime");
 const server_agent_runner_1 = require("./server-agent-runner");
 const server_static_1 = require("./server-static");
 const server_bootstrap_1 = require("./server-bootstrap");
@@ -481,11 +488,11 @@ function handleRequest(req, res) {
         res.end();
         return;
     }
+    if ((0, desktop_update_gate_1.directoryAuthMutationBlocked)(req, pathname))
+        return (0, utils_1.sendJson)(res, { success: false, code: 'CCM_DATA_DIRECTORY_MIGRATING', error: '数据目录正在切换，请稍后重试账户修改或登录' }, 503);
     if ((0, local_auth_1.handleLocalAuthApi)(pathname, req, res))
         return;
     if (pathname.startsWith("/api/") && !(0, api_access_control_1.authorizeApiRequest)(req, res, String(req.url || pathname)))
-        return;
-    if ((0, access_policy_1.handleAccessPolicyApi)(pathname, req, res))
         return;
     if (pathname.startsWith("/api/") && !(0, access_policy_1.authorizeResourceQuery)(req, res, parsed))
         return;
@@ -494,6 +501,8 @@ function handleRequest(req, res) {
     if ((0, desktop_update_gate_1.desktopMutationBlocked)(req, pathname))
         return (0, utils_1.sendJson)(res, { success: false, code: 'CCM_DESKTOP_UPDATE_PENDING', error: '桌面更新准备中，暂不接受新的修改操作', retryable: true }, 503);
     (0, desktop_update_gate_1.trackDesktopMutation)(req, res, pathname);
+    if ((0, access_policy_1.handleAccessPolicyApi)(pathname, req, res))
+        return;
     if (require('./review/routes').handleCodeReviewApi(pathname, req, res))
         return;
     if (pathname === "/api/internal/lifecycle/identity" && req.method === "GET") {
@@ -881,7 +890,7 @@ function handleRequest(req, res) {
         return;
     if (pathname === "/api/pets/runtime/stream" && req.method === "GET") {
         const isDesktopPet = req.ccmAuth?.kind === "internal" && req.ccmAuth?.caller === "desktop-pet";
-        const recipientUserIds = isDesktopPet ? undefined : [String(req.ccmAuth?.userId || "")].filter(Boolean);
+        const recipientUserIds = [(0, pet_runtime_1.petRequestUserId)(req)].filter(Boolean);
         const channel = isDesktopPet ? "desktop_pet" : "web_pet";
         const clientId = String(parsed.query.client_id || `${channel}:${crypto.randomUUID()}`).slice(0, 120);
         res.writeHead(200, {
@@ -983,7 +992,7 @@ function handleRequest(req, res) {
         pathname.startsWith("/css/") || pathname.startsWith("/js/") ||
         pathname.startsWith("/pets/") ||
         pathname === "/favicon.svg" || pathname === "/icons.svg" || pathname === "/favicon.ico") {
-        const filePath = path.join(utils_1.PUBLIC_DIR, pathname.startsWith("/public/") ? pathname.replace("/public/", "") : pathname);
+        const filePath = (pathname.startsWith("/pets/") && (0, pet_asset_storage_1.resolvePersistentPetAsset)(pathname.slice(6))) || path.join(utils_1.PUBLIC_DIR, pathname.startsWith("/public/") ? pathname.replace("/public/", "") : pathname);
         if (fs.existsSync(filePath)) {
             return (0, server_static_1.sendFile)(res, filePath, req);
         }
@@ -1203,7 +1212,7 @@ function handleRequest(req, res) {
         return (0, utils_1.sendJson)(res, (0, cleanup_center_1.getCleanupSummary)());
     }
     if (pathname.startsWith("/pets/") && req.method === "GET") {
-        const downloaded = (0, pet_asset_pack_1.resolveDownloadedPetAsset)(pathname.slice("/pets/".length));
+        const downloaded = (0, pet_asset_storage_1.resolvePersistentPetAsset)(pathname.slice("/pets/".length));
         if (downloaded)
             return (0, server_static_1.sendFile)(res, downloaded);
     }
@@ -3130,6 +3139,8 @@ function handleRequest(req, res) {
         return;
     if ((0, git_1.handleGitApi)(pathname, req, res, parsed))
         return;
+    if ((0, extensions_api_1.handleExtensionsApi)(pathname, req, res, parsed))
+        return;
     if ((0, marketplace_1.handleMarketplaceApi)(pathname, req, res, parsed))
         return;
     if (pathname.startsWith("/api/templates")) {
@@ -3301,6 +3312,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         bootId: (0, process_lifecycle_1.getProcessBootId)(),
     });
     (0, git_workspace_runtime_1.cleanupStaleGitMutationLeases)();
+    (0, runtime_directory_job_1.holdDirectoryActivation)(utils_1.CCM_DIR, instanceLock.identity.instance_id);
     (0, dispatch_startup_barrier_1.prepareDispatchStartup)();
     (0, project_git_1.cleanupStaleProjectCloneArtifacts)();
     (0, context_engine_recovery_1.registerContextEngineRecoveryHook)();
@@ -3369,6 +3381,8 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
             setImmediate(() => {
                 try {
                     const marketplaceRecovery = (0, marketplace_1.recoverMarketplaceProductionState)();
+                    (0, installed_tool_catalog_1.migrateInstalledToolAvailability)();
+                    (0, extension_packages_1.recoverExtensionPackages)();
                     if (marketplaceRecovery.quarantined || marketplaceRecovery.recoveredTransactions) {
                         console.log(`[工具市场] 隔离旧外部工具 ${marketplaceRecovery.quarantined} 个，恢复待处理事务 ${marketplaceRecovery.recoveredTransactions} 个`);
                     }
@@ -3434,10 +3448,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
                     timer.unref?.();
                 },
             })).catch(error => console.warn(`[Agent Communication] 启动恢复未放行：${error?.code || "recovery_failed"}`));
-            const petAutoStart = (0, pets_1.maybeAutoStartPet)(port);
-            if (!petAutoStart.success) {
-                console.warn(`[桌面宠物] 自动启动失败：${"error" in petAutoStart ? petAutoStart.error || "未知错误" : "未知错误"}`);
-            }
+            void (0, pets_1.maybeAutoStartPet)(port);
             (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
             (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
             (0, cleanup_center_1.recoverCleanupTransactions)();
@@ -3561,6 +3572,7 @@ if (require.main === module) {
         const closed = new Promise(resolve => server.close(() => resolve()));
         await Promise.all([
             (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)().catch(error => console.warn(`[项目运行] 受控退出停止失败：${error?.message || error}`)),
+            (0, pet_runtime_1.stopPetForShutdown)(),
             (0, terminal_1.stopAllTerminalRuns)().catch(error => console.warn(`[终端] 受控退出停止失败：${error?.message || error}`)),
             require('./modules/music/video/account-login').closeVideoAccounts().then(() => require('./modules/music/video/account-browser').closeVideoBrowsers()).catch(() => { }),
             require('./modules/music/douyin-mcp-bridge').closeDouyinMcpRuntime().catch(() => { }),
@@ -3582,6 +3594,8 @@ if (require.main === module) {
         process.exit(exitCode);
     };
     REQUEST_SERVICE_DRAIN = reason => { void shutdown(reason || "internal_drain"); };
+    (0, runtime_data_directory_1.configureDataDirectoryLifecycle)(() => REQUEST_SERVICE_DRAIN?.('data-directory-migration'));
+    (0, runtime_data_directory_1.recoverInterruptedDirectoryMigration)();
     (0, process_lifecycle_1.installProcessLifecycleFaultHandlers)((_reason, type) => { void shutdown(type, 1); });
     server.once("error", (error) => {
         SERVICE_LIFECYCLE_STATE = "failed";

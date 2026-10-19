@@ -46,7 +46,7 @@ const NONCE_RETENTION_MS = 120_000;
 const MAX_NONCES = 10_000;
 const usedNonces = new Map();
 const ROUTE_ALLOWLIST = {
-    "ccm-desktop": [/^\/api\/internal\/(?:lifecycle\/(?:identity|ready|drain)|desktop\/(?:status|prepare|cancel|seal))$/],
+    "ccm-desktop": [/^\/api\/internal\/(?:lifecycle\/(?:identity|ready|drain)|desktop\/(?:status|prepare|cancel|seal|pet-stop))$/],
     "global-agent": [
         /^\/api\/(?:global-agent|groups|projects|tasks|requirements|knowledge|rag|tools|permissions|music|cron|skills|mcp|pets|templates|git)(?:\/|\?|$)/,
         /^\/api\/send-stream(?:\?|$)/,

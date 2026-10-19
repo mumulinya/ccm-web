@@ -7,6 +7,7 @@ const semantic_decision_runtime_1 = require("../../system/semantic-decision-runt
 const select_track_1 = require("./select-track");
 const state_1 = require("./state");
 const search_1 = require("./folia/search");
+const recommendation_engine_1 = require("./recommendation-engine");
 function cleanText(value, limit) {
     return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, limit);
 }
@@ -48,6 +49,8 @@ async function searchCandidates(decision) {
 }
 async function resolveMusicPlaybackDecisionV2(input) {
     const intent = input.intent;
+    if (intent.recommendation && intent.mediaMode !== 'video')
+        return (0, recommendation_engine_1.resolveRecommendation)(input, makeDecision);
     const requestId = cleanText(input.requestId || intent.semanticDecisionReceipt?.inputChecksum || cryptoRandomId(), 160);
     const base = {
         requestId,

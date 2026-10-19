@@ -1,0 +1,1 @@
+var e={cellSize:128,gap:8},t=.46,n=.12,r=.95,i=.5,a=[.45,0,.2,1],o=e=>e<640?.52:e<1100?.64:.76,s=.36,c=.42;export{r as a,s as c,n as i,o as l,e as n,i as o,a as r,t as s,c as t};

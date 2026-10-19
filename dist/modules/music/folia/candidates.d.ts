@@ -1,4 +1,6 @@
 export declare function publicMusicCandidate(candidate: any): {
+    popularity?: any;
+    recommendationReason?: any;
     type: any;
     sourceId: any;
     title: any;
@@ -16,6 +18,8 @@ export declare function publicMusicCandidate(candidate: any): {
     searchChannel?: undefined;
     bvid?: undefined;
 } | {
+    popularity?: any;
+    recommendationReason?: any;
     type: string;
     track: {
         filename: any;
@@ -37,6 +41,8 @@ export declare function publicMusicCandidate(candidate: any): {
     searchChannel?: undefined;
     bvid?: undefined;
 } | {
+    popularity?: any;
+    recommendationReason?: any;
     type: string;
     songId: any;
     title: any;
@@ -54,6 +60,8 @@ export declare function publicMusicCandidate(candidate: any): {
     searchChannel?: undefined;
     bvid?: undefined;
 } | {
+    popularity?: any;
+    recommendationReason?: any;
     type: string;
     awemeId: any;
     title: any;
@@ -71,6 +79,8 @@ export declare function publicMusicCandidate(candidate: any): {
     songId?: undefined;
     bvid?: undefined;
 } | {
+    popularity?: any;
+    recommendationReason?: any;
     type: string;
     bvid: any;
     title: any;

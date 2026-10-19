@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('petBridge', {
+  ready: (error) => ipcRenderer.send('pet-ready', error),
   onInitPet: (cb) => ipcRenderer.on('init-pet', (_, data) => cb(data)),
   onLabelUpdate: (cb) => ipcRenderer.on('label-update', (_, data) => cb(data)),
   onStateUpdate: (cb) => ipcRenderer.on('state-update', (_, data) => cb(data)),

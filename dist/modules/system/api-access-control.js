@@ -43,6 +43,7 @@ const utils_1 = require("../../core/utils");
 const local_auth_1 = require("./local-auth");
 const internal_api_auth_1 = require("./internal-api-auth");
 const access_policy_1 = require("./access-policy");
+const pet_runtime_1 = require("../pets/pet-runtime");
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 // Routes here expose account or credential material and are never delegated.
 // Other settings, terminal, tool and maintenance routes are guarded by their
@@ -51,7 +52,8 @@ const ADMIN_GET = [
     /^\/api\/auth\/users(?:\/|$)/,
     /^\/api\/(?:security\/credentials|credentials)(?:\/|$)/,
     // Marketplace and Smithery installation endpoints remain administrator-only.
-    /^\/api\/(?:marketplace|smithery)(?:\/|$)/,
+    /^\/api\/(?:marketplace|smithery|extensions)(?:\/|$)/,
+    /^\/api\/system\/data-directory(?:\/|$)/,
 ];
 const OPERATOR_GET = [
     /^\/api\/metrics\/events(?:\/|$)/,
@@ -102,6 +104,7 @@ const ADMIN_ONLY_MUTATIONS = [
     /^\/api\/permissions(?:\/|$)/,
     /^\/api\/tasks\/(?:purge|logs\/clear|runtime-debt\/cleanup)(?:\/|$)/,
     /^\/api\/(?:reliability|cleanup)(?:\/|$)/,
+    /^\/api\/system\/data-directory(?:\/|$)/,
 ];
 const CAPABILITY_BY_OPERATOR_ROUTE = [
     { pattern: /^\/api\/projects\/runtime(?:\/|$)/, capability: "project.runtime" },
@@ -122,6 +125,10 @@ function authorizeApiRequest(req, res, pathnameWithQuery) {
     const pathname = normalizedPath(pathnameWithQuery);
     const internal = (0, internal_api_auth_1.verifyInternalApiRequest)(req, pathnameWithQuery);
     if (internal) {
+        if (internal.caller === 'desktop-pet' && !(0, pet_runtime_1.authorizePetRuntimeRequest)(req)) {
+            (0, utils_1.sendJson)(res, { success: false, code: 'PET_SESSION_INVALID', error: '宠物启动归属或登录会话已失效' }, 401);
+            return false;
+        }
         if (matches(ADMIN_ONLY_MUTATIONS, pathname)) {
             (0, utils_1.sendJson)(res, { success: false, error: "高风险权限只能由已登录的 Admin 审批", code: "ADMIN_REQUIRED" }, 403);
             return false;

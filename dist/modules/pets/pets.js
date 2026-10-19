@@ -33,50 +33,26 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.stopPet = exports.launchPet = exports.isPetRunning = void 0;
 exports.readPetConfig = readPetConfig;
 exports.runPetAssetSecuritySelfTest = runPetAssetSecuritySelfTest;
 exports.maybeAutoStartPet = maybeAutoStartPet;
-exports.isPetRunning = isPetRunning;
-exports.launchPet = launchPet;
-exports.stopPet = stopPet;
 exports.handlePetsApi = handlePetsApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
-const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const pet_activity_coordinator_1 = require("./pet-activity-coordinator");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const user_notifications_1 = require("../../system/user-notifications");
 const pet_asset_pack_1 = require("./pet-asset-pack");
-const PET_WEB_ASSETS_DIR = path.join(utils_1.PUBLIC_DIR, "pets");
-const PET_DESKTOP_ASSETS_DIR = PET_WEB_ASSETS_DIR;
+const pet_runtime_1 = require("./pet-runtime");
+Object.defineProperty(exports, "launchPet", { enumerable: true, get: function () { return pet_runtime_1.launchPet; } });
+Object.defineProperty(exports, "stopPet", { enumerable: true, get: function () { return pet_runtime_1.stopPet; } });
+Object.defineProperty(exports, "isPetRunning", { enumerable: true, get: function () { return pet_runtime_1.isPetRunning; } });
+const pet_asset_storage_1 = require("./pet-asset-storage");
+const PET_WEB_ASSETS_DIR = pet_asset_storage_1.PET_CUSTOM_ASSETS_DIR;
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
-const ELECTRON_RUNTIME = "electron@35.7.5";
-const PET_RUNTIME_FILE = path.join(path.dirname(utils_1.PET_PID_FILE_GLOBAL), "pet-runtime.json");
-function parsePetPid(value) {
-    const pid = Number.parseInt(String(value || "").trim(), 10);
-    return Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
-}
-function readPetRuntimeIdentity() {
-    const runtime = (0, atomic_json_file_1.readJsonWithBackup)(PET_RUNTIME_FILE, null);
-    const pid = parsePetPid(runtime?.pid) || (() => {
-        try {
-            return parsePetPid(fs.readFileSync(utils_1.PET_PID_FILE_GLOBAL, "utf-8"));
-        }
-        catch {
-            return 0;
-        }
-    })();
-    return {
-        schema: "ccm-pet-runtime-v2",
-        pid,
-        startedAt: String(runtime?.startedAt || ""),
-        port: Number(runtime?.port || 0),
-        clientId: String(runtime?.clientId || ""),
-        status: String(runtime?.status || (pid ? "unknown" : "stopped")),
-    };
-}
 function emptyPetConfig() {
     return {
         schema: "ccm-pet-config-v2",
@@ -177,19 +153,12 @@ function syncGeneratedPetDisplayNames(customTypes) {
     for (const skin of list) {
         const id = String(skin?.id || "").trim();
         const name = String(skin?.name || "").trim();
-        if (!id || !name)
+        if (!/^[a-zA-Z0-9._-]+$/.test(id) || !name)
             continue;
         if (!(skin?.generated || Number(skin?.spriteVersionNumber) === 2))
             continue;
         const relativeDir = path.join("generated", id);
         const targets = [path.join(PET_WEB_ASSETS_DIR, relativeDir, "pet.json")];
-        if (path.resolve(PET_DESKTOP_ASSETS_DIR) !== path.resolve(PET_WEB_ASSETS_DIR)) {
-            targets.push(path.join(PET_DESKTOP_ASSETS_DIR, relativeDir, "pet.json"));
-        }
-        const frontendRoot = path.resolve(utils_1.PUBLIC_DIR, "..", "..", "frontend");
-        if (fs.existsSync(frontendRoot)) {
-            targets.push(path.join(frontendRoot, "public", "pets", relativeDir, "pet.json"));
-        }
         for (const file of targets) {
             try {
                 if (!fs.existsSync(file))
@@ -202,109 +171,6 @@ function syncGeneratedPetDisplayNames(customTypes) {
             catch { }
         }
     }
-}
-function isPetRunning() {
-    const identity = readPetRuntimeIdentity();
-    if (!identity.pid)
-        return false;
-    try {
-        process.kill(identity.pid, 0);
-        return true;
-    }
-    catch {
-        try {
-            fs.unlinkSync(utils_1.PET_PID_FILE_GLOBAL);
-        }
-        catch { }
-        try {
-            fs.unlinkSync(PET_RUNTIME_FILE);
-        }
-        catch { }
-        return false;
-    }
-}
-function findElectronBin() {
-    const petExe = path.resolve(__dirname, "..", "..", "..", "pet", "node_modules", "electron", "dist", "electron.exe");
-    if (fs.existsSync(petExe))
-        return petExe;
-    const mainExe = path.resolve(__dirname, "..", "..", "..", "node_modules", "electron", "dist", "electron.exe");
-    if (fs.existsSync(mainExe))
-        return mainExe;
-    const petBin = path.resolve(__dirname, "..", "..", "..", "pet", "node_modules", ".bin", "electron");
-    if (fs.existsSync(petBin))
-        return petBin;
-    const mainBin = path.resolve(__dirname, "..", "..", "..", "node_modules", ".bin", "electron");
-    if (fs.existsSync(mainBin))
-        return mainBin;
-    return null;
-}
-function launchPet(port) {
-    try {
-        if (isPetRunning())
-            return { success: false, error: "桌面宠物已在运行" };
-        const petDir = path.resolve(__dirname, "..", "..", "..", "pet");
-        if (!fs.existsSync(path.join(petDir, "main.js")))
-            return { success: false, error: "宠物应用未安装" };
-        const electronBin = findElectronBin();
-        const cmd = electronBin || (process.platform === "win32" ? "npx.cmd" : "npx");
-        const args = electronBin ? [petDir] : ["--yes", ELECTRON_RUNTIME, petDir];
-        const child = (0, child_process_1.spawn)(cmd, args, {
-            detached: true,
-            stdio: "ignore",
-            shell: false,
-            windowsHide: true,
-            env: { ...process.env, CCM_PORT: String(port) }
-        });
-        child.on("error", (err) => console.error("[pet]", err.message));
-        child.unref();
-        fs.writeFileSync(utils_1.PET_PID_FILE_GLOBAL, String(child.pid));
-        (0, atomic_json_file_1.writeJsonAtomic)(PET_RUNTIME_FILE, {
-            schema: "ccm-pet-runtime-v2",
-            pid: child.pid,
-            launcherPid: child.pid,
-            port,
-            status: "starting",
-            startedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        });
-        return { success: true, pid: child.pid, status: "starting" };
-    }
-    catch (e) {
-        return { success: false, error: e.message };
-    }
-}
-function stopPet() {
-    const runtime = readPetRuntimeIdentity();
-    const pid = runtime.pid;
-    if (!pid)
-        return { success: false, error: "桌面宠物未在运行" };
-    try {
-        if (process.platform === "win32") {
-            const result = (0, child_process_1.spawnSync)("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-            if (result.status !== 0 && isPetRunning())
-                throw new Error(`taskkill退出码 ${result.status}`);
-        }
-        else {
-            try {
-                process.kill(-pid, "SIGTERM");
-            }
-            catch {
-                process.kill(pid, "SIGTERM");
-            }
-        }
-    }
-    catch (error) {
-        return { success: false, error: `关闭桌面宠物失败：${error?.message || error}`, pid };
-    }
-    try {
-        fs.unlinkSync(utils_1.PET_PID_FILE_GLOBAL);
-    }
-    catch { }
-    try {
-        fs.unlinkSync(PET_RUNTIME_FILE);
-    }
-    catch { }
-    return { success: true, pid, status: "stopped" };
 }
 function normalizePetAssetPath(assetPath) {
     const normalized = String(assetPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
@@ -409,16 +275,9 @@ function writePetAsset(assetPath, sourcePath) {
         validatePngAsset(contentBuffer);
     }
     const checksum = crypto.createHash("sha256").update(contentBuffer).digest("hex");
-    const devWebAssetsDir = path.resolve(utils_1.PUBLIC_DIR, "..", "..", "frontend", "public", "pets");
     const targets = [
         { root: PET_WEB_ASSETS_DIR, file: path.join(PET_WEB_ASSETS_DIR, safePath) },
     ];
-    if (path.resolve(PET_DESKTOP_ASSETS_DIR) !== path.resolve(PET_WEB_ASSETS_DIR)) {
-        targets.push({ root: PET_DESKTOP_ASSETS_DIR, file: path.join(PET_DESKTOP_ASSETS_DIR, safePath) });
-    }
-    if (fs.existsSync(devWebAssetsDir)) {
-        targets.push({ root: devWebAssetsDir, file: path.join(devWebAssetsDir, safePath) });
-    }
     for (const target of targets) {
         const relative = path.relative(target.root, target.file);
         if (relative.startsWith("..") || path.isAbsolute(relative))
@@ -490,7 +349,7 @@ function runPetAssetSecuritySelfTest() {
     return { pass: Object.values(checks).every(Boolean), checks };
 }
 // === 暴露供外部查询进程状态 ===
-function maybeAutoStartPet(port) {
+async function maybeAutoStartPet(port) {
     const enabled = readPetConfig().settings.autoStart;
     const desktopAvailable = process.platform === "win32"
         || process.platform === "darwin"
@@ -500,9 +359,15 @@ function maybeAutoStartPet(port) {
         return { success: true, skipped: true, reason: "disabled" };
     if (!desktopAvailable)
         return { success: true, skipped: true, reason: "desktop_unavailable" };
-    if (isPetRunning())
+    if ((0, pet_runtime_1.isPetRunning)())
         return { success: true, skipped: true, reason: "already_running" };
-    return launchPet(port);
+    const binding = (0, pet_runtime_1.savedPetBinding)();
+    if (!binding)
+        return { success: true, skipped: true, reason: "login_required" };
+    const result = await (0, pet_runtime_1.launchPet)(port, binding);
+    if (!result.success)
+        console.warn(`[桌面宠物] 自动启动失败：${result.error}`);
+    return result;
 }
 function handlePetsApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/pets/assets/status" && req.method === "GET") {
@@ -538,7 +403,7 @@ function handlePetsApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/pets/runtime/bootstrap" && req.method === "GET") {
         const isDesktopPet = req.ccmAuth?.kind === "internal" && req.ccmAuth?.caller === "desktop-pet";
         const channel = isDesktopPet ? "desktop_pet" : "web_pet";
-        const recipientUserIds = isDesktopPet ? undefined : [String(req.ccmAuth?.userId || "")].filter(Boolean);
+        const recipientUserIds = [(0, pet_runtime_1.petRequestUserId)(req)].filter(Boolean);
         let config = { schema: "ccm-pet-config-v2", revision: 0, configs: {}, positions: {}, customTypes: [] };
         try {
             if (fs.existsSync(utils_1.PETS_FILE))
@@ -714,15 +579,15 @@ function handlePetsApi(pathname, req, res, parsed, ctx) {
         return true;
     }
     if (pathname === "/api/pets/launch" && req.method === "POST") {
-        (0, utils_1.sendJson)(res, launchPet(ctx.PORT));
+        void (0, pet_runtime_1.launchPet)(ctx.PORT, req.ccmAuth?.kind === "browser" ? { userId: req.ccmAuth.userId, sessionId: req.ccmAuth.sessionId } : {}).then(result => (0, utils_1.sendJson)(res, result));
         return true;
     }
     if (pathname === "/api/pets/close" && req.method === "POST") {
-        (0, utils_1.sendJson)(res, stopPet());
+        void (0, pet_runtime_1.stopPet)().then(result => (0, utils_1.sendJson)(res, result));
         return true;
     }
     if (pathname === "/api/pets/status" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { running: isPetRunning(), runtime: readPetRuntimeIdentity() });
+        (0, utils_1.sendJson)(res, { running: (0, pet_runtime_1.isPetRunning)(), runtime: (0, pet_runtime_1.readPetRuntimeIdentity)() });
         return true;
     }
     return false;

@@ -50,7 +50,7 @@ const atomic_json_file_1 = require("../core/atomic-json-file");
 const responses_output_replay_1 = require("./responses-output-replay");
 const ROOT = process.env.CCM_MODEL_TOKEN_PREFLIGHT_DIR
     ? path.resolve(process.env.CCM_MODEL_TOKEN_PREFLIGHT_DIR)
-    : path.join(os.homedir(), ".ccm", "model-token-preflight");
+    : path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "model-token-preflight");
 const FILE = path.join(ROOT, "calibration.json");
 const encodingCache = new Map();
 let registryCache = null;

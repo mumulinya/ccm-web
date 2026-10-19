@@ -12,7 +12,7 @@ function cleanFoliaSong(song, track) {
         id: text(song.id || track.sourceId), name: text(song.name || track.title),
         artists: (Array.isArray(song.artists) ? song.artists : []).slice(0, 30).map((artist) => ({ id: text(artist.id), name: text(artist.name) })),
         album: { id: text(song.album?.id), name: text(song.album?.name) }, durationMs: Math.max(0, Number(song.durationMs) || 0),
-        sourceRef: track.provider === 'navidrome' ? { kind: 'navidrome', mediaId: track.sourceId } : { kind: 'online', providerId: track.provider === 'local' ? 'ccm' : track.provider, mediaId: track.sourceId, providerData },
+        sourceRef: track.provider === 'navidrome' ? { kind: 'navidrome', mediaId: track.sourceId } : { kind: 'online', providerId: track.provider === 'local' ? 'ccm' : track.provider === 'device-local' ? 'ccm-device' : track.provider, mediaId: track.sourceId, providerData: track.provider === 'device-local' ? { deviceId: track.instanceId } : providerData },
     };
 }
 //# sourceMappingURL=song-metadata.js.map

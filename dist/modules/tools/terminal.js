@@ -418,6 +418,7 @@ function spawnPersistentSession(payload) {
         cwd,
         env,
         useConpty: process.platform === "win32",
+        useConptyDll: process.platform === "win32" && process.env.CCM_DESKTOP_RUNTIME === '1',
     });
     const now = Date.now();
     const session = {

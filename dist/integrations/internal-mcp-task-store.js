@@ -45,7 +45,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const db_1 = require("../core/db");
 const logs_1 = require("../modules/collaboration/logs");
-const ROOT = path.join(os.homedir(), ".ccm", "internal-mcp", "task-runtime");
+const ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "internal-mcp", "task-runtime");
 function safeSegment(value) {
     return String(value || "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "unknown";
 }

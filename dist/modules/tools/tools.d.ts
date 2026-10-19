@@ -47,21 +47,7 @@ export declare function reloadToolManagerAfterCatalogMutation(entry: any): Promi
         snapshots: any;
         truncated: boolean;
     };
-    runtimeResync: {
-        schema: string;
-        success: boolean;
-        requestedAt: string;
-        error: string;
-        summary: {
-            scanned: number;
-            selected: number;
-            created: number;
-            resynced: number;
-            skipped: number;
-            failed: number;
-        };
-        items: any;
-    };
+    runtimeResync: any;
     schema: string;
     action: any;
     type: any;

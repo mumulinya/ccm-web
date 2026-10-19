@@ -67,6 +67,9 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const observability_database_1 = require("../../system/observability-database");
 const utils_1 = require("../../core/utils");
+const context_1 = require("./folia/context");
+const commandScopeSQL = "(json_extract(origin_json, '$.owner') IS NULL OR json_extract(origin_json, '$.owner') = ?)";
+const visibleCommand = (row) => !row || !parseJson(row.origin_json, null)?.owner || parseJson(row.origin_json, null).owner === (0, context_1.currentFoliaOwner)();
 const WORKSPACE_ID = "workspace";
 const COMMANDS_V2_FILE = path.join(utils_1.CCM_DIR, "music-remote-commands.json");
 const COMMAND_V1_FILE = path.join(utils_1.CCM_DIR, "music-remote-command.json");
@@ -196,8 +199,8 @@ function listPersistedMusicCommands(limit = 200) {
     return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
         expireCommandLeases(db);
         return db.prepare(`
-      SELECT * FROM music_playback_commands_v3 ORDER BY generation ASC LIMIT ?
-    `).all(Math.max(1, Math.min(1000, limit))).map(commandFromRow);
+      SELECT * FROM music_playback_commands_v3 WHERE ${commandScopeSQL} ORDER BY generation ASC LIMIT ?
+    `).all((0, context_1.currentFoliaOwner)(), Math.max(1, Math.min(1000, limit))).map(commandFromRow);
     });
 }
 function replacePersistedMusicCommandsForTest(commands) {
@@ -211,9 +214,21 @@ function replacePersistedMusicCommandsForTest(commands) {
     });
 }
 function enqueuePersistedMusicCommand(input) {
+    // 浏览器提交的 origin 只作来源说明，不能替换已鉴权的用户主体。
+    if ((0, context_1.currentFoliaOwner)() !== 'workspace')
+        input = { ...input, origin: { ...input.origin, owner: (0, context_1.currentFoliaOwner)() } };
     ensureMusicPersistenceMigrated();
     return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
         expireCommandLeases(db);
+        const stableId = input.idempotencyKey ? 'music_' + crypto.createHash('sha256').update(JSON.stringify([input.origin?.owner || 'workspace', input.idempotencyKey])).digest('hex').slice(0, 32) : '';
+        if (stableId) {
+            const prior = db.prepare('SELECT * FROM music_playback_commands_v3 WHERE command_id=?').get(stableId);
+            if (prior) {
+                if (prior.request_text !== String(input.request_text || input.keyword || ''))
+                    throw Error('重复播放请求内容不符');
+                return commandFromRow(prior);
+            }
+        }
         const generation = Number(db.prepare("SELECT COALESCE(MAX(generation), 0) AS value FROM music_playback_commands_v3").get()?.value || 0) + 1;
         const timestamp = now();
         const type = String(input?.type || "play") || "play";
@@ -222,19 +237,19 @@ function enqueuePersistedMusicCommand(input) {
         UPDATE music_playback_commands_v3
         SET status = 'superseded', terminal_at = ?, lease_id = '', lease_expires_at = NULL,
             last_error = '已被更新的点歌请求替代', updated_at = ?
-        WHERE type = 'play' AND status IN (${ACTIVE_COMMAND_STATES.map(() => "?").join(",")})
-      `).run(timestamp, timestamp, ...ACTIVE_COMMAND_STATES);
+        WHERE type = 'play' AND status IN (${ACTIVE_COMMAND_STATES.map(() => "?").join(",")}) AND ${commandScopeSQL}
+      `).run(timestamp, timestamp, ...ACTIVE_COMMAND_STATES, input.origin?.owner || (0, context_1.currentFoliaOwner)());
         }
         else if (type === "stop") {
             db.prepare(`
         UPDATE music_playback_commands_v3
         SET status = 'cancelled', terminal_at = ?, lease_id = '', lease_expires_at = NULL,
             last_error = '已由停止指令取消', updated_at = ?
-        WHERE type = 'play' AND status IN (${ACTIVE_COMMAND_STATES.map(() => "?").join(",")})
-      `).run(timestamp, timestamp, ...ACTIVE_COMMAND_STATES);
+        WHERE type = 'play' AND status IN (${ACTIVE_COMMAND_STATES.map(() => "?").join(",")}) AND ${commandScopeSQL}
+      `).run(timestamp, timestamp, ...ACTIVE_COMMAND_STATES, input.origin?.owner || (0, context_1.currentFoliaOwner)());
         }
         const command = {
-            id: `music_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`,
+            id: stableId || `music_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`,
             type,
             keyword: String(input?.keyword || "").trim() || (type === "stop" ? "__stop__" : ""),
             request_text: String(input?.request_text || input?.requestText || input?.keyword || "").trim(),
@@ -268,8 +283,8 @@ function peekPersistedMusicCommand() {
         expireCommandLeases(db);
         return commandFromRow(db.prepare(`
       SELECT * FROM music_playback_commands_v3
-      WHERE status IN ('ready','pending') ORDER BY generation DESC LIMIT 1
-    `).get());
+      WHERE status IN ('ready','pending') AND ${commandScopeSQL} ORDER BY generation DESC LIMIT 1
+    `).get((0, context_1.currentFoliaOwner)()));
     });
 }
 function claimPersistedMusicCommand(input) {
@@ -278,8 +293,8 @@ function claimPersistedMusicCommand(input) {
         expireCommandLeases(db);
         const row = input.id
             ? db.prepare("SELECT * FROM music_playback_commands_v3 WHERE command_id = ?").get(input.id)
-            : db.prepare("SELECT * FROM music_playback_commands_v3 WHERE status IN ('ready','pending') ORDER BY generation DESC LIMIT 1").get();
-        if (!row || !["ready", "pending"].includes(String(row.status)))
+            : db.prepare(`SELECT * FROM music_playback_commands_v3 WHERE status IN ('ready','pending') AND ${commandScopeSQL} ORDER BY generation DESC LIMIT 1`).get((0, context_1.currentFoliaOwner)());
+        if (!row || !visibleCommand(row) || !["ready", "pending"].includes(String(row.status)))
             return null;
         if (input.generation && Number(input.generation) !== Number(row.generation))
             return null;
@@ -309,7 +324,7 @@ function heartbeatPersistedMusicCommand(input) {
     return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
         expireCommandLeases(db);
         const row = db.prepare("SELECT * FROM music_playback_commands_v3 WHERE command_id = ?").get(String(input.id || ""));
-        if (!row)
+        if (!row || !visibleCommand(row))
             return { success: false, error: "指令不存在" };
         if (input.generation && Number(input.generation) !== Number(row.generation))
             return { success: false, error: "播放generation不匹配" };
@@ -332,7 +347,7 @@ function completePersistedMusicCommand(input) {
     ensureMusicPersistenceMigrated();
     return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
         const row = db.prepare("SELECT * FROM music_playback_commands_v3 WHERE command_id = ?").get(String(input.id || ""));
-        if (!row)
+        if (!row || !visibleCommand(row))
             return { success: false, error: "指令不存在" };
         if (input.generation && Number(input.generation) !== Number(row.generation))
             return { success: false, error: "播放generation不匹配" };
@@ -366,7 +381,7 @@ function requeuePersistedMusicCommand(input) {
     ensureMusicPersistenceMigrated();
     return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
         const row = db.prepare("SELECT * FROM music_playback_commands_v3 WHERE command_id=?").get(input.id);
-        if (!row)
+        if (!row || !visibleCommand(row))
             return { success: false, error: "指令不存在" };
         if (input.generation && Number(input.generation) !== Number(row.generation))
             return { success: false, error: "播放generation不匹配" };

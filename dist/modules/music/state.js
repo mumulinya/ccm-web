@@ -69,6 +69,7 @@ function playbackCommandTitle(command) {
 }
 function emitPlaybackCommandEvent(command) {
     const status = String(command.status || "");
+    const privateAssistant = !!command.origin?.owner && command.source === 'music-agent';
     (0, runtime_events_1.publishRuntimeEvent)("music", `music.playback.${status}`, {
         commandId: command.id,
         generation: command.generation,
@@ -76,8 +77,8 @@ function emitPlaybackCommandEvent(command) {
         source: command.origin?.source || command.source || "music",
         sessionId: command.origin?.sessionId || "",
         messageId: command.origin?.messageId || "",
-        title: playbackCommandTitle(command),
-        reason: command.last_error || "",
+        title: privateAssistant ? '音乐助手播放' : playbackCommandTitle(command),
+        reason: privateAssistant ? '' : command.last_error || "",
     });
     if (!["completed", "failed", "superseded", "cancelled", "needs_user_gesture"].includes(status))
         return;
@@ -245,15 +246,15 @@ function loadMusicAgentConfig() {
     const music = (0, db_1.loadMusicConfig)();
     let boundaryGeneration = 0;
     try {
-        const memory = JSON.parse(fs.readFileSync(path.join(utils_1.CCM_DIR, "music-agent-memory.json"), "utf8"));
+        const memory = JSON.parse(fs.readFileSync(require('./music-memory-scope').musicMemoryFile(), "utf8"));
         boundaryGeneration = Math.max(0, Number(memory?.compaction?.boundaryGeneration || memory?.compactBoundary?.generation || 0));
     }
     catch { }
     return {
         ...llm,
         contextEngineScope: "music",
-        contextEngineScopeId: "music-agent",
-        contextEngineSessionId: "music-agent",
+        contextEngineScopeId: require('./music-memory-scope').musicMemorySessionId(),
+        contextEngineSessionId: require('./music-memory-scope').musicMemorySessionId(),
         contextEngineBoundaryGeneration: boundaryGeneration,
         contextEngineSource: "music_agent",
         proxy: music.proxy || "",

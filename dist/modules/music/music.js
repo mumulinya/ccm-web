@@ -1,5 +1,4 @@
 "use strict";
-// music.ts — merged from 3 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -38,6 +37,9 @@ exports.runMusicWeatherSelfTest = exports.runMusicRemoteCommandQueueSelfTest = e
 exports.handleMusicApi = handleMusicApi;
 exports.handleMusicApiPartA = handleMusicApiPartA;
 exports.handleMusicApiPartB = handleMusicApiPartB;
+const agent_api_1 = require("./agent-api");
+const context_1 = require("./folia/context");
+// music.ts — merged from 3 part files (behavior-freeze merge).
 const memory_1 = require("./memory");
 Object.defineProperty(exports, "handleMusicMemoryApi", { enumerable: true, get: function () { return memory_1.handleMusicMemoryApi; } });
 const fs = __importStar(require("fs"));
@@ -56,7 +58,6 @@ const unified_search_1 = require("./unified-search");
 const video_playback_api_1 = require("./video-playback-api");
 const media_interactions_1 = require("./media-interactions");
 const stream_playback_sessions_1 = require("./stream-playback-sessions");
-const douyin_music_agent_1 = require("./douyin-music-agent");
 const library_1 = require("./library");
 const music_catalog_1 = require("./music-catalog");
 const secure_multipart_1 = require("../../system/secure-multipart");
@@ -94,6 +95,7 @@ function publicPlaybackCommand(command) {
     };
 }
 function handleMusicApi(pathname, req, res, parsed, ctx) {
+    (0, context_1.preserveMusicRequestScope)(req);
     if ((0, api_1.handleFoliaApi)(pathname, req, res))
         return true;
     if ((0, memory_1.handleMusicMemoryApi)(pathname, req, res))
@@ -917,129 +919,8 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
         });
         return true;
     }
-    if (pathname === "/api/music/agent" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { message } = JSON.parse(body);
-                // 音乐助手不再使用播放页来源按钮作为搜索范围；来源仅由当前用户消息中的
-                // 明确平台词决定，否则统一三端搜索。
-                const chatMode = "auto";
-                const cfg = (0, state_1.loadMusicAgentConfig)();
-                if (!cfg.enabled) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: "请先在系统设置启用统一大模型配置" });
-                }
-                if (!cfg.apiKey) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: "请先到系统设置 → 统一大模型配置 中填写 API Key" });
-                }
-                if (!cfg.model) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: "请先到系统设置 → 统一大模型配置 中填写模型名称" });
-                }
-                const memoryContext = await (0, memory_1.prepareMusicAgentTurn)(message, chatMode);
-                const systemPrompt = `你是 CCM 音乐助手。播放意图、搜索、候选选择和下载已经由服务端结构化链处理；当前请求只需要自然语言回答。
-
-不要输出工具调用、JSON、tracks代码块、歌曲ID或下载协议。不要声称已经播放、下载或搜索服务端尚未确认的内容。回复使用中文，简洁友好。
-
-## 当前单例音乐记忆
-${memoryContext.continuityText}`;
-                const messages = (0, agent_1.normalizeMusicAgentMessages)(memoryContext.messages || [], "", Math.max(20, memoryContext.messages?.length || 0));
-                res.writeHead(200, {
-                    "Content-Type": "text/event-stream",
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Access-Control-Allow-Origin": "*",
-                });
-                const agentAction = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
-                (0, agent_1.writeSse)(res, {
-                    type: "music_action",
-                    action: agentAction,
-                    intent: agentAction.type,
-                    keyword: agentAction.keyword,
-                });
-                const turnId = `music_turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
-                (0, agent_1.writeSse)(res, { type: "turn", turn_id: turnId });
-                if (agentAction.error) {
-                    (0, agent_1.writeSse)(res, { type: "error", text: `音乐意图识别失败：${agentAction.error}`, receipt: agentAction.semanticDecisionReceipt || null });
-                    (0, agent_1.writeSse)(res, { type: "terminal", turn_id: turnId, status: "failed" });
-                    (0, agent_1.writeSse)(res, { type: "done" });
-                    res.end();
-                    return;
-                }
-                if (agentAction.intentDecision?.douyinRequest) {
-                    await (0, douyin_music_agent_1.runMusicDouyinTurn)(cfg, message, memoryContext.messages || [], res, turnId);
-                    return;
-                }
-                if (agentAction.type === "play_music" || agentAction.type === "search_music") {
-                    const playbackDecision = await (0, playback_decision_1.resolveMusicPlaybackDecisionV2)({
-                        intent: agentAction.intentDecision,
-                        requestId: turnId,
-                        aiRecommendationEnabled: (0, db_1.loadMusicConfig)()?.aiRecommendationEnabled !== false,
-                        aiAutoSelectEnabled: (0, db_1.loadMusicConfig)()?.aiAutoSelectEnabled !== false,
-                        modelConfig: cfg,
-                    });
-                    (0, agent_1.writeSse)(res, { type: "decision", turn_id: turnId, decision: (0, playback_decision_1.publicMusicPlaybackDecision)(playbackDecision) });
-                    const resultRows = playbackDecision.candidates.map(candidates_1.publicMusicCandidate);
-                    (0, agent_1.writeSse)(res, { type: "candidate_results", turn_id: turnId, results: resultRows });
-                    (0, agent_1.writeSse)(res, { type: "music_results", mode: playbackDecision.sourceMode, results: resultRows });
-                    let command = null;
-                    if (agentAction.type === "play_music" && playbackDecision.status === "resolved" && playbackDecision.selectedCandidate) {
-                        command = (0, state_1.enqueueMusicRemoteCommand)({
-                            type: "play",
-                            keyword: playbackDecision.searchQuery,
-                            request_text: message,
-                            mode: playbackDecision.sourceMode,
-                            source: "music-agent",
-                            decision: playbackDecision,
-                            origin: { source: "music-agent", sessionId: "music-singleton", messageId: turnId },
-                        });
-                        (0, agent_1.writeSse)(res, { type: "playback_status", turn_id: turnId, status: "ready", command: publicPlaybackCommand(command) });
-                    }
-                    (0, agent_1.writeSse)(res, { type: "text", text: playbackDecision.reply });
-                    (0, agent_1.writeSse)(res, {
-                        type: "terminal",
-                        turn_id: turnId,
-                        status: command ? "queued" : playbackDecision.status,
-                        decision_checksum: playbackDecision.checksum,
-                    });
-                    (0, agent_1.writeSse)(res, { type: "done" });
-                    res.end();
-                    return;
-                }
-                const intent = {
-                    type: agentAction.type === "play_music" ? "play" : agentAction.type === "search_music" ? "search" : agentAction.type === "convert_music" ? "convert" : "help",
-                    keyword: agentAction.keyword,
-                };
-                if (intent.type === "convert") {
-                    const convert = await startMusicConvertJob(message, intent.keyword);
-                    (0, agent_1.writeSse)(res, {
-                        type: "music_convert",
-                        success: convert.ok,
-                        reply: convert.reply,
-                        job: convert.job || null,
-                    });
-                    messages[messages.length - 1].content += `\n\n[工具结果] ${convert.reply}`;
-                    await (0, agent_1.callClaudeAgent)(cfg, systemPrompt, messages, res, chatMode, { allowTools: false });
-                }
-                else {
-                    await (0, agent_1.callClaudeAgent)(cfg, systemPrompt, messages, res, chatMode, { allowTools: false });
-                }
-            }
-            catch (e) {
-                if (res.headersSent) {
-                    (0, agent_1.writeSse)(res, { type: "error", text: e.message || "音乐助手处理失败" });
-                    (0, agent_1.writeSse)(res, { type: "terminal", status: "failed" });
-                    (0, agent_1.writeSse)(res, { type: "done" });
-                    if (!res.writableEnded)
-                        res.end();
-                }
-                else {
-                    (0, utils_1.sendJson)(res, { error: e.message }, 400);
-                }
-            }
-        });
+    if ((0, agent_api_1.handleMusicAgentApi)(pathname, req, res, { startMusicConvertJob, publicPlaybackCommand }))
         return true;
-    }
     // === AI 歌曲金句接口 ===
     return false;
 }

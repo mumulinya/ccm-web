@@ -40,6 +40,7 @@ export type MusicPlaybackDecisionV2 = {
     createdAt: string;
     expiresAt: string;
     checksum: string;
+    recommendation?: any;
 };
 export declare function resolveMusicPlaybackDecisionV2(input: {
     intent: MusicIntentDecisionV2;
@@ -47,6 +48,12 @@ export declare function resolveMusicPlaybackDecisionV2(input: {
     aiRecommendationEnabled?: boolean;
     aiAutoSelectEnabled?: boolean;
     modelConfig?: any;
+    recommendationBatch?: any;
+    recommendationIndex?: number;
+    preferences?: any;
+    signal?: AbortSignal;
+    current?: () => boolean;
+    onProgress?: (stage: string, text: string) => void;
 }): Promise<MusicPlaybackDecisionV2>;
 export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecisionV2 | null): {
     candidates: {
@@ -101,5 +108,6 @@ export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecis
     createdAt: string;
     expiresAt: string;
     checksum: string;
+    recommendation?: any;
 };
 export declare function sameMusicPlaybackCandidate(left: any, right: any): boolean;

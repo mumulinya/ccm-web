@@ -1,3 +1,4 @@
+import { currentInstalledRecordAllowed } from "./installed-tool-catalog";
 interface SkillDef {
     name: string;
     description: string;
@@ -67,13 +68,19 @@ interface McpAuthStatus {
     detectedSignals: string[];
 }
 export declare class ToolManager {
+    private readonly installedCheck;
     private clients;
     private serverConfigs;
     private serverStatuses;
     private tools;
     private skills;
     private initialized;
+    private connectionIdentities;
+    private connectionAttempts;
+    constructor(installedCheck?: typeof currentInstalledRecordAllowed);
+    private reloadQueue;
     loadTools(): Promise<void>;
+    private reloadInstalledTools;
     private createClient;
     buildToolPrompt(scope?: ToolScope): string;
     buildScopeAudit(scope?: ToolScope): {
@@ -236,7 +243,7 @@ export declare class ToolManager {
             name: string;
             connected: boolean;
             toolsCount: number;
-            state: "connected" | "disconnected" | "pending" | "failed" | "auth_required";
+            state: "failed" | "connected" | "disconnected" | "pending" | "auth_required";
             error: string;
             lastConnectedAt: string;
             lastErrorAt: string;

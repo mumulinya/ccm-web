@@ -1,4 +1,5 @@
 import { SemanticDecisionReceiptV1 } from "../../system/semantic-decision-runtime";
+import { RecommendationIntent } from './recommendation-types';
 export declare const RANDOM_MUSIC_KEYWORD = "__random__";
 export type MusicPlaybackStrategy = "exact_song" | "artist_random" | "mood_recommendation" | "genre_recommendation" | "random";
 export type MusicPlaybackPlan = {
@@ -31,6 +32,7 @@ export type MusicIntentDecisionV2 = {
     confidence: number;
     reason: string;
     semanticDecisionReceipt: SemanticDecisionReceiptV1;
+    recommendation?: RecommendationIntent;
 };
 export declare function resolveMusicIntentDecisionV2(input: {
     config?: any;
@@ -39,6 +41,10 @@ export declare function resolveMusicIntentDecisionV2(input: {
     history?: any[];
     sessionId?: string;
     requestId?: string;
+    uiContext?: any;
+    recommendationContext?: any;
+    preferences?: any;
+    signal?: AbortSignal;
 }): Promise<MusicIntentDecisionV2>;
 export declare function resolveMusicPlaybackRequestFallback(requestText: string, keyword?: string): MusicPlaybackPlan;
 export declare function resolveMusicPlaybackRequest(cfg: any, requestText: string, keyword?: string): Promise<MusicPlaybackPlan>;
@@ -55,7 +61,10 @@ export declare function normalizeMusicAgentMessages(history?: any[], currentMess
     role: "user" | "assistant";
     content: string;
 }[];
-export declare function classifyMusicAgentAction(cfg: any, message: string, mode: string, history?: any[]): Promise<{
+export declare function classifyMusicAgentAction(cfg: any, message: string, mode: string, history?: any[], uiContext?: any, recommendationContext?: any, preferences?: any, execution?: {
+    signal?: AbortSignal;
+    requestId?: string;
+}): Promise<{
     type: string;
     keyword: string;
     mode: "auto" | "local" | "qq" | "kugou" | "netease" | "bilibili" | "douyin" | "navidrome";
@@ -94,6 +103,8 @@ export declare function getMusicHelpText(chatMode: string): "🎵 本地音乐�
 export declare function writeSse(res: any, data: any): void;
 export declare function callClaudeAgent(cfg: any, system: string, messages: any[], res: any, _chatMode: string, _options?: {
     allowTools?: boolean;
+    signal?: AbortSignal;
+    onEvent?: (event: any) => void;
 }): Promise<void>;
 export declare function runMusicAgentIntentSelfTest(): {
     pass: boolean;

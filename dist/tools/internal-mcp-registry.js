@@ -225,7 +225,7 @@ function buildBundledFilesystemMcpTool(fallback = {}) {
         && !/\.m?js$/i.test(item)));
     const root = configuredRoot && fs.existsSync(configuredRoot) && fs.statSync(configuredRoot).isDirectory()
         ? configuredRoot
-        : path.join(os.homedir(), ".ccm", "shared");
+        : path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "shared");
     return {
         ...fallback,
         name: exports.FILESYSTEM_BUNDLED_MCP,

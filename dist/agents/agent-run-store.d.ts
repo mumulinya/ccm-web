@@ -138,7 +138,7 @@ export declare function buildAgentRunProjection(runId: string): {
     task_id: string;
     attempt_id: string;
     runtime_id: string;
-    run_status: "queued" | "paused" | "failed" | "cancelled" | "running" | "recovering" | "succeeded" | "waiting_confirmation" | "recovery_required" | "starting" | "created" | "leased" | "waiting_input";
+    run_status: "failed" | "queued" | "paused" | "cancelled" | "running" | "recovering" | "succeeded" | "waiting_confirmation" | "recovery_required" | "starting" | "created" | "leased" | "waiting_input";
     run_started_at: string;
     run_finished_at: string;
     run_recovery_state: string;
@@ -152,7 +152,7 @@ export declare function buildTaskAgentRunProjection(task: any): {
     task_id: string;
     attempt_id: string;
     runtime_id: string;
-    run_status: "queued" | "paused" | "failed" | "cancelled" | "running" | "recovering" | "succeeded" | "waiting_confirmation" | "recovery_required" | "starting" | "created" | "leased" | "waiting_input";
+    run_status: "failed" | "queued" | "paused" | "cancelled" | "running" | "recovering" | "succeeded" | "waiting_confirmation" | "recovery_required" | "starting" | "created" | "leased" | "waiting_input";
     run_started_at: string;
     run_finished_at: string;
     run_recovery_state: string;

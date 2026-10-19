@@ -37,7 +37,7 @@ export declare function buildAgentGovernanceProjection(task: any): {
     };
     artifact_summary: {
         count: number;
-        kinds: ("receipt" | "file" | "external" | "diff" | "report" | "test_evidence")[];
+        kinds: ("receipt" | "file" | "diff" | "external" | "report" | "test_evidence")[];
     };
     dependency_state: {
         dependencyId: string;

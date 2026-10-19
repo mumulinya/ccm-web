@@ -47,11 +47,11 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../../core/atomic-json-file");
-const ROOT = path.join(os.homedir(), ".ccm", "marketplace");
+const ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "marketplace");
 exports.MARKETPLACE_TRANSACTIONS_FILE = path.join(ROOT, "transactions.json");
 exports.MARKETPLACE_GLOBAL_LOCK_FILE = path.join(ROOT, "mutation");
 exports.MARKETPLACE_ACTIVATION_LOCK_FILE = path.join(ROOT, "activation");
-const ACTIVATION_KEY_FILE = path.join(os.homedir(), ".ccm", "private", "marketplace-activation.key");
+const ACTIVATION_KEY_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "private", "marketplace-activation.key");
 function sha(value) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
 }

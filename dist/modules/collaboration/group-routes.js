@@ -1,5 +1,4 @@
 "use strict";
-// group-routes.ts — merged from 3 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -57,6 +56,9 @@ exports.cleanGroupStatusFollowupText = cleanGroupStatusFollowupText;
 exports.buildGroupStatusFollowupSummary = buildGroupStatusFollowupSummary;
 exports.runGroupStatusFollowupSelfTest = runGroupStatusFollowupSelfTest;
 exports.handleBasicGroupRoutes = handleBasicGroupRoutes;
+const installed_tool_catalog_1 = require("../../tools/installed-tool-catalog");
+const installed_tool_catalog_2 = require("../../tools/installed-tool-catalog");
+// group-routes.ts — merged from 3 part files (behavior-freeze merge).
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -2311,8 +2313,8 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         const group = groups.find(g => g.id === groupId);
         if (!group)
             return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-        const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(group.tools || {});
-        (0, utils_1.sendJson)(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_1.loadOrchestratorConfig)(), group.context_policy || group.contextPolicy || {}) });
+        const toolAuth = (0, installed_tool_catalog_1.buildInstalledToolAvailabilityPayload)(group.tools || {});
+        (0, utils_1.sendJson)(res, { availabilityMode: toolAuth.availabilityMode, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_1.loadOrchestratorConfig)(), group.context_policy || group.contextPolicy || {}) });
         return true;
     }
     if (pathname === "/api/groups/test-targets" && req.method === "GET") {
@@ -2366,33 +2368,34 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         req.on("end", async () => {
             try {
                 const payload = JSON.parse(body);
-                const { group_id, tools } = payload;
+                (0, installed_tool_catalog_2.rejectLegacyToolSelection)(payload);
+                const { group_id } = payload;
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
                 const previousTools = (0, tool_authorization_1.normalizeToolAuthorization)(group.tools || {});
-                group.tools = (0, tool_authorization_1.normalizeToolAuthorization)(tools);
+                const effectiveTools = (0, installed_tool_catalog_2.installedToolGrants)();
                 if ((0, main_agent_context_policy_1.mainAgentContextPolicyUpdatePresent)(payload)) {
                     group.context_policy = (0, main_agent_context_policy_1.updateMainAgentContextPolicyOverride)(group.context_policy || group.contextPolicy || {}, (0, main_agent_context_policy_1.contextPolicyUpdateSource)(payload), (0, group_orchestrator_1.loadOrchestratorConfig)());
                     delete group.contextPolicy;
                 }
                 (0, storage_1.saveGroups)(groups);
-                const toolAuth = await (0, tool_authorization_1.buildFreshToolAuthorizationPayload)(group.tools);
+                const toolAuth = await (0, installed_tool_catalog_1.buildInstalledToolAvailabilityPayload)(effectiveTools);
                 const authorizationChange = (0, tool_authorization_1.recordToolAuthorizationChange)({
                     scope: "group",
                     scopeId: group_id,
                     previous: previousTools,
-                    next: group.tools,
+                    next: effectiveTools,
                     actor: "api",
                     source: "/api/groups/tools",
                     toolAudit: toolAuth.tool_audit,
                     authorizationReadiness: toolAuth.authorization_readiness,
                 });
-                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_1.loadOrchestratorConfig)(), group.context_policy || {}) });
+                (0, utils_1.sendJson)(res, { success: true, availabilityMode: toolAuth.availabilityMode, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_1.loadOrchestratorConfig)(), group.context_policy || {}) });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { error: e.message, code: e.code }, e.statusCode || 400);
             }
         });
         return true;

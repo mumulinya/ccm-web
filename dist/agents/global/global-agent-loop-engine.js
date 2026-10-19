@@ -1039,6 +1039,7 @@ function completeRun(run, runtime, status, reply, error = "") {
 }
 // ===== merged from global-agent-loop-engine-part-02.ts =====
 async function continueLoop(run, runtime) {
+    await require('../../system/desktop-update-gate').waitForDesktopExecution(`global:${run.id}`);
     if (activeRuns.has(run.id))
         return activeRunObjects.get(run.id) || run;
     activeRuns.add(run.id);
@@ -1773,6 +1774,7 @@ async function continueLoop(run, runtime) {
     }
 }
 async function startGlobalAgentRun(input, runtime) {
+    await require('../../system/desktop-update-gate').waitForDesktopExecution();
     const createdAt = nowIso(runtime);
     const id = `gar_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
     const semanticUsage = input.workflowDecision?.semanticDecisionReceipt?.usage || null;
@@ -1880,6 +1882,7 @@ async function startGlobalAgentRun(input, runtime) {
     return continueLoop(run, runtime);
 }
 async function resumeGlobalAgentRun(id, runtime, options = {}) {
+    await require('../../system/desktop-update-gate').waitForDesktopExecution(`global:${id}`);
     if (activeRuns.has(id)) {
         const started = Date.now();
         while (activeRuns.has(id) && Date.now() - started < 2 * 60_000)
@@ -2083,6 +2086,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
     return continueLoop(run, runtime);
 }
 async function continueGlobalAgentRunWithClarification(id, answer, runtime, options = {}) {
+    await require('../../system/desktop-update-gate').waitForDesktopExecution(`global:${id}`);
     if (activeRuns.has(id))
         throw new Error("全局 Agent 当前仍在处理上一轮，请稍后再补充");
     const stored = getGlobalAgentRun(id);

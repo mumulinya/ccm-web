@@ -51,8 +51,8 @@ const invocation_1 = require("../test-agent/invocation");
 const work_order_builder_1 = require("../test-agent/work-order-builder");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
 const group_test_targets_1 = require("../modules/collaboration/group-test-targets");
-const ROOT = path.join(os.homedir(), ".ccm", "internal-mcp", "test-acceptance");
-const DELIVERY_ROOT = path.join(os.homedir(), ".ccm", "internal-mcp", "delivery-workspaces");
+const ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "internal-mcp", "test-acceptance");
+const DELIVERY_ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "internal-mcp", "delivery-workspaces");
 function safe(value) {
     return String(value || "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "unknown";
 }

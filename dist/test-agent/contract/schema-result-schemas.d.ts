@@ -3227,14 +3227,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
         blocked: z.ZodNumber;
         skipped: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }>;
     flowTypeCount: z.ZodNumber;
@@ -3251,14 +3251,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3296,14 +3296,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3341,14 +3341,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3386,14 +3386,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
         blocked: z.ZodNumber;
         skipped: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }>;
     flowTypeCount: z.ZodNumber;
@@ -3410,14 +3410,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3455,14 +3455,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3500,14 +3500,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3545,14 +3545,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
         blocked: z.ZodNumber;
         skipped: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }>;
     flowTypeCount: z.ZodNumber;
@@ -3569,14 +3569,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3614,14 +3614,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3659,14 +3659,14 @@ export declare const browserFlowSummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         criteriaCount: z.ZodNumber;
@@ -3705,14 +3705,14 @@ export declare const browserMultiSessionSummarySchema: z.ZodObject<{
         blocked: z.ZodNumber;
         skipped: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }>;
     sessionCount: z.ZodNumber;
@@ -3872,14 +3872,14 @@ export declare const browserMultiSessionSummarySchema: z.ZodObject<{
         blocked: z.ZodNumber;
         skipped: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }>;
     sessionCount: z.ZodNumber;
@@ -4039,14 +4039,14 @@ export declare const browserMultiSessionSummarySchema: z.ZodObject<{
         blocked: z.ZodNumber;
         skipped: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }, {
+        failed?: number;
         skipped?: number;
         blocked?: number;
-        failed?: number;
         passed?: number;
     }>;
     sessionCount: z.ZodNumber;
@@ -4239,14 +4239,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4270,14 +4270,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4301,14 +4301,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4358,14 +4358,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4389,14 +4389,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4420,14 +4420,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4477,14 +4477,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4508,14 +4508,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -4539,14 +4539,14 @@ export declare const browserStabilitySummarySchema: z.ZodObject<{
             blocked: z.ZodNumber;
             skipped: z.ZodNumber;
         }, "strip", z.ZodTypeAny, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }, {
+            failed?: number;
             skipped?: number;
             blocked?: number;
-            failed?: number;
             passed?: number;
         }>;
         failedRuns: z.ZodArray<z.ZodNumber, "many">;
@@ -5088,7 +5088,7 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         run?: number;
         toolCallIds?: string[];
         checkId?: string;
-        resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+        resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
         evidenceRequired?: boolean;
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
@@ -5102,7 +5102,7 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         run?: number;
         toolCallIds?: string[];
         checkId?: string;
-        resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+        resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
         evidenceRequired?: boolean;
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
@@ -5119,7 +5119,7 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         run?: number;
         toolCallIds?: string[];
         checkId?: string;
-        resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+        resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
         evidenceRequired?: boolean;
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
@@ -5155,7 +5155,7 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         run?: number;
         toolCallIds?: string[];
         checkId?: string;
-        resultStatus?: "skipped" | "blocked" | "failed" | "timed_out" | "passed" | "started" | "already_running";
+        resultStatus?: "failed" | "skipped" | "blocked" | "timed_out" | "passed" | "started" | "already_running";
         evidenceRequired?: boolean;
         linkedToolCallCount?: number;
         failedToolCallCount?: number;

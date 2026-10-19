@@ -198,7 +198,7 @@ export interface PngPixelStats {
     nonTransparentPixels: number;
     nonWhitePixels: number;
 }
-export declare function pngChannelCount(colorType: number): 0 | 1 | 2 | 3 | 4;
+export declare function pngChannelCount(colorType: number): 2 | 1 | 0 | 3 | 4;
 export declare function pngPaeth(left: number, up: number, upperLeft: number): number;
 export declare function evaluateElementScreenshotNotBlank(page: any, assertion: BrowserAssertionSpec, timeout: number): Promise<{
     ok: boolean;

@@ -64,8 +64,8 @@ export declare function createAgentRunnerSupport(deps: any): {
         runnerRequestId: string;
     }>;
     getProjectToolSelection: (projectName: string) => {
-        mcp: any;
-        skill: any;
+        mcp: any[];
+        skill: any[];
     };
     findRuntimeToolSnapshotPath: (mcpConfigPath?: string) => any;
     readJsonFileSafe: (file?: string) => any;
@@ -106,7 +106,16 @@ export declare function createAgentRunnerSupport(deps: any): {
     runIndependentProjectVerification: (projectName: string, workDir: string, timeoutMs: number, taskId: string, executionId: string, agentType: string) => Promise<string>;
     buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string, options?: any) => {
         prompt: string;
-        allowedTools: any;
+        allowedTools: {
+            skill: any[];
+            configuredTools: {
+                mcp: any[];
+                skill: any[];
+            };
+            executionRoleSkills: any;
+            enforceExecutionRoleSkills: boolean;
+            mcp: any[];
+        };
         audit: any;
         workEvent: {
             id: string;

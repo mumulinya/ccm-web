@@ -51,7 +51,7 @@ const path = __importStar(require("path"));
 const db_1 = require("../core/db");
 const role_skills_1 = require("../skills/role-skills");
 const workspace_readonly_tools_1 = require("../tools/workspace-readonly-tools");
-const SECRET_FILE = path.join(os.homedir(), ".ccm", "private", "test-agent-readonly-capability-secret");
+const SECRET_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "private", "test-agent-readonly-capability-secret");
 const DEFAULT_SKILL_SUMMARY_CHARS = 2_000;
 const DEFAULT_SKILL_CATALOG_CHARS = 8_000;
 function canonical(value) {

@@ -56,7 +56,7 @@ exports.MEMORY_CONTEXT_CONSUMPTION_RECOVERY_FAILPOINTS = [
     "after_receipt_verify_before_recovery_commit",
     "after_recovery_commit_before_return",
 ];
-const RECOVERY_DIR = path.join(os.homedir(), ".ccm", "memory-context-consumption-recoveries");
+const RECOVERY_DIR = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "memory-context-consumption-recoveries");
 const DEFAULT_RECOVERY_RETENTION_DAYS = 30;
 const DEFAULT_INTERRUPTED_AFTER_MINUTES = 10;
 const DEFAULT_RECOVERY_GRACE_HOURS = 1;

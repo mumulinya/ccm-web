@@ -1,4 +1,4 @@
-export declare const FOLIA_PROVIDERS: readonly ["local", "netease", "qq", "kugou", "navidrome"];
+export declare const FOLIA_PROVIDERS: readonly ["local", "netease", "qq", "kugou", "navidrome", "bodian", "device-local"];
 export type FoliaTrack = {
     provider: string;
     instanceId: string;

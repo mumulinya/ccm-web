@@ -47,7 +47,8 @@ function applyFoliaEmbeddingHeaders(res, root) {
     if (!entry || entry.signature !== signature) {
         const html = stat ? fs.readFileSync(index, 'utf8') : '';
         const hashes = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter(match => !/\bsrc\s*=/i.test(match[1]) && match[2].trim()).map(match => `'sha256-${crypto.createHash('sha256').update(match[2]).digest('base64')}'`).join(' ');
-        entry = { signature, policy: `default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' ${hashes}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https:; connect-src 'self' https:; worker-src 'self' blob:` };
+        // 原生协议只在经过授权的桌面 Session 中存在；普通网页不会由此获得文件或 IPC 能力。
+        entry = { signature, policy: `default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; script-src 'self' folia-mod: 'wasm-unsafe-eval' ${hashes}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: ccm-media: folia-mod:; media-src 'self' blob: https: ccm-media: folia-mod: folia-transcode:; font-src 'self' data: https:; connect-src 'self' https: wss: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* ccm-media: folia-mod: folia-transcode:; worker-src 'self' blob:` };
         cache.set(root, entry);
     }
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');

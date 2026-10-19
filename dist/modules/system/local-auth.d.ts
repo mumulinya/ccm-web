@@ -39,6 +39,7 @@ export declare function getOrCreateLocalSetupCode(options?: {
     code: string;
     expires_at: string;
 };
+export declare function isLocalSessionActive(sessionId: string, userId: string): boolean;
 export declare function resolveLocalAuthSession(req: IncomingMessage): {
     user: StoredUser;
     session: StoredSession;

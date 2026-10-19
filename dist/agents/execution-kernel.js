@@ -748,8 +748,9 @@ function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
         catch { }
     }
     let stopped = false;
+    const extensionRevoked = require("../tools/extension-runtime-bindings").extensionRuntimeRevocationCheck(safeTaskId, executionId, meta);
     const cancellationPoll = setInterval(() => {
-        if (!isTaskCancellationRequested(safeTaskId))
+        if (!isTaskCancellationRequested(safeTaskId) && !extensionRevoked())
             return;
         killProcessTree(child);
     }, 250);

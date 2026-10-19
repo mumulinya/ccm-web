@@ -41,7 +41,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
-const ROOT = path.join(os.homedir(), ".ccm", "context-engine-observability");
+const ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "context-engine-observability");
 const EVENT_FILE = path.join(ROOT, "events.jsonl");
 const MAX_BYTES = 8 * 1024 * 1024;
 function checksum(value) {

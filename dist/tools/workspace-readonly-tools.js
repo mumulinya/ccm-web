@@ -69,7 +69,7 @@ const workspace_search_runtime_1 = require("./workspace-search-runtime");
 const workspace_file_context_read_1 = require("./workspace-file-context-read");
 const workspace_readonly_analysis_1 = require("./workspace-readonly-analysis");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
-const SECRET_FILE = path.join(os.homedir(), ".ccm", "private", "main-agent-tool-capability-secret");
+const SECRET_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "private", "main-agent-tool-capability-secret");
 const EXCLUDED_DIRECTORIES = new Set([
     ".git", ".svn", ".hg", "node_modules", "target", "dist", "build", "coverage",
     ".next", ".nuxt", ".output", ".cache", ".tmp", "release-artifacts",

@@ -77,14 +77,14 @@ const module_1 = require("module");
 const credential_store_1 = require("../../core/credential-store");
 const cc_switch_provider_1 = require("./cc-switch-provider");
 const development_agent_auth_evidence_1 = require("./development-agent-auth-evidence");
-const SETTINGS_FILE = path.join(os.homedir(), ".ccm", "agent-provider-settings.json");
+const SETTINGS_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-provider-settings.json");
 const STATUS_CACHE = new Map();
 // 状态探测涉及 spawnSync 外部 CLI（最长 8s），过期后由后台异步刷新兜底，
 // TTL 只决定刷新节奏，不再决定请求路径上的阻塞探测频率。
 const STATUS_CACHE_TTL_MS = 60_000;
 const INSTALL_OUTPUT_LIMIT = 12_000;
 const INSTALL_STATES = new Map();
-const INSTALL_STATE_FILE = path.join(os.homedir(), ".ccm", "agent-install-jobs.json");
+const INSTALL_STATE_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-install-jobs.json");
 let installStatesLoaded = false;
 function persistInstallStates() {
     fs.mkdirSync(path.dirname(INSTALL_STATE_FILE), { recursive: true });
@@ -1385,7 +1385,7 @@ async function runAgentProviderTest(provider, model) {
     const ready = status?.installed === true && ["logged_in", "configured", "credential_detected"].includes(status.authState);
     if (!ready)
         throw new Error(provider === "claudecode" ? "请先保存完整的 Claude Code API 配置" : "请先安装并登录该 Agent");
-    const runDir = path.join(os.homedir(), ".ccm", "run", "agent-provider-tests");
+    const runDir = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "run", "agent-provider-tests");
     fs.mkdirSync(runDir, { recursive: true });
     const promptFile = path.join(runDir, `${provider}-${(0, crypto_1.randomUUID)()}.txt`);
     const challenge = (0, crypto_1.randomUUID)().replace(/-/g, "");
@@ -1904,7 +1904,7 @@ function quarantineGeminiCredential(sessionId) {
     if (!stat.isFile() || stat.isSymbolicLink()) {
         throw new Error("Gemini OAuth凭据不是受支持的普通文件，已拒绝自动重新登录");
     }
-    const backupDir = path.join(os.homedir(), ".ccm", "auth-backups");
+    const backupDir = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "auth-backups");
     fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     const backupFile = path.join(backupDir, `gemini-oauth-${sessionId}.json`);
     fs.renameSync(credentialFile, backupFile);
@@ -1943,7 +1943,7 @@ function snapshotGeminiSuccessfulCredential(session) {
         if (!stat.isFile() || stat.isSymbolicLink() || !parsed || typeof parsed !== "object"
             || !(parsed.access_token || parsed.refresh_token))
             return "";
-        const backupDir = path.join(os.homedir(), ".ccm", "auth-backups");
+        const backupDir = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "auth-backups");
         fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
         const snapshot = path.join(backupDir, `gemini-oauth-success-${session.id}.json`);
         fs.copyFileSync(credentialFile, snapshot);
@@ -1988,7 +1988,7 @@ function recoverOrphanedGeminiCredentialBackup() {
     const credentialFile = geminiOauthCredentialFile();
     if (fs.existsSync(credentialFile))
         return false;
-    const backupDir = path.join(os.homedir(), ".ccm", "auth-backups");
+    const backupDir = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "auth-backups");
     if (!fs.existsSync(backupDir))
         return false;
     const candidates = fs.readdirSync(backupDir)
@@ -2015,7 +2015,7 @@ function recoverOrphanedGeminiSuccessSnapshot() {
     const credentialFile = geminiOauthCredentialFile();
     if (fs.existsSync(credentialFile))
         return false;
-    const backupDir = path.join(os.homedir(), ".ccm", "auth-backups");
+    const backupDir = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "auth-backups");
     if (!fs.existsSync(backupDir))
         return false;
     const candidates = fs.readdirSync(backupDir)
@@ -2450,7 +2450,7 @@ function logoutAgentProvider(providerValue) {
     return { provider, loggedOut: true };
 }
 function purgeManagedCodexAuthCopies() {
-    const root = path.join(os.homedir(), ".ccm", "agent-runtime", "codex");
+    const root = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runtime", "codex");
     if (!fs.existsSync(root))
         return;
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {

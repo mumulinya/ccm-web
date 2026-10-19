@@ -1,5 +1,8 @@
 export declare function proxyFoliaProvider(owner: string, provider: string, endpoint: string, req: any, res: any, body?: any): Promise<void>;
-export declare function requestFoliaProvider(owner: string, provider: string, endpoint: string, params: any): Promise<any>;
+export declare function requestFoliaProvider(owner: string, provider: string, endpoint: string, params: any, options?: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+}): Promise<any>;
 export declare function requestFoliaNavidrome(owner: string, endpoint: string, params: URLSearchParams): Promise<{
     target: import("node:url").URL;
     host: string;

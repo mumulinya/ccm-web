@@ -3,5 +3,5 @@ export declare function isAgentRunTerminal(status: AgentRunStatus | string): boo
 export declare function canTransitionAgentRun(from: AgentRunStatus | string, to: AgentRunStatus | string): boolean;
 export declare function assertAgentRunTransition(from: AgentRunStatus | string, to: AgentRunStatus | string): void;
 export declare function listAgentRunTransitions(): {
-    [k: string]: ("queued" | "paused" | "failed" | "cancelled" | "running" | "recovering" | "succeeded" | "waiting_confirmation" | "recovery_required" | "starting" | "created" | "leased" | "waiting_input")[];
+    [k: string]: ("failed" | "queued" | "paused" | "cancelled" | "running" | "recovering" | "succeeded" | "waiting_confirmation" | "recovery_required" | "starting" | "created" | "leased" | "waiting_input")[];
 };

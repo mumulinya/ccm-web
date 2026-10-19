@@ -43,7 +43,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
 exports.TASK_TRANSITION_SCHEMA = "ccm-task-transition-event-v1";
-const STORE_FILE = path.join(process.env.CCM_TASK_TRANSITION_DIR || path.join(os.homedir(), ".ccm"), "task-transition-events.json");
+const STORE_FILE = path.join(process.env.CCM_TASK_TRANSITION_DIR || path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm")), "task-transition-events.json");
 function text(value, max = 300) { return String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/(api[_-]?key|token|password|secret|authorization)\s*[:=]\s*[^\s,;]+/ig, "$1=[redacted]").trim().slice(0, max); }
 function hash(value) { return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex"); }
 function readStore() { const value = (0, atomic_json_file_1.readJsonWithBackup)(STORE_FILE, { schema: "ccm-task-transition-ledger-v1", revision: 0, events: [] }); return { revision: Number(value?.revision || 0), events: Array.isArray(value?.events) ? value.events : [] }; }

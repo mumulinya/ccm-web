@@ -10250,7 +10250,10 @@ export declare function collectProjectPolicyViolations(actualFileChanges?: any[]
 export declare function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText?: string, selectedSkillNames?: string[]): {
     prompt: string;
     allowedTools: {
-        configuredTools: Required<Pick<import("../../tools/tool-manager").ToolScope, "mcp" | "skill">>;
+        configuredTools: {
+            mcp: any[];
+            skill: any[];
+        };
         executionRoleSkills: import("../../skills/internal-skill-catalog").CcmInternalSkillName[];
         enforceExecutionRoleSkills: boolean;
         mcp: string[];
@@ -10280,7 +10283,10 @@ export declare function buildAgentToolContext(ctx: CollabCtx, group: any, projec
             skill: any;
         };
     };
-    configuredTools: Required<Pick<import("../../tools/tool-manager").ToolScope, "mcp" | "skill">>;
+    configuredTools: {
+        mcp: any[];
+        skill: any[];
+    };
     executionRoleSkills: import("../../skills/internal-skill-catalog").CcmInternalSkillName[];
     selectedRoleSkills: {
         name: import("../../skills/internal-skill-catalog").CcmInternalSkillName;

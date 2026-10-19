@@ -1,33 +1,33 @@
 {
   "schema": "ccm-release-artifact-manifest-v1",
   "package_name": "@mumulinya167/cc-web",
-  "version": "5.0.0",
-  "tarball": "mumulinya167-cc-web-5.0.0.tgz",
-  "tarball_sha256": "068ef40d9cccf38bf01bfd259db62fd6ac4a5ec3aaa29a34bbdfb28be88d678c",
+  "version": "5.1.0",
+  "tarball": "mumulinya167-cc-web-5.1.0.tgz",
+  "tarball_sha256": "4623e4a6e3afffb2e163fa6d66ec3659987c39ddff1e1562da27de4caa0bfc93",
   "sbom": "sbom.cdx.json",
-  "sbom_sha256": "62da6597210f9a5488ab9b6fb0f2e3df445450439a96034a4a12191216474173",
+  "sbom_sha256": "bbcce6ae77e1e6a85177f54248110b9f17e07678ff2ceccfd16328690516ecc7",
   "pet_assets": {
     "package_name": "@mumulinya167/ccm-pet-assets",
-    "version": "5.0.0",
-    "tarball": "mumulinya167-ccm-pet-assets-5.0.0.tgz",
-    "tarball_sha256": "753d19bbde6212ceac37b96395f6aeb86b673f7b7173df29ba35df4c5b65166a",
-    "compressed_bytes": 17496900,
+    "version": "5.1.0",
+    "tarball": "mumulinya167-ccm-pet-assets-5.1.0.tgz",
+    "tarball_sha256": "594e7505572cf2b3e6b58f7b800f65a2a496a9dfdbd9a150f59244f426725033",
+    "compressed_bytes": 17496903,
     "unpacked_bytes": 20882059,
     "entries": 178
   },
   "budgets": {
     "compressed_bytes": 150994944,
     "unpacked_bytes": 201326592,
-    "entries": 1500
+    "entries": 3500
   },
   "actual": {
-    "compressed_bytes": 134030035,
-    "unpacked_bytes": 168122883,
-    "entries": 1365
+    "compressed_bytes": 143247901,
+    "unpacked_bytes": 180926153,
+    "entries": 3065
   },
   "module_fold": {
     "schema": "ccm-release-module-fold-v1",
-    "folded": 209,
+    "folded": 217,
     "modules": [
       {
         "module": "agents/acceptance-git-audit.js",
@@ -90,7 +90,7 @@
         "owner": "agents/execution-kernel.js",
         "directOwner": "agents/execution-kernel.js",
         "checksum": "4fcdf09991f130e6093a9b369f6b41bf04aa9491e277e71418604ff0e6fd18d1",
-        "originalOwnerChecksum": "8645ff4a887bab133cdf3e59cdefddb2211e9104eea73e737873e727b0f04f50"
+        "originalOwnerChecksum": "b67818e1dd7246fc38b54ee98c059fc96ad6b9f94949b9cc116fbe9a7ae9d166"
       },
       {
         "module": "agents/global/transcript-ingestion-merge.js",
@@ -160,7 +160,7 @@
         "owner": "agents/runner.js",
         "directOwner": "agents/runner.js",
         "checksum": "4e27fbcaebbb171051e5de2a7f08fdff28129213fa102cd4c114844284003d97",
-        "originalOwnerChecksum": "b5376e017cb4d77128d5b3237eafca3e78550b6c7032c214a56b30bb4f42f224"
+        "originalOwnerChecksum": "0d320a52f74d090f2f1b11c641384c61c9001dad26e0390c671282c84c7d28df"
       },
       {
         "module": "test-agent/optimization-projection.js",
@@ -177,6 +177,13 @@
         "originalOwnerChecksum": "9a55b5374e8e3253503068d754dfde793c43223278d0a7f444e1322e4082bd73"
       },
       {
+        "module": "core/runtime-directory-rebase.js",
+        "owner": "core/runtime-directory-worker.js",
+        "directOwner": "core/runtime-directory-worker.js",
+        "checksum": "58b6ced5a720b336010b8660a4d54ccc9334bd004cb20e0c6217e6ad790eb536",
+        "originalOwnerChecksum": "1e772e96f035a07a7bae3ca3bb164260350362690c5c8abb05321aa4a49082a1"
+      },
+      {
         "module": "core/task-store-index-maintenance.js",
         "owner": "core/task-store.js",
         "directOwner": "core/task-store.js",
@@ -189,6 +196,13 @@
         "directOwner": "core/task-store.js",
         "checksum": "68cb1eecccb338773af8a920370a5c8c148fc58f5e56c8657d97c7b75a73782d",
         "originalOwnerChecksum": "e591d3c2203ffab5385abbc8aeef3b940c4c30519ca3961282698c783d140a0d"
+      },
+      {
+        "module": "tools/extension-proxy-authorization.js",
+        "owner": "integrations/extension-proxy-mcp.js",
+        "directOwner": "integrations/extension-proxy-mcp.js",
+        "checksum": "601566db23e79097f388760ed4f2b36210283b30e2195b75f4765b9f11cbc6b5",
+        "originalOwnerChecksum": "f6aa576230f91c25c0ab3b0fc91db5226eb9c1714d81dfed532440221973ddbf"
       },
       {
         "module": "agents/dispatch-memory-receipt.js",
@@ -209,7 +223,7 @@
         "owner": "modules/collaboration/collaboration-coordination-ux.js",
         "directOwner": "modules/collaboration/collaboration-coordination-ux.js",
         "checksum": "e8a7c25c03e7be0ea514df01db293f91bcdd98b71078e53298655d34afd172bb",
-        "originalOwnerChecksum": "616e43d4f6389c4d71aa3df80fdf80f739852a993ed62c208437ee470179c045"
+        "originalOwnerChecksum": "3d41b2a70b7551b8c6d63e72938580bb9fd643a4a929067b257fddade0b03541"
       },
       {
         "module": "modules/collaboration/collaboration-agent-parallel-dispatch.js",
@@ -278,7 +292,7 @@
         "module": "system/task-transition-ledger.js",
         "owner": "modules/collaboration/collaboration-task-service.js",
         "directOwner": "modules/collaboration/collaboration-task-service.js",
-        "checksum": "bb05bfa993f4ec527dfefa3c76bb1bd417bc91386941e2cf4ebccb511841f8cb",
+        "checksum": "b5316e606b383fad26c920bfa079a45900e16944030d7474fe3681cbebd8a0e2",
         "originalOwnerChecksum": "27aa14f2d40b1bae0d0d0cd922eee5f919ccf4fde235a5a3ccf6eedccb897cc1"
       },
       {
@@ -300,7 +314,7 @@
         "owner": "modules/collaboration/group-memory-context.js",
         "directOwner": "modules/collaboration/group-memory-context.js",
         "checksum": "4625e9f3ecd5348a739014112c290ba08a799e17e1b40ad8c9be6b1ce67e6d82",
-        "originalOwnerChecksum": "e3565c3fd4a6a1680fb4617e98ca5461efb00a5d379d1234879848261846ac81"
+        "originalOwnerChecksum": "dc0c005f6aa96deb40126294c0c7341c69744612a2baa721a0c9f3967d304ad3"
       },
       {
         "module": "system/provider-cache-breakpoint-encoding.js",
@@ -313,7 +327,7 @@
         "module": "system/provider-reasoning-summary-capability.js",
         "owner": "modules/collaboration/group-orchestrator-llm-client.js",
         "directOwner": "modules/collaboration/group-orchestrator-llm-client.js",
-        "checksum": "89d4af5df3ae7deee7393e0fbbe62bff48ac5e867d96cf45e70d9e78cd06b8ae",
+        "checksum": "3db06d43d3177ce0753f4966185acf2f941e6fcd8b8ea74978c08c949a4d542a",
         "originalOwnerChecksum": "db9d5677e8d312a8e9a8bff3b254ee9095fed43fb6ccb3ba2454ca6397887c6b"
       },
       {
@@ -436,6 +450,13 @@
         "originalOwnerChecksum": "75f4066baf0438954480bcc0a77e1c1c1f1cd4f9a105e04adfa8a4230c1c5a7a"
       },
       {
+        "module": "modules/music/recommendation-types.js",
+        "owner": "modules/music/agent.js",
+        "directOwner": "modules/music/agent.js",
+        "checksum": "f2ab3e1dbbb84f1cf2719bfb8ab5b2f88254bfdb3bf51a7824319399054e0dd2",
+        "originalOwnerChecksum": "74abeff86d56a8bb540c6ef64cfdcbc2fe78054e82cbec49978fcd3b9eb45b4e"
+      },
+      {
         "module": "modules/music/video/materialize-video.js",
         "owner": "modules/music/douyin-media-coordinator.js",
         "directOwner": "modules/music/douyin-media-coordinator.js",
@@ -443,95 +464,144 @@
         "originalOwnerChecksum": "2a18e636e227461e9bd02e9938fcfa12cbff3857d246f863b4c6c48b165133f6"
       },
       {
+        "module": "modules/music/folia/ai-call-config.js",
+        "owner": "modules/music/folia/ai-runtime.js",
+        "directOwner": "modules/music/folia/ai-runtime.js",
+        "checksum": "3b87d9f7bee094f3ff5d558bfad82f99d5c2d7a63439ec7e3074d0dfe586c168",
+        "originalOwnerChecksum": "5e69f4a23877fdc12b49eb40516ced65ee011be96df5798c598c69a81d5cfa93"
+      },
+      {
+        "module": "modules/music/folia/bodian.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "52b2f5777208819256a4efd8ceddee2991b827956cb6f3d656b1eb225149988e",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
+      },
+      {
+        "module": "modules/music/folia/cover-image.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/cover-reader.js",
+        "checksum": "dc12737660cd2b2a689f02589b5bbe80098c7183e200dbf5bba3948e77286453",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
+      },
+      {
         "module": "modules/music/folia/cover-reader.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/cover.js",
-        "checksum": "060f6d344d265bee990cf721ea8cc3155b84307a7d7a056f48b119f72f9694bb",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "checksum": "a77f50ebc8f37e763944235e7c45c62571a06ec5ed8fb29b6ea75c7e4a607d4d",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/cover.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/api.js",
-        "checksum": "5469a45f9142b6258e1bfd8c271bb11ffc3e31570569b6a47e27bc0cfefbf1c9",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "checksum": "2054b5be323492860f02aab21a82f99c8bd3b8df4312ed67ee2c9aa4573fff34",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
+      },
+      {
+        "module": "modules/music/folia/device-catalog.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/library.js",
+        "checksum": "6d3456b0bb7633e97f8883af6aaf01a0d9df10e5d4192de6399fcd2c245d9faf",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
+      },
+      {
+        "module": "modules/music/folia/device-lyrics.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/device-catalog.js",
+        "checksum": "f58d774cbfd511d061e8fd056050d327dc9119227865b36eb783304265045f26",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
+      },
+      {
+        "module": "modules/music/folia/device-metadata.js",
+        "owner": "modules/music/folia/api.js",
+        "directOwner": "modules/music/folia/device-catalog.js",
+        "checksum": "4a2c94d1eab2d980f73bb3b573abb36701ed3695ce5e0b31edfb6b8b4df5ce5e",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/library.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/api.js",
-        "checksum": "480eb569b26dc3850d14ae555e38ae56f49a6d7df9a441694a83225b6bbf7f05",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "checksum": "117ad1d09f1276af6d37599663f06a030ec9cc0b2b02e3b44aa879593f159b02",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/local-assets.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/api.js",
         "checksum": "301394f89dfcfccb37f3c77a392840af13117f0ab87fb8ece5718caf4ad34c6a",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/native-local-state.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/library.js",
         "checksum": "f8adcb07185bbcf7ea2f2aadc14ab173e4bc87d1555aeed1329a5fec3405f6b1",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/navidrome-settings.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/api.js",
         "checksum": "8e0dc1850969be717940751ebe3ecb9301eeceff7873783245b005c343ede37b",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/provider-status.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/api.js",
-        "checksum": "3d6bc2fe0f91c5bb2a83ce1b267fab47f5c597ef5b6ec8425ee240019af2871f",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "checksum": "236cd16e1453c0e4f26a5e5b9708d0b15441a5657a9980218961a92a64414392",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
-        "module": "modules/music/folia/song-metadata.js",
+        "module": "modules/music/folia/sync-settings.js",
         "owner": "modules/music/folia/api.js",
-        "directOwner": "modules/music/folia/library.js",
-        "checksum": "2604d1d6d414bb5a9279ba5aedd305abc051c13ad35f81ce3fdc6ea2530d8f42",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "directOwner": "modules/music/folia/api.js",
+        "checksum": "1cc1ffaac52c27d6d4dc8c085824e2aca5a9915fcd46c427d7b6721adb8bf131",
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/video-library.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/library.js",
         "checksum": "19a92d9a0221ba211e2c47891ecef7f48c030481d901b3fdb98b120e22d8891c",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/video/api.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/folia/api.js",
         "checksum": "17acb28007d6a3a996628b1f7c1a0f0dac769587f0b521b5e6bde307f366ae04",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/video/local-library.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/video/api.js",
         "checksum": "e479483bb550e7bca1aa3fa4519125eb8fb9f14dcb99388dca128fcd5c439067",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/video/personal-reference.js",
         "owner": "modules/music/folia/api.js",
         "directOwner": "modules/music/video/api.js",
         "checksum": "9b52cf8912c4e0fe12330ec1d80fcecee7a3bf056d7c92c0769ef9143698d094",
-        "originalOwnerChecksum": "604dd9ec5fea91951c86cd8ccf3289666d2978fe9a9e00da2c0119f64b7750d7"
+        "originalOwnerChecksum": "ff678802bd751328f3f2e17f83e833dec450c3b853bc3493ec79ce09c735e21f"
       },
       {
         "module": "modules/music/folia/lyric-proxy.js",
         "owner": "modules/music/folia/auxiliary.js",
         "directOwner": "modules/music/folia/auxiliary.js",
         "checksum": "4f2e37c40cc12539b00bb0fc5260f7fd898dd3f9caaa800f5c2bcaecc4f82555",
-        "originalOwnerChecksum": "20496f627795620458c0d616b7600e3bc3e6e857efe9a24d54baf5fce11e5643"
+        "originalOwnerChecksum": "2807d55e6b3484c22c149d924688bde37e127eec306d02858daff60fc9dde702"
+      },
+      {
+        "module": "modules/music/folia/provider-cookie.js",
+        "owner": "modules/music/folia/proxy.js",
+        "directOwner": "modules/music/folia/proxy.js",
+        "checksum": "a51f570e478b6793a26e15d4a085f502ca031a8430f1b461747bb00f09eaf6f2",
+        "originalOwnerChecksum": "49c35858eea71e70232f6b5682361af090e633eaf2d9a4a71cca2f8e904ec34a"
       },
       {
         "module": "modules/music/catalog-track-identity.js",
@@ -539,6 +609,13 @@
         "directOwner": "modules/music/music-catalog.js",
         "checksum": "d6bf983e0aaebd3363f3383d6e52eb8994330a4b386a0fe9c1284728cbe2e680",
         "originalOwnerChecksum": "85d9f685eacc9e0dae8470895bf907ad8004cdeafa199915596dfbcdf9581154"
+      },
+      {
+        "module": "modules/music/recommendation-charts.js",
+        "owner": "modules/music/recommendation-engine.js",
+        "directOwner": "modules/music/recommendation-engine.js",
+        "checksum": "71dad02374bde953b6ec69228fbd9f4db124b9e259e9e008b12afaff471c6455",
+        "originalOwnerChecksum": "7947e86515169a7f3c4d6f63065f8b641b147daead17cd92fbc33396cee65348"
       },
       {
         "module": "modules/music/video/media-task-scheduler.js",
@@ -601,28 +678,28 @@
         "owner": "modules/projects/projects.js",
         "directOwner": "modules/projects/projects.js",
         "checksum": "fb3ca22fd1e40e86443dc2ed369a0f396e1c3580675f6343449657c9c854ebad",
-        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+        "originalOwnerChecksum": "5edbed8b88a64aa521a3ee62aa452a622a1cc8660533e3d22cd3c9062b13b651"
       },
       {
         "module": "modules/projects/managed-process-query.js",
         "owner": "modules/projects/projects.js",
         "directOwner": "modules/projects/projects.js",
         "checksum": "406dce4d8a5a157629688aa2c07a9e2be96ed7ece2a7ea3f472ca4c5f079d569",
-        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+        "originalOwnerChecksum": "5edbed8b88a64aa521a3ee62aa452a622a1cc8660533e3d22cd3c9062b13b651"
       },
       {
         "module": "modules/projects/project-folders.js",
         "owner": "modules/projects/projects.js",
         "directOwner": "modules/projects/projects.js",
         "checksum": "0dc200ef20d04d53b2bac19cf7422acd1251c05aeb2bc9bc08eaece406a5d4f6",
-        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+        "originalOwnerChecksum": "5edbed8b88a64aa521a3ee62aa452a622a1cc8660533e3d22cd3c9062b13b651"
       },
       {
         "module": "modules/projects/project-orphan-removal.js",
         "owner": "modules/projects/projects.js",
         "directOwner": "modules/projects/projects.js",
         "checksum": "5f7c98cd54f298f1f92c08d2a141b9ecf1da3ce96b73dfe8244f0cebc6a34312",
-        "originalOwnerChecksum": "c95a3a3ba6c1e0d15251946f5ee48036d3c306757fdd944be05b25cf459f9bda"
+        "originalOwnerChecksum": "5edbed8b88a64aa521a3ee62aa452a622a1cc8660533e3d22cd3c9062b13b651"
       },
       {
         "module": "modules/scheduling/work-journal.js",
@@ -650,35 +727,35 @@
         "owner": "modules/system/agent-provider-settings.js",
         "directOwner": "modules/system/agent-provider-settings.js",
         "checksum": "ffb152d311ecb9d52e862ffd53ec6264f1443942bc12b6e8bf961a52deb7bd75",
-        "originalOwnerChecksum": "c13ac250a5f1e4fdc5176d185ae7b23e5ae17514a7ef27c63b72c8c5e0f3f27f"
+        "originalOwnerChecksum": "301deaad11d34ce8cf738a4a5a57a9b494768171d07a0767df39d7c8280f6a94"
       },
       {
         "module": "modules/system/cc-switch-provider.js",
         "owner": "modules/system/agent-provider-settings.js",
         "directOwner": "modules/system/agent-provider-settings.js",
         "checksum": "39903b0a7308cf7efead63d2cf5ffef9f4833e59637c058faee2a49b7500bdf8",
-        "originalOwnerChecksum": "c13ac250a5f1e4fdc5176d185ae7b23e5ae17514a7ef27c63b72c8c5e0f3f27f"
+        "originalOwnerChecksum": "301deaad11d34ce8cf738a4a5a57a9b494768171d07a0767df39d7c8280f6a94"
       },
       {
         "module": "modules/system/development-agent-auth-evidence.js",
         "owner": "modules/system/agent-provider-settings.js",
         "directOwner": "modules/system/agent-provider-settings.js",
-        "checksum": "5d43717f7df8225900b774761cbbdcc182b39c32999d779bc499514b1de99c54",
-        "originalOwnerChecksum": "c13ac250a5f1e4fdc5176d185ae7b23e5ae17514a7ef27c63b72c8c5e0f3f27f"
+        "checksum": "0942cdfd82608e9b86f63a5545f0aa648a1b06ed1fbc78d4b648ddd0f03e2cce",
+        "originalOwnerChecksum": "301deaad11d34ce8cf738a4a5a57a9b494768171d07a0767df39d7c8280f6a94"
       },
       {
-        "module": "modules/tools/marketplace-transactions.js",
+        "module": "modules/tools/extension-catalog.js",
         "owner": "modules/tools/marketplace.js",
         "directOwner": "modules/tools/marketplace.js",
-        "checksum": "2c904df6e832bb805fc586b720fe3881c6626cd3227031e05b7e3888df55f775",
-        "originalOwnerChecksum": "1fc14f926c46ea6160f33fa346c4f8bdd90333be1303aa8f43b927945bab73d2"
+        "checksum": "2b1743a8a109d4cc9c2b7cca6dec0f6572a664a431e343c92a0eb649d8ef4d5c",
+        "originalOwnerChecksum": "b9b0aef0fff28c0b4ef035f90057991e9356e6698f42cf92606d0fef946da04c"
       },
       {
         "module": "system/performance-provider-cache-metrics.js",
         "owner": "modules/tools/tools.js",
         "directOwner": "modules/tools/tools.js",
         "checksum": "c8f3bdcad84caec9f49dc93b8aacf0e3be40ca29ae438341efe3ec119a0979e2",
-        "originalOwnerChecksum": "49a28452f25c5c56db85a0501b825efae7907d9e69d430778be3c7fa35ee6609"
+        "originalOwnerChecksum": "8df0d5393e512e263ca1733a349d5ab46ca75ae4bd6118cb9b5fc3b4d40226a5"
       },
       {
         "module": "agents/dispatch-tool-loop-result.js",
@@ -698,7 +775,7 @@
         "module": "server-agent-runner-support.js",
         "owner": "server-agent-runner.js",
         "directOwner": "server-agent-runner.js",
-        "checksum": "52ad572c5b32487252a9d0e96548ad5a64870f61ff2106b69e20ac845ff5c108",
+        "checksum": "abc02d71ab7bf9d0dc86ed325c1e377e19712ca2de469df3f7226d764c1fe523",
         "originalOwnerChecksum": "b0ba94e8a632c4f9cf1772639e735f130d8e668e2014315d2f44552cb2a784ba"
       },
       {
@@ -706,462 +783,448 @@
         "owner": "server.js",
         "directOwner": "server-bootstrap.js",
         "checksum": "d9ec95ef98dabfb37a110e9e4c5dbddc038a52e8cdc8f1047cb2fe499e55fa18",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "agents/agent-routine-recovery.js",
         "owner": "server.js",
         "directOwner": "server-bootstrap.js",
         "checksum": "a107fd1db0ee9ca8add8dd5546962768c0acb8ede0132fbaca8dc1f181bc3829",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "agents/agent-run-supervisor.js",
         "owner": "server.js",
         "directOwner": "server-bootstrap.js",
         "checksum": "bc4b083e15b2255639fa691991df88b8d196db159e0d5dd008a7c3bec0b3d6ac",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "agents/agent-supervisor-candidates.js",
         "owner": "server.js",
         "directOwner": "agents/agent-run-supervisor.js",
         "checksum": "47e0d896895695820bb40581b69b1116466ba1558dcb56b1a809416b9bd5de69",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "agents/clarification-answer-validation.js",
         "owner": "server.js",
         "directOwner": "modules/tools/slash-command-conversations.js",
         "checksum": "90eea6680685d0fb02d21603542b676559ec88b33ca84fa0b8187301fff46130",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "agents/project-worker-semantic-ack.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "f210c0564e66780efb7777a0df724da3c4f4881166770d5bb3c8b06ffee454de",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "core/server-instance-lock.js",
         "owner": "server.js",
         "directOwner": "server.js",
-        "checksum": "99a23f4f93708ff6161d3707a71b0dcbd7ebfac44c5ff49b20d20340db838bca",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "42f133bd991207c8c7b22bb1202d72436b60cb7b216ee8cb35f4c4db1fbf0bee",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "core/task-workbench-query.js",
         "owner": "server.js",
         "directOwner": "modules/collaboration/task-workbench-routes.js",
         "checksum": "e6ef061c8ef190446cb7715569517269737947c0ab5919d928fe995558a19c6d",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "core/task-workbench-read-version.js",
         "owner": "server.js",
         "directOwner": "core/task-workbench-query.js",
         "checksum": "dd5893eebb8482363de57984311d728e928484cd046092af66bd455255f47f3a",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-acceptance-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "c52d6138ef925cee9c588aac49eb4568f1265e6b21a58caed941f101f3762f80",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-permission-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "932192d1bfdb2a5b5a399a6e50800b1268a5c9d4b4125cd4fd59807f4879636a",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-recovery-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "5ac78c9a54d2306843d43ef9297f90ed917e76964fb7ddbaa06fd92d7461188d",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-session-controls.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "d2f343376eaf31cdc23758c1a26daf47a31d80ee6a322629594e27fcdca87ca4",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-session-message-routing.js",
         "owner": "server.js",
         "directOwner": "modules/collaboration/task-session-routes.js",
         "checksum": "cf5f24982034db15642aba30e77a106148316780477bd03789c5178681a6cc3a",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-session-message-validation.js",
         "owner": "server.js",
         "directOwner": "modules/collaboration/task-session-routes.js",
         "checksum": "b3b870d1f8487624eda9d6bb043f957d7f6823217d79f132128a55eaeec2b010",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-session-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "db41e4df54a5b83fea0564633f74fe189956642a14910e47e7e559dbbe588823",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/collaboration/task-workbench-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "42b748a92bc049198748b8ace118683db8b02a88df8972b6bb309e850f6f97a3",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/knowledge/knowledge-model-startup.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "ca9adbdfbe5c1218b64f5704949ee835ff5a9dd4b371e4a04e003865d888cc04",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
-        "module": "modules/music/agent.js",
+        "module": "modules/music/agent-api.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
-        "checksum": "5793c76bf7763e8acd8b51ec1d44b4b2cba4fcda7cd3c36b202f5e9508175ead",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "313881e5a45ae976586f101cddde28cb0bb2e3035067f3091bb9c7a5dfd9f9c1",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
+      },
+      {
+        "module": "modules/music/agent-turn-lifecycle.js",
+        "owner": "server.js",
+        "directOwner": "modules/music/agent-api.js",
+        "checksum": "74197b6ce072222f2402fcf5c1cc08601f67ce6feec8fdfc2f93a29704bfd788",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/cover.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
         "checksum": "3bf52c04d05802b5506a4f8ea37b4f36bf5c54eb53509d9642904af2a937cb17",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/douyin-api.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
         "checksum": "230b45125ec7a070fd879d93a3f80e960533b5c8efa0db2e68b26a0518449af6",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/douyin-music-agent.js",
         "owner": "server.js",
-        "directOwner": "modules/music/music.js",
+        "directOwner": "modules/music/agent-api.js",
         "checksum": "03c8854d821f7c1f93a033e22adeb9b0325f477047640185785cf23cb1f17c72",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/download-jobs.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
-        "checksum": "249e95638cc2c8d8aa882435280735f6bcf038b33dd72271a6c89ad2ab4d87cf",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "3f380941d5ed265d92d0b36b97c4f110610d97385e385390cd86f0f5b8981a2c",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/duplicates.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
         "checksum": "459e5faf0a6d736b6c357b5066559354c100d8847d8cb8010fa84154fd25fbb8",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
-      },
-      {
-        "module": "modules/music/folia/candidates.js",
-        "owner": "server.js",
-        "directOwner": "modules/music/music.js",
-        "checksum": "ba8f4f059a0e3f1a6a6416ba301210c158bc2c5bcb33bf006b1051ffccd24806",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/folia/embedding-security.js",
         "owner": "server.js",
         "directOwner": "modules/music/folia/static.js",
-        "checksum": "2e0b1ee7ee51c0e6e2c7b44717b1bbd529bdd5e13d6a120f046c4c419590d61e",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
-      },
-      {
-        "module": "modules/music/folia/search.js",
-        "owner": "server.js",
-        "directOwner": "modules/music/playback-decision.js",
-        "checksum": "750b26da140eca1817e37f9b02354eeab03efd4b9f72d517bdef2161cc567914",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "1a49e5f01414c0d2a906f2d6fa74a9b6ea27972104eeb48bd39183cd27cecf6d",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/folia/static.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "606981e716e9ca215979220b5bd6fa81471a359b46b2d6a7fea42570a984681a",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/music.js",
         "owner": "server.js",
         "directOwner": "server.js",
-        "checksum": "0d4833053e11039195913b4404be1822c6f866fd0b769a5968f945286c235754",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
-      },
-      {
-        "module": "modules/music/playback-decision.js",
-        "owner": "server.js",
-        "directOwner": "modules/music/music.js",
-        "checksum": "6e9683cff3333d2d54ea588ca3be2465a96d4dd2e9ce8735827c5265b1f02eda",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "aa3c1a541af060ed0489683124ee7f1e15ef402d4a7b9d143d395be734be4dd2",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/unified-search.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
         "checksum": "8ba7b96279569ed1f5e74bef68ee6e309086c8f97be6dcd110eec57a474f09d6",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/video-playback-api.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
         "checksum": "e1123731b6898cb7c1c1e4bc19ac4fcd3424a1e8c558167747bce3a2a74ea1bd",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/music/weather.js",
         "owner": "server.js",
         "directOwner": "modules/music/music.js",
         "checksum": "2b1d9ae25118625417db1066308c89a01d3eca292bd6c8a58e3102264d2cfc76",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/projects/dispatch-delivery-gate.js",
         "owner": "server.js",
         "directOwner": "modules/projects/project-worker-delivery.js",
         "checksum": "e1a687b57649c68d3cdae156094fcf868c5b7ecdf4e9d957544417c06e10ed50",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/projects/project-conversation-stream.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "bcb9be4dcbdcc86ea13be06e52446f4c32832feafe7728914dfa58afcbd71a91",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/projects/project-feishu-turn-queue.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "07d54c9a167af9373f4137f91954d316fb9ba0b9529248fb9b18d0e5b72e51c4",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/projects/project-main-turn-complete.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "198e1772be0c21ce033de2a560a2ac05390ea9cac54a1d3ab3178487ebe791a8",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/projects/project-session-dispatch-lifetime.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "8524eb6b843f4ae57ad3fdcd4333b2820ab120e9a0585ba12f5690bf91c6e18d",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/projects/project-worker-delivery.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "40aa1b05c5e36aebfcd8bf1fb95cdec20ae0b20059166709887ff8af6df02e80",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/scheduling/automation-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "665798211686a68633f61d44f22c668e12cde1ac31c39db01c85095dd7171b72",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/search/conversation-search.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "0c894db266d3b5cc3d03b248be746348748e13177fd59c98b11d401fe026c131",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/system/navigation-config.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "0c70cedcf78a70fb9a10f880632efda0e1663a729c2940734f538ebbf9500785",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/system/usability.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "10dfeb15a65e4258f2e231e8c100b714ec3c17843a15958640c1998abb720fef",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/tools/shared-files-api.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "048eab2bfe49193bc17cdb50b811a3e05ad9baca9a97566be4bd11b084f8dfc1",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/tools/slash-command-conversations.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "3c8683a2037d20603464414b7ecbbd37d8ec13572d561f81f9d1e12347d4ebcd",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "modules/tools/slash-commands.js",
         "owner": "server.js",
         "directOwner": "server.js",
-        "checksum": "3b13fde6bf77b9655d57e2d19da925114dc757936c657cc58d205ac178faae68",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "ce8cab0f742438c7d77d0250d26fa7d50490440fae744a0e9e31afdfc25d4b48",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "server-bootstrap.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "b1a3c56136d9ad8a12f7b371c8afbf59c70a0cc0886cb62c5480281c1f27a60f",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "server-pet-activity.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "7f04ee7b1635cebaab997a684b272a56e15625c251936866e0d17fe3a1823f6f",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/agent-communication-api.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "5e7c68d8f4cb386dc49be78f5beae83ecbc83917c5ce462337d0dcbd1c0d7704",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/attachment-reference-registry.js",
         "owner": "server.js",
         "directOwner": "system/cleanup-center.js",
         "checksum": "055c25d8aedd451e75b762efc624aaf40e714973dfe2f215f69cf5158029d020",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/automation-session-bindings-api.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "e44697d994949969a9bb3aa91ac7676aa42a3b06001a3f2ddbf840f2f568c7aa",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/cleanup-center.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "8eb768e1f4112624c071a3a18470e87282eea287d60f51400c3e7b86a3a51546",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/code-intelligence-api.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "95b0115d602bd602c73570e892ecf57e005caf45a4646e1f613611fa349b356f",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/delegated-inquiry-actions.js",
         "owner": "server.js",
         "directOwner": "system/delegated-inquiry-projections-api.js",
         "checksum": "27a34f7fc7a841327ed092b7383fc9e7f1c1cb03bf7ecaa5575af282f9d1ab20",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/delegated-inquiry-projections-api.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "5187b8947508b126e29412bf3db897a386f1fce150b20fe14ba6eb63859553e2",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/event-file-diff.js",
         "owner": "server.js",
         "directOwner": "system/user-visible-agent-events-api.js",
         "checksum": "ff487b627271c5e40de86115b9e5a70b7e4d6efce86b509955f306a4bdc4c166",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/event-file-source.js",
         "owner": "server.js",
         "directOwner": "system/user-visible-agent-events-api.js",
         "checksum": "e99f89d6dbbdf6ed34d2d9835d119bc629c7b5ab3e842e435adca89dad0f055f",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/pet-agent-milestones.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "bffe726cb92a142c6a4d3de8b89d82a8be2fb7839fdd360f4c8f32326d15c4ed",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/runtime-schema-policy.js",
         "owner": "server.js",
         "directOwner": "system/cleanup-center.js",
-        "checksum": "7593911422a23a05dfed6a9937693227280bb2745c16130bc0bfe90afa763e1f",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "d66ac9668d8191a2109cef0273a49a616c96ffe31b8560a68aba9b4735c67545",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/scope-instruction-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "26a01511c5456ee73dbdf01cdf25fcdb7d6cb2ffc190bd51dcd45339cea12fc1",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/session-compaction-hook-routes.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "134d9439e171a045532e88213d77984778cb36ab94f4f7b24c31e2694eb0566a",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/session-compaction-hooks.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "83a9cbb971afbb404e5a49ae80223b12d6c57da3b91388ca204eed614a9fd3ab",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/task-list-preparation.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "38c67d35ca788b8f16fd4dc29b3ebba3dd3f6ffdee0956ffdf831f2e68db0551",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/unified-agent-turn-state.js",
         "owner": "server.js",
         "directOwner": "system/user-visible-agent-events-api.js",
         "checksum": "27321cb7379febdade46e2454d4601a1ef90088d248aadf1628624f4a21a17da",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/user-visible-agent-events-api.js",
         "owner": "server.js",
         "directOwner": "server.js",
         "checksum": "9e7520775a3ac306e502d051f5afa844ca5450051bf6f56bf2d28b373297202a",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "tools/tool-call-loop.js",
         "owner": "server.js",
         "directOwner": "server.js",
-        "checksum": "e60b5548ee9a5236c9cef2e43689aa2d2e90ae351e6cc6519467887c364d9914",
-        "originalOwnerChecksum": "d0d577351e2fc7336731151889e2119c938e0475eab3fecaece53d5516777d0f"
+        "checksum": "7440689b409c1d5c4eb96136d302e33a6a95db69f35fe592783795556066fcbb",
+        "originalOwnerChecksum": "70f88fc8349285ccbf862cb7f11df758f64055fc4c024252f73fa196ec85d9f0"
       },
       {
         "module": "system/scope-navigation-validation-report.js",
@@ -1175,21 +1238,21 @@
         "owner": "system/code-intelligence.js",
         "directOwner": "system/code-intelligence.js",
         "checksum": "6de407872186ed9029fc3eacd977f068caf470eb835e0ee74e9306667d6e3a4a",
-        "originalOwnerChecksum": "b54d76ef907187ac1017d2f005681c9a1827b1024591a4061dc763b1ac530b26"
+        "originalOwnerChecksum": "954cf1b62d9b7576ca52652855793576acfad0e30cccc44274787a1b40fadcb3"
       },
       {
         "module": "system/lsp-client.js",
         "owner": "system/code-intelligence.js",
         "directOwner": "system/code-intelligence.js",
         "checksum": "a5e5a6b86f29afbeeb08d06862db360b8210d876e2c6f4780a0173fe75da8fbe",
-        "originalOwnerChecksum": "b54d76ef907187ac1017d2f005681c9a1827b1024591a4061dc763b1ac530b26"
+        "originalOwnerChecksum": "954cf1b62d9b7576ca52652855793576acfad0e30cccc44274787a1b40fadcb3"
       },
       {
         "module": "system/managed-language-servers.js",
         "owner": "system/code-intelligence.js",
         "directOwner": "system/code-intelligence.js",
-        "checksum": "a86cb3985bb10603a48b9f3666c07f0117010e2012bf2c3db6cad7506e121eaf",
-        "originalOwnerChecksum": "b54d76ef907187ac1017d2f005681c9a1827b1024591a4061dc763b1ac530b26"
+        "checksum": "be1bc844e3f15396802d4d2fe5e07a9ee14e6e9e0fd115fc021630e6454d97b7",
+        "originalOwnerChecksum": "954cf1b62d9b7576ca52652855793576acfad0e30cccc44274787a1b40fadcb3"
       },
       {
         "module": "system/source-evidence-metadata.js",
@@ -1336,14 +1399,14 @@
         "owner": "system/user-visible-agent-events.js",
         "directOwner": "system/user-visible-agent-events.js",
         "checksum": "bda3e918a41241f8697a9f5e239907addca1c239be2dac9a315993ac89af302c",
-        "originalOwnerChecksum": "fb0ebc9dc5cd864cfd8ea63b17ec5d5ceee5faaf4d53a00cfeac1901bde6ad1c"
+        "originalOwnerChecksum": "5585d3a7eb935e2d651cc3c664f506af2e3536145f05b1af489212ae8e21859f"
       },
       {
         "module": "system/ephemeral-assistant-text.js",
         "owner": "system/user-visible-agent-events.js",
         "directOwner": "system/user-visible-agent-events.js",
         "checksum": "46135f9c67b66e1a0c74c967e6e108376ba8f937b5dd6fb533ec7b9286ae9c3b",
-        "originalOwnerChecksum": "fb0ebc9dc5cd864cfd8ea63b17ec5d5ceee5faaf4d53a00cfeac1901bde6ad1c"
+        "originalOwnerChecksum": "5585d3a7eb935e2d651cc3c664f506af2e3536145f05b1af489212ae8e21859f"
       },
       {
         "module": "agents/session-contamination-detector.js",
@@ -1419,22 +1482,15 @@
         "module": "tools/tool-search-index.js",
         "owner": "tools/main-agent-tool-runtime.js",
         "directOwner": "tools/main-agent-tool-runtime.js",
-        "checksum": "0b589f45590dca43d20551bee1a6edd571bee82a190fdee99642338ec8254424",
-        "originalOwnerChecksum": "37527cf139438dc1a4fcba9b90b17d9355670160900a533142688cc20481fe5d"
+        "checksum": "4676cfac97441ff5538f53e941612d636c7dc91e5eb4c24f97a4a868c32d75b4",
+        "originalOwnerChecksum": "946aee0438ded160be3c741090b86bc150d67b3bbbbb55cc29eba4ba3b9896e8"
       },
       {
         "module": "tools/workspace-read-budget.js",
         "owner": "tools/main-agent-tool-runtime.js",
         "directOwner": "tools/main-agent-tool-runtime.js",
         "checksum": "d68dfc2b31a55421d1fd745f9a2ddae9932cb7479c20266e5b9807d57065cac7",
-        "originalOwnerChecksum": "37527cf139438dc1a4fcba9b90b17d9355670160900a533142688cc20481fe5d"
-      },
-      {
-        "module": "tools/mcp-remote-client.js",
-        "owner": "tools/tool-manager.js",
-        "directOwner": "tools/tool-manager.js",
-        "checksum": "80181e57e7ad8c82588c06acdd3e1c6d49bf78b960717e0ce058d5104dc30817",
-        "originalOwnerChecksum": "2cd4f690d6dc04720756c61f7e55e99fad59de21e16bf5459385510ebe62d361"
+        "originalOwnerChecksum": "946aee0438ded160be3c741090b86bc150d67b3bbbbb55cc29eba4ba3b9896e8"
       },
       {
         "module": "tools/html-to-light-markdown.js",
@@ -1454,43 +1510,43 @@
         "module": "tools/readonly-inspection-sandbox.js",
         "owner": "tools/workspace-readonly-analysis.js",
         "directOwner": "tools/workspace-readonly-analysis.js",
-        "checksum": "e3360f4167e28fb7db078ad23b94b8bac6e2913045d136f01994e2da64d92a9d",
-        "originalOwnerChecksum": "97a9a12938eaabfd529a4a0a4ec5d864ab24babb43595809d398d87884e26962"
+        "checksum": "9044665252cd2f380e84cfc4657c2bb9549a3559df6c799d93e94847fa5d2b3f",
+        "originalOwnerChecksum": "1aa3faed1bae3eca81f07c13411ca51029cc9d3621662e075aba75c473ca79e1"
       },
       {
         "module": "tools/workspace-file-context-read.js",
         "owner": "tools/workspace-readonly-tools.js",
         "directOwner": "tools/workspace-readonly-tools.js",
         "checksum": "e20392bcb12b749d590a38fadb16e2f79212a96316273d55e2f093c00e6b05e6",
-        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+        "originalOwnerChecksum": "6f879bd27acb2005ee90099029e049ff5a7db250404b91d9cea69249b4656251"
       },
       {
         "module": "tools/workspace-file-metadata.js",
         "owner": "tools/workspace-readonly-tools.js",
         "directOwner": "tools/workspace-readonly-tools.js",
         "checksum": "653d16d9718450fd42d359cba7a4e2338396ac2ce3d44af350d6b9e34a149fb1",
-        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+        "originalOwnerChecksum": "6f879bd27acb2005ee90099029e049ff5a7db250404b91d9cea69249b4656251"
       },
       {
         "module": "tools/workspace-json-fields.js",
         "owner": "tools/workspace-readonly-tools.js",
         "directOwner": "tools/workspace-readonly-tools.js",
         "checksum": "5ab0fc755ab8bcc243ab5906886068493da8415cc8af3c33ce2066093caab9dc",
-        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+        "originalOwnerChecksum": "6f879bd27acb2005ee90099029e049ff5a7db250404b91d9cea69249b4656251"
       },
       {
         "module": "tools/workspace-read-media.js",
         "owner": "tools/workspace-readonly-tools.js",
         "directOwner": "tools/workspace-readonly-tools.js",
         "checksum": "be305cad438052f5263645c05912102c6a5dc2a4411fa143d1a841972ab985d7",
-        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+        "originalOwnerChecksum": "6f879bd27acb2005ee90099029e049ff5a7db250404b91d9cea69249b4656251"
       },
       {
         "module": "tools/workspace-search-runtime.js",
         "owner": "tools/workspace-readonly-tools.js",
         "directOwner": "tools/workspace-readonly-tools.js",
         "checksum": "1d1fc8f22c9d305650d9530dd91673ac8111abf40b8d98da77586d04617f65fe",
-        "originalOwnerChecksum": "7590992187fdc6a10e6421bdb58715655dd46edb4e0fdb914c114d59984d92b8"
+        "originalOwnerChecksum": "6f879bd27acb2005ee90099029e049ff5a7db250404b91d9cea69249b4656251"
       }
     ],
     "entryProtectionSources": [
@@ -1520,8 +1576,10 @@
       "scripts/clipboard-attachments-selftest.mjs",
       "scripts/conversation-client-boundaries-selftest.mjs",
       "scripts/douyin-mcp-bridge-selftest.mjs",
+      "scripts/extensions-installed-selftest.mjs",
       "scripts/fetch-web-mcp-selftest.mjs",
       "scripts/fixtures/runtime-tool-e2e-mcp-server.mjs",
+      "scripts/folia-model-install-ui-cases.mjs",
       "scripts/group-coordination-mcp-selftest.mjs",
       "scripts/helpers/release-fold-chains.mjs",
       "scripts/internal-mcp-catalog-selftest.mjs",
@@ -1539,6 +1597,7 @@
       "scripts/release-live-acceptance.mjs",
       "scripts/runtime-path-integrity-selftest.mjs",
       "scripts/runtime-tool-real-cli-e2e.mjs",
+      "scripts/sync-cli-runtime.mjs",
       "scripts/sync-douyin-mcp.mjs",
       "scripts/sync-folia-package.mjs",
       "scripts/sync-review-package.mjs",
@@ -1546,7 +1605,7 @@
       "scripts/validate-release-manifests.mjs"
     ]
   },
-  "stage_package": "D:\\ccm-workbench\\release-artifacts\\5.0.0\\stage-z5Q3xs\\ccm-package",
+  "stage_package": "D:\\ccm-workbench\\release-artifacts\\5.1.0\\stage-qF8xWj\\ccm-package",
   "executable_entries": [
     "package/bin/ccm.js",
     "package/bin/legacy-project-cli.js",
@@ -1555,5 +1614,5 @@
     "package/bin/setup.js"
   ],
   "tested": false,
-  "created_at": "2026-10-16T03:42:46.841Z"
+  "created_at": "2026-10-19T14:30:13.385Z"
 }

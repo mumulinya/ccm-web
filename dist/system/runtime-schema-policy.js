@@ -176,7 +176,7 @@ function stripRetiredRuntimeValues(value, retiredSchemasInput) {
         removedRecords: removed.records,
     };
 }
-const DATA_ROOT = path.join(os.homedir(), ".ccm");
+const DATA_ROOT = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"));
 const SCAN_ROOTS = [
     path.join(DATA_ROOT, "context-accounting"),
     path.join(DATA_ROOT, "main-agent-context-continuity"),

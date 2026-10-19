@@ -41,6 +41,7 @@ const utils_1 = require("../../core/utils");
 const agent_provider_settings_1 = require("./agent-provider-settings");
 const catalog_1 = require("../../agents/catalog");
 const test_agent_settings_1 = require("./test-agent-settings");
+const runtime_data_directory_1 = require("../../system/runtime-data-directory");
 const startedAt = new Date().toISOString();
 function readAppVersion() {
     const candidates = [
@@ -59,6 +60,47 @@ function readAppVersion() {
     return "unknown";
 }
 function handleSystemSettingsApi(pathname, req, res) {
+    const dataDirectoryRoute = pathname === "/api/system/data-directory"
+        || pathname.startsWith("/api/system/data-directory/");
+    if (dataDirectoryRoute) {
+        const principal = req.ccmAuth;
+        const browserAdmin = principal?.kind === "browser" && principal.role === "admin";
+        if (!browserAdmin) {
+            (0, utils_1.sendJson)(res, { success: false, error: "只有服务器 Admin 可以管理数据目录", code: "ADMIN_REQUIRED" }, 403);
+            return true;
+        }
+    }
+    if (pathname === "/api/system/data-directory" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, dataDirectory: (0, runtime_data_directory_1.runtimeDataDirectoryState)() });
+        return true;
+    }
+    if (pathname === "/api/system/data-directory/validate" && req.method === "POST") {
+        readJsonBody(req, 64 * 1024)
+            .then(payload => (0, utils_1.sendJson)(res, { success: true, validation: (0, runtime_data_directory_1.validateRuntimeDataDirectory)(String(payload?.path || "")) }))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "数据目录不可用" }, 400));
+        return true;
+    }
+    if (pathname === "/api/system/data-directory/migration" && req.method === "GET") {
+        const state = (0, runtime_data_directory_1.runtimeDataDirectoryState)();
+        (0, utils_1.sendJson)(res, { success: true, dataDirectory: state, migration: state.migration });
+        return true;
+    }
+    if (pathname === "/api/system/data-directory/migration" && req.method === "POST") {
+        readJsonBody(req, 64 * 1024)
+            .then(payload => (0, runtime_data_directory_1.migrateRuntimeDataDirectory)(String(payload?.path || ""), { restoreBackup: payload?.restoreBackup === true }))
+            .then(result => (0, utils_1.sendJson)(res, { success: true, dataDirectory: result }, 202))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "数据目录迁移失败", migration: (0, runtime_data_directory_1.runtimeDataDirectoryState)() }, 409));
+        return true;
+    }
+    if (pathname === "/api/system/data-directory/migration/cancel" && req.method === "POST") {
+        try {
+            (0, utils_1.sendJson)(res, { success: true, dataDirectory: (0, runtime_data_directory_1.cancelRuntimeDataDirectoryMigration)() });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error.message }, 409);
+        }
+        return true;
+    }
     if (pathname === "/api/system/settings-status" && req.method === "GET") {
         const credentials = (0, credential_store_1.credentialStoreStatus)();
         (0, utils_1.sendJson)(res, {

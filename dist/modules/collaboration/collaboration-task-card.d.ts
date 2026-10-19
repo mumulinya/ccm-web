@@ -69,7 +69,7 @@ export declare function taskCardGapLabel(item: any): string;
 export declare function userAgentRole(project: string): "项目" | "测试" | "前端" | "后端";
 export declare function userAgentProgress(worker: any): string;
 export declare function sanitizeUserAgentProgressText(value: any, fallback?: string, max?: number): string;
-export declare function normalizeUserAgentProgressStatus(status: any, phase?: string): "pending" | "blocked" | "completed" | "failed" | "running";
+export declare function normalizeUserAgentProgressStatus(status: any, phase?: string): "completed" | "failed" | "pending" | "blocked" | "running";
 export declare function userAgentProgressStatusLabel(status: any): "失败" | "待补齐" | "执行中" | "等待中" | "已回传结果";
 export declare function userAgentProgressDefaultSummary(agent: string, status: string, currentFocus?: string, blockers?: string[]): string;
 export declare function userAgentProgressNextAction(status: string, currentFocus?: string): "等待我纳入验收和最终总结" | "我会按缺口精准返工" | "继续执行，完成后提交结果和验证" | "等待前置条件满足后派发" | "等待我分配下一步";
@@ -32677,7 +32677,7 @@ export declare function buildUserContinuationStatus(task: any, phase?: string): 
 export declare function shouldResumeAfterGoalRevisionInterruption(task: any, executionFollowupRevision?: number): boolean;
 export declare function buildGoalRevisionInterruptedStatus(pending?: any[]): string;
 export declare function shouldShowUserTaskCard(task: any, summary?: any, executions?: any[]): boolean;
-export declare function timelineStatusForUser(item: any): "done" | "pending" | "failed" | "warning" | "active";
+export declare function timelineStatusForUser(item: any): "failed" | "done" | "pending" | "warning" | "active";
 export declare function timelineLabelForUser(item: any): string;
 export declare function buildUserWorkflowTimeline(task: any, summary: any, phase: string): any;
 export declare function buildUserAgentQuestionRows(summary: any): any;
@@ -32692,7 +32692,7 @@ export declare function buildUserWorkOrderPreview(task: any, summary?: any, plan
     summary: string;
     orders: any;
 };
-export declare function executionStoryStatus(conditionDone: boolean, conditionActive: boolean, phase: string): "done" | "pending" | "failed" | "warning" | "active";
+export declare function executionStoryStatus(conditionDone: boolean, conditionActive: boolean, phase: string): "failed" | "done" | "pending" | "warning" | "active";
 export declare function buildUserExecutionStory(task: any, summary?: any, executions?: any[], phase?: string, workOrderPreview?: any): {
     title: string;
     style: string;
@@ -34640,7 +34640,7 @@ export declare function loopStageStatus(stage: any, input: {
     blockedActions: string[];
     observations: any;
     verified?: boolean;
-}): "pending" | "in_progress" | "completed" | "skipped" | "needs_confirmation";
+}): "completed" | "pending" | "in_progress" | "skipped" | "needs_confirmation";
 export declare function planStepHasVerificationSignal(step: any): boolean;
 export declare function summaryHasExecutedVerification(summary?: any): boolean;
 export declare const GROUP_MAIN_AGENT_LOOP_STAGES: {

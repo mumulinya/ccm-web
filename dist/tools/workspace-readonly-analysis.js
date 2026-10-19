@@ -63,7 +63,7 @@ const MAX_TEXT_BYTES = 768 * 1024;
 const MAX_RESULT_ITEMS = 500;
 const COMMAND_OUTPUT_BYTES = 64 * 1024;
 const COMMAND_OUTPUT_LINES = 1_000;
-const AUDIT_FILE = path.join(os.homedir(), ".ccm", "agent-runner", "tool-permission-violations.jsonl");
+const AUDIT_FILE = path.join(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".ccm"), "agent-runner", "tool-permission-violations.jsonl");
 const BLOCKED_ANALYSIS_IDENTITIES = new Set();
 function analysisIdentityKey(identity) {
     return [identity.scope, identity.scopeId, identity.exactSessionId, identity.generation, identity.projectId].join("\u001f");
